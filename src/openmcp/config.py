@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import tomli_w
+from pydantic import BaseModel, ConfigDict, Field
+
+from openmcp.models import Scope
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "defaults": {"read_scopes": ["personal"], "write_scope": "personal"},
@@ -17,6 +19,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cursor": {"read_scopes": ["work"], "write_scope": "work"},
     },
 }
+
+
+class ClientScopes(BaseModel):
+    """The scopes one client may read from and write to."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    read_scopes: tuple[Scope, ...]
+    write_scope: Scope
+
+
+class ClientOverride(BaseModel):
+    """A [clients.<name>] table; any key left out falls back to [defaults]."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    read_scopes: tuple[Scope, ...] | None = None
+    write_scope: Scope | None = None
+
+
+class Config(BaseModel):
+    """config.toml. Unknown keys are rejected so typos (e.g. `read_scope`) don't pass silently."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    defaults: ClientScopes = ClientScopes(read_scopes=("personal",), write_scope="personal")
+    clients: dict[str, ClientOverride] = Field(default_factory=dict)
 
 
 def home() -> Path:
@@ -41,22 +70,18 @@ def write_default_config(path: Path) -> bool:
     return True
 
 
-def load_config(path: Path) -> dict[str, Any]:
-    """Load config.toml, falling back to the built-in defaults if it is missing."""
+def load_config(path: Path) -> Config:
+    """Load and validate config.toml, falling back to the built-in defaults if it is missing."""
     if not path.exists():
-        return DEFAULT_CONFIG
+        return Config.model_validate(DEFAULT_CONFIG)
     with path.open("rb") as f:
-        return tomllib.load(f)
+        return Config.model_validate(tomllib.load(f))
 
 
-@dataclass(frozen=True)
-class ClientScopes:
-    read_scopes: tuple[str, ...]
-    write_scope: str
-
-
-def resolve_client(config: dict[str, Any], client: str) -> ClientScopes:
+def resolve_client(config: Config, client: str) -> ClientScopes:
     """Scopes for a client name; unknown clients (or missing keys) fall back to [defaults]."""
-    defaults = {**DEFAULT_CONFIG["defaults"], **config.get("defaults", {})}
-    entry = {**defaults, **config.get("clients", {}).get(client, {})}
-    return ClientScopes(read_scopes=tuple(entry["read_scopes"]), write_scope=entry["write_scope"])
+    override = config.clients.get(client, ClientOverride())
+    return ClientScopes(
+        read_scopes=override.read_scopes if override.read_scopes is not None else config.defaults.read_scopes,
+        write_scope=override.write_scope if override.write_scope is not None else config.defaults.write_scope,
+    )

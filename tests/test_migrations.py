@@ -108,6 +108,36 @@ def test_foreign_keys_cascade(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
 
 
+def test_metadata_columns_default_and_require_valid_json(tmp_path):
+    conn = db.open_db(tmp_path / "t.db")
+    conv = conn.execute("INSERT INTO conversations (provider, external_id) VALUES ('claude', 'c1')").lastrowid
+    assert conn.execute("SELECT metadata FROM conversations WHERE id = ?", (conv,)).fetchone()[0] == "{}"
+
+    conn.execute("UPDATE conversations SET metadata = '{\"model\": \"x\"}' WHERE id = ?", (conv,))
+    assert conn.execute("SELECT metadata ->> '$.model' FROM conversations").fetchone()[0] == "x"
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE conversations SET metadata = 'not json' WHERE id = ?", (conv,))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO memories (kind, content, source_client, content_hash, created_at, updated_at, metadata) "
+            "VALUES ('fact', 'x', 't', 'h', 'now', 'now', '{oops')"
+        )
+
+
+def test_upgrade_from_version_1_keeps_rows(tmp_path, monkeypatch):
+    """A DB created by the original M0 (migration 001 only) upgrades cleanly."""
+    path = tmp_path / "t.db"
+    all_migrations = db.migrations()
+    monkeypatch.setattr(db, "migrations", lambda: all_migrations[:1])
+    conn = db.open_db(path)
+    conn.execute("INSERT INTO audit_log (ts, client, tool) VALUES ('2026-01-01T00:00:00.000Z', 'c', 'ping')")
+    monkeypatch.undo()
+
+    assert db.migrate(conn) == [v for v, _ in all_migrations[1:]]
+    row = conn.execute("SELECT client, duration_ms FROM audit_log").fetchone()
+    assert (row["client"], row["duration_ms"]) == ("c", 0)
+
+
 def test_statement_splitter_handles_triggers():
     sql = (
         "CREATE TABLE a (x);\n"
