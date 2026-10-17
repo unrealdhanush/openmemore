@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+# Never commit real exports or databases
+*.db
+*.db-wal
+*.db-shm
+*.zip
+!tests/fixtures/**
+# Editor local history (e.g. VS Code Local History extension)
+.history/
