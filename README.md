@@ -5,7 +5,7 @@
 A local-first MCP server that gives every AI assistant you use one shared, user-owned
 context store on your own machine. See [SPEC.md](SPEC.md) for the full design.
 
-**Status:** early development (milestone M0: skeleton). Not ready for use.
+**Status:** early development (milestone M1: memory store, keyword search). Not ready for use.
 
 ## Development
 
