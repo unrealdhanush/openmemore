@@ -86,7 +86,8 @@ Overridable with the `OPENMCP_HOME` environment variable (tests use a temp dir).
 | Language | Python 3.11+ |
 | Packaging | `uv`, `pyproject.toml`, console script `openmcp` |
 | MCP | Official `mcp` Python SDK (FastMCP), stdio transport |
-| Storage | SQLite (stdlib `sqlite3`), WAL mode |
+| Validation / schemas | Pydantic v2 |
+| Storage | SQLite (stdlib `sqlite3`), WAL mode. **No ORM.** |
 | Keyword search | SQLite FTS5 |
 | Vector search | `sqlite-vec` |
 | Embeddings | `fastembed` with `BAAI/bge-small-en-v1.5` (384-dim, local, ONNX) |
@@ -96,6 +97,29 @@ Overridable with the `OPENMCP_HOME` environment variable (tests use a temp dir).
 | Manual testing | MCP Inspector (`npx @modelcontextprotocol/inspector`) |
 
 Verify current SDK APIs against the installed versions rather than relying on memory.
+
+### 4.1 Layering
+
+```
+MCP tools / CLI  ->  Pydantic models (models.py)  ->  repository (repo.py)  ->  sqlite3
+```
+
+- **Pydantic at every boundary.** Every MCP tool's arguments and results, every CLI input, and the normalized import schema are Pydantic models. Nothing unvalidated reaches the repository.
+- **Repository layer (`repo.py`)** is the only module that writes SQL. It converts Pydantic models to rows and rows back to models. Tools, CLI, and ingestion call the repository, never `sqlite3` directly.
+- **Plain `sqlite3`, no ORM.** One fewer abstraction to debug; the schema is small.
+
+### 4.2 Design decisions (settled; don't relitigate in v1)
+
+- **SQLite over files of serialized Pydantic objects.** Several server processes write at once (one per client); SQLite in WAL mode handles concurrent writers, transactions make imports atomic and resumable, and FTS5 plus sqlite-vec give search in the same single, user-owned file.
+- **Flexibility through `metadata` JSON columns, not a schemaless store.** The core schema is the contract between every model that reads and writes. Provider-specific or experimental fields go in `metadata` (queryable with SQLite's JSON functions). A field that proves useful gets promoted to a real column through a migration.
+- **Python, not Rust.** Per-call latency is dominated by the LLM (seconds); SQLite and ONNX Runtime are already native code. The one real Python cost, process startup, is handled by lazy-loading the embedding model. If profiling later shows a hot spot, rewrite only that piece (e.g., via PyO3), not the server.
+
+### 4.3 Performance budget
+
+- `openmcp serve` ready to accept calls in under 500ms (embedding model must **not** load at startup).
+- `search_context`: p95 under 100ms once warm, on a store of 10k memories and 100k chunks.
+- `save_memories` with 20 items: p95 under 300ms once warm.
+- Every tool call records `duration_ms` in `audit_log`; `openmcp audit --stats` prints p50/p95 per tool so these budgets are checked against real numbers.
 
 ---
 
@@ -110,6 +134,8 @@ openmcp/
     __init__.py
     cli.py              # typer app: init, serve, import, status, memories, audit, export
     config.py           # load/write config.toml, client scope resolution
+    models.py           # Pydantic models: tool args/results, normalized import schema
+    repo.py             # repository: the ONLY module that writes SQL
     db.py               # connection, pragmas, migrations
     migrations/         # 001_init.sql, ...
     server.py           # FastMCP server, tool + prompt registration
@@ -147,6 +173,7 @@ CREATE TABLE conversations (
   external_id   TEXT NOT NULL,          -- provider's conversation id
   title         TEXT,
   scope         TEXT NOT NULL DEFAULT 'personal',
+  metadata      TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),  -- provider-specific extras
   created_at    TEXT,                   -- ISO 8601 UTC
   updated_at    TEXT,
   UNIQUE (provider, external_id)
@@ -181,6 +208,7 @@ CREATE TABLE memories (
   source_client  TEXT NOT NULL,        -- 'claude-desktop', 'cursor', 'cli', 'import:chatgpt'
   confidence     REAL,                 -- 0..1, optional, set by writer
   content_hash   TEXT NOT NULL,        -- normalized-text hash for exact dedup
+  metadata       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),  -- experimental fields
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
   superseded_by  INTEGER REFERENCES memories(id)   -- history kept on update
@@ -195,7 +223,8 @@ CREATE TABLE audit_log (
   client        TEXT NOT NULL,
   tool          TEXT NOT NULL,
   summary       TEXT,                  -- short, never the full payload
-  result_count  INTEGER
+  result_count  INTEGER,
+  duration_ms   REAL NOT NULL          -- for the performance budget (Section 4.3)
 );
 
 CREATE TABLE ingest_jobs (
@@ -219,6 +248,7 @@ Rules:
 - "Active" memories are those with `superseded_by IS NULL`.
 - `update_memory` never overwrites. It inserts a new row and points the old one at it.
 - `forget` is a **hard delete** of the row, its history chain, and its vectors. The user owns their data.
+- `metadata` is for fields that vary by provider or are still experimental. Pydantic models expose it as `dict[str, Any]`. Never put fields there that tools filter on routinely; those get real columns.
 
 ---
 
@@ -230,6 +260,8 @@ Every tool call:
 3. Returns read results wrapped per Section 8.
 
 Tool descriptions matter: models decide when to call tools based on them. Write them carefully and keep them specific.
+
+The signatures below are shorthand. Implement each tool's arguments and result as Pydantic models in `models.py`, so validation errors come back to the calling model as clear messages instead of exceptions.
 
 ### 7.1 `save_memories`
 Bulk write. Used for both everyday saves and the instant cold-start dump.
@@ -392,20 +424,21 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 - `pyproject.toml`, `uv` setup, console script.
 - `openmcp init` creates data dir, DB (migration 001), and default config.
 - `openmcp serve --client X` starts a FastMCP stdio server with a `ping` tool.
-- **Done when:** MCP Inspector connects and `ping` works; tests cover init and migrations.
+- `models.py` and `repo.py` exist with the base pattern (one model, one repository function) so later milestones follow it.
+- **Done when:** MCP Inspector connects and `ping` works; startup is under 500ms; tests cover init and migrations.
 
 ### M1 — Memory store
 - `save_memories`, `update_memory`, `forget`, `get_profile`, `search_context` (**FTS5 only** for now).
 - Secret filter, read wrapping, audit log.
 - `import_my_memory` prompt and `openmcp://profile` resource.
-- CLI: `openmcp memories list|show|rm`, `openmcp audit`.
+- CLI: `openmcp memories list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
 - **Done when:** in Claude Desktop, "save that I prefer Python and terse answers," then a new chat with "what do you know about my preferences?" retrieves it via the tools.
 
 ### M2 — Semantic search
 - `embed.py` with lazy model loading (don't slow server startup).
 - `sqlite-vec` tables; embed on write.
 - Hybrid search with reciprocal rank fusion and recency boost; near-duplicate detection in `save_memories`.
-- **Done when:** a paraphrased query finds a memory that keyword search alone misses (test it).
+- **Done when:** a paraphrased query finds a memory that keyword search alone misses (test it), and a benchmark script on a synthetic 10k-memory / 100k-chunk store meets the Section 4.3 budget.
 
 ### M3 — Import
 - Job table, ChatGPT and Claude adapters, auto-detect, newest-first batching, resume.

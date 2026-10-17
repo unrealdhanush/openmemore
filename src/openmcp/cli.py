@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typer
+from pydantic import TypeAdapter, ValidationError
 from rich.console import Console
 
 from openmcp import config, db
+from openmcp.models import ClientName
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Local-first shared context store for AI assistants.")
 console = Console()
@@ -56,6 +58,13 @@ def serve(
     # stdout carries the MCP protocol: nothing else may be printed to it.
     from openmcp.server import build_server
 
+    try:
+        client = TypeAdapter(ClientName).validate_python(client)
+    except ValidationError:
+        raise typer.BadParameter(
+            "use 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit",
+            param_hint="--client",
+        ) from None
     base = config.home()
     initialize(base)
     build_server(client, base).run(transport="stdio")

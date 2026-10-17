@@ -9,6 +9,7 @@ dependencies = [
     "typer",
     "rich",
     "tomli-w",
+    "pydantic>=2",
 ]
 
 [project.scripts]
