@@ -18,7 +18,9 @@
 
 A **local-first MCP server** that gives every AI assistant a user works with (Claude, Cursor, Gemini CLI, and later ChatGPT) **one shared, user-owned context store** on the user's own machine.
 
-Any connected model can **write** what it learns (preferences, projects, decisions) and **read** what other models learned. Start a project in Claude, continue it in another assistant tomorrow without re-explaining anything.
+Any connected model can **write** what it learns (preferences, projects, decisions), **record** each substantive exchange (what the user asked, what it answered), and **read** what other models stored. Ask Claude something today, ask a different assistant about it tomorrow, and it knows what you mean. Start a project in Claude, continue it in another assistant without re-explaining anything.
+
+Single-assistant memory of preferences is already solved inside each product. The point of OpenMCP is what no single assistant can do: carry context **across** assistants.
 
 Models do not "learn from each other." They read and write a shared store. No weights change.
 
@@ -132,7 +134,7 @@ openmcp/
   SPEC.md
   src/openmcp/
     __init__.py
-    cli.py              # typer app: init, serve, import, status, memories, audit, export
+    cli.py              # typer app: init, serve, import, status, memories, conversations, audit, export
     config.py           # load/write config.toml, client scope resolution
     models.py           # Pydantic models: tool args/results, normalized import schema
     repo.py             # repository: the ONLY module that writes SQL
@@ -141,6 +143,7 @@ openmcp/
     server.py           # FastMCP server, tool + prompt registration
     tools/
       memories.py       # save, update, forget
+      conversations.py  # record_exchange, recent_conversations
       search.py         # hybrid search
       profile.py        # get_profile
     safety/
@@ -166,10 +169,10 @@ openmcp/
 Logical schema. Implementation details (FTS5 external-content wiring, triggers, vec0 syntax) are up to the implementer.
 
 ```sql
--- Imported or client-written conversation history
+-- Conversation history: captured live by clients (record_exchange) or imported from exports
 CREATE TABLE conversations (
   id            INTEGER PRIMARY KEY,
-  provider      TEXT NOT NULL,          -- 'chatgpt' | 'claude' | 'gemini' | ...
+  provider      TEXT NOT NULL,          -- captured: the client name ('claude-desktop', ...); imported: 'chatgpt' | 'claude' | ...
   external_id   TEXT NOT NULL,          -- provider's conversation id
   title         TEXT,
   scope         TEXT NOT NULL DEFAULT 'personal',
@@ -185,11 +188,11 @@ CREATE TABLE messages (
   role             TEXT NOT NULL CHECK (role IN ('user','assistant','system','tool')),
   content          TEXT NOT NULL,
   created_at       TEXT,
-  content_hash     TEXT NOT NULL,
+  content_hash     TEXT NOT NULL,        -- sha256(role, created_at, content): the same message is stored once
   UNIQUE (conversation_id, content_hash)
 );
 
--- Messages split for embedding (long messages -> several chunks)
+-- Messages split for search and embedding (~1000 chars; long messages -> several chunks)
 CREATE TABLE chunks (
   id          INTEGER PRIMARY KEY,
   message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -280,9 +283,9 @@ save_memories(
 ```
 
 - Run every item through the secret filter (Section 8). Reject matches; never store them.
-- Exact duplicate (same normalized hash, active) → skip.
+- Exact duplicate (same normalized hash, active, same scope) → skip.
 - Near-duplicate (cosine ≥ 0.92, same kind) → **save anyway** but report it in `possible_duplicates`, so the calling model can follow up with `update_memory` or `forget`. No silent merging in v1.
-- Description should tell the model to save when the user states a preference, makes a decision, or finishes meaningful work on a project, and to **never save secrets, credentials, or other people's private details**.
+- Description should tell the model to save when the user states a preference, makes a decision, or finishes meaningful work on a project, and to **never save secrets, credentials, or other people's private details**. One-off questions go to `record_exchange` instead.
 
 ### 7.2 `search_context`
 ```
@@ -292,11 +295,12 @@ search_context(
   project?: str,
   include_chats?: bool = true,
   limit?: int = 10            # max 25
-) -> { results: [{ type: 'memory'|'chat', id, content, kind?, project?, source, created_at, score }] }
+) -> { results: [{ type: 'memory'|'chat', id, content, kind?, subject?, project?, conversation_id?, title?, role?, source, created_at, score }] }
 ```
-- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion, plus a mild recency boost.
+- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion, plus a mild recency boost. M1 fuses the two keyword lists (memories, chat chunks); M2 adds vector lists and the recency boost to the same fusion.
 - Only searches scopes the client may read.
-- Chat results return the matching chunk plus conversation title and provider, not whole conversations.
+- Chat results return the matching chunk plus `conversation_id`, conversation title, and source, not whole conversations; `recent_conversations(conversation_id=…)` reads the rest.
+- Chats have no kind or project, so filtering on either excludes them.
 
 ### 7.3 `get_profile`
 ```
@@ -327,12 +331,46 @@ This gives each assistant's existing memory a path into the store within minutes
 ### 7.7 MCP resource: `openmcp://profile`
 Same payload as `get_profile()`, exposed as a resource for clients that prefer resources.
 
+### 7.8 `record_exchange`
+Live capture: how a question asked in one assistant becomes visible to the others.
+
+```
+record_exchange(
+  question: str,              # what the user asked, verbatim if short, else condensed (max 8000)
+  answer_summary: str,        # short summary of the answer: conclusions, recommendations, next steps (max 4000)
+  conversation_id?: int,      # omit on the first call in a chat; then pass back the id it returned
+  title?: str                 # for a new conversation; defaults to the question's first line
+) -> { conversation_id, message_ids: [int], redacted: [reason] }
+```
+- Stores a `user` message and an `assistant` message in `conversations`/`messages`, chunked and indexed for search. `provider` is the calling client; `scope` is its write scope; `metadata.capture = 'record_exchange'`.
+- A client may only append to conversations it started (same `provider`, writable scope).
+- Secrets are **redacted** (replaced with `[REDACTED]`), not rejected; the reasons come back in `redacted` (Section 8).
+- The description and the server instructions tell the model to call it after each substantive question or finished task, skipping small talk.
+- Capture depends on the model choosing to call the tool. See Section 14.
+
+### 7.9 `recent_conversations`
+```
+recent_conversations(
+  source?: str,               # assistant/provider name, partial, case-insensitive ('claude' matches 'claude-desktop')
+  conversation_id?: int,      # just this conversation, with up to 50 messages
+  limit?: int = 5             # max 20
+) -> { conversations: [{ id, title, source, started_at, updated_at, message_count, messages: [{ role, content, created_at }] }] }
+```
+- Newest first by last activity; listings carry the latest 6 messages of each conversation.
+- Answers questions with no topic words ("what did I ask Claude earlier?"), which keyword search can't.
+- Only scopes the client may read. Content is wrapped (Section 8).
+
+### 7.10 Server instructions
+The MCP `instructions` tell every connected model, in short: call `get_profile` at the start; call `record_exchange` after substantive answers; call `recent_conversations` or `search_context` when the user refers to an earlier conversation (including with another assistant) before saying it doesn't know; save lasting context with `save_memories`; never record secrets.
+
 ---
 
 ## 8. Safety
 
 ### Writes: secret filter (`safety/secrets.py`)
 Reject items matching common patterns: API keys and tokens (`sk-…`, `ghp_…`, AWS keys, JWT-shaped strings, private-key headers), payment card numbers (Luhn-checked), US SSN pattern, and lines that look like `password: …`. Return the rejection reason; never echo the matched value back.
+
+Memories (`save_memories`, `update_memory`) are **rejected** on a match. Captured exchanges (`record_exchange`) are **redacted** instead: each match is replaced with `[REDACTED]` (a private key's whole block, not just its header) and the rest is stored. Users paste keys into chats often, and rejecting the exchange would silently lose the record.
 
 ### Reads: untrusted-data wrapping (`safety/wrap.py`)
 Every piece of stored content returned to a model is wrapped, for example:
@@ -373,6 +411,7 @@ write_scope = "work"
 - The client name comes from `openmcp serve --client <name>`.
 - Unknown clients fall back to `[defaults]`.
 - Scopes are free-form strings; `personal` and `work` are just the starting set.
+- With these defaults, Cursor can't read what Claude Desktop writes (`personal`). That's the isolation working as designed. For the cross-assistant tests (M1, v1), use a client that reads `personal` (e.g. Gemini CLI, which falls back to `[defaults]`) or add `personal` to Cursor's `read_scopes`.
 
 Example Claude Desktop config (README should include one per supported client):
 
@@ -428,11 +467,13 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 - **Done when:** MCP Inspector connects and `ping` works; startup is under 500ms; tests cover init and migrations.
 
 ### M1 — Memory store
-- `save_memories`, `update_memory`, `forget`, `get_profile`, `search_context` (**FTS5 only** for now).
-- Secret filter, read wrapping, audit log.
+- `save_memories`, `update_memory`, `forget`, `get_profile`, `search_context` (**FTS5 only** for now, over memories and captured chats).
+- Live capture: `record_exchange` and `recent_conversations`, chat chunks indexed with FTS5, server instructions (Section 7.10).
+- Secret filter (reject for memories, redact for exchanges), read wrapping, audit log.
+- Scope checks on every tool (read scopes for reads; write scope plus read for writes).
 - `import_my_memory` prompt and `openmcp://profile` resource.
-- CLI: `openmcp memories list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
-- **Done when:** in Claude Desktop, "save that I prefer Python and terse answers," then a new chat with "what do you know about my preferences?" retrieves it via the tools.
+- CLI: `openmcp memories list|show|rm`, `openmcp conversations list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
+- **Done when:** you ask one assistant (e.g. Claude Desktop) a substantive question, then ask a **different** assistant (e.g. Gemini CLI, or Cursor with `personal` readable) about that previous question, both with and without naming its topic ("what did I ask Claude earlier?"), and it answers from the stored exchange without being told. An automated test scripts the same flow across two real server processes.
 
 ### M2 — Semantic search
 - `embed.py` with lazy model loading (don't slow server startup).
@@ -443,17 +484,17 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 ### M3 — Import
 - Job table, ChatGPT and Claude adapters, auto-detect, newest-first batching, resume.
 - `openmcp import`, `openmcp status` with a `rich` progress bar.
-- `search_context` returns chat chunks.
+- Imported conversations are searchable and listable alongside captured ones (same tables, same tools).
 - **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates.
 
 ### M4 — Scopes and ownership
-- Enforce read and write scopes on every tool.
+- Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
 - `openmcp export` dumps all memories and conversations to JSON.
 - README: install, per-client config snippets, the safety model, honest limitations.
 - **Done when:** a `cursor` client scoped to `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 
 ### v1 success test
-Start a project in Claude Desktop and save context. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**.
+Start a project in Claude Desktop and work on it over a few exchanges. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**, including picking up the questions you asked and the answers you got.
 
 ---
 
@@ -464,6 +505,7 @@ Start a project in Claude Desktop and save context. The next day, open a differe
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
 - **Review UI**: small local web page to browse, edit, and approve memories.
 - **More importers**: Gemini (Google Takeout), others.
+- **Automatic capture through client hooks**: where a client can run a command on every prompt or response (Claude Code does; verify others), capture exchanges deterministically through an `openmcp capture` CLI instead of relying on the model to call `record_exchange`.
 - **Per-user evals**: auto-generated tests checking whether stored context actually improves answers.
 
 ---
@@ -480,3 +522,4 @@ Start a project in Claude Desktop and save context. The next day, open a differe
 - Should `get_profile` be called automatically at session start, or left to the model? (Depends on client support for resources versus tools.)
 - What's the right near-duplicate threshold? Tune it on real data in M2.
 - Should imported chats ever be readable by default, or opt-in per scope?
+- How reliably do models call `record_exchange` unprompted? Measure it in the M1 manual test (`openmcp audit` shows every call). If it's poor, options are stronger instructions, per-client prompts, or pulling hook-based capture forward from "Later". Clients that ask the user to approve each tool call add friction here too.
