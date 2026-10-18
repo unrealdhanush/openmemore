@@ -32,6 +32,11 @@ MemoryId = Annotated[int, Field(ge=1)]
 
 Role = Literal["user", "assistant", "system", "tool"]
 
+CaptureSource = Literal["claude-code", "vscode-copilot"]
+"""Clients whose transcripts OpenMCP can read from disk (SPEC.md M1.5). Each name is
+also the client name it connects with, and the `provider` of what it captures."""
+CAPTURE_SOURCES: tuple[CaptureSource, ...] = ("claude-code", "vscode-copilot")
+
 SUMMARY_MAX = 200
 MAX_SAVE_ITEMS = 100
 MAX_SEARCH_LIMIT = 25
@@ -39,8 +44,16 @@ PROFILE_GROUP_CAP = 15
 ACTIVE_PROJECT_DAYS = 30
 MAX_QUESTION_CHARS = 8000
 MAX_ANSWER_CHARS = 4000
+MAX_CODE_BLOCKS = 10
+MAX_CODE_CHARS = 20_000
 MAX_RECENT_CONVERSATIONS = 20
 RECENT_MESSAGES_PER_CONVERSATION = 6
+
+CHAT_ORDER_NOTE = (
+    "Messages within a conversation are in the order they were written. Where a later message "
+    "contradicts an earlier one (for example a decision made after several options were discussed), "
+    "the later one is current."
+)
 
 
 # --- Stored rows ---------------------------------------------------------------------
@@ -111,6 +124,9 @@ class NewMessage(BaseModel):
     content: str = Field(min_length=1)
     created_at: AwareDatetime | None = None
     content_hash: str
+    external_id: str | None = None
+    """The source's id for this message (captured transcripts), so re-reading a growing
+    transcript updates the message instead of adding another copy."""
 
 
 class Message(NewMessage):
@@ -123,6 +139,7 @@ class ChunkMatch(BaseModel):
     """A chunk found by full-text search, with the conversation it belongs to."""
 
     chunk_id: int
+    message_id: int
     text: str
     role: Role
     created_at: datetime | None
@@ -131,6 +148,43 @@ class ChunkMatch(BaseModel):
     provider: str
     rank: float
     """bm25: lower is better."""
+
+
+class CaptureFile(BaseModel):
+    """A row of `capture_files`: a transcript file already read, and where to resume."""
+
+    path: str
+    source: CaptureSource
+    mtime_ns: int
+    size: int
+    resume_offset: int = 0
+    conversation_id: int | None = None
+    ignored: bool = False
+    """The user deleted the conversation, so changes to the file are no longer captured."""
+    captured_at: AwareDatetime
+
+
+# --- Conversations read from transcripts ---------------------------------------------
+
+
+class ParsedMessage(BaseModel):
+    external_id: str
+    role: Role
+    content: str = Field(min_length=1)
+    created_at: AwareDatetime | None = None
+
+
+class ParsedConversation(BaseModel):
+    """One conversation as read from a client's transcript, before it is stored."""
+
+    provider: str
+    external_id: str
+    title: str | None = None
+    """None keeps the stored title (e.g. when only the end of a transcript was re-read)."""
+    created_at: AwareDatetime | None = None
+    updated_at: AwareDatetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    messages: list[ParsedMessage] = Field(default_factory=list)
 
 
 # --- MCP tool arguments --------------------------------------------------------------
@@ -153,6 +207,20 @@ class MemoryInput(BaseModel):
     subject: Label | None = Field(default=None, description="Short label, e.g. 'coding style'.")
     project: Label | None = Field(default=None, description="Project name, if this belongs to one.")
     confidence: float | None = Field(default=None, ge=0, le=1, description="How sure you are, 0 to 1.")
+
+
+class CodeBlock(BaseModel):
+    """Code passed to `record_exchange`, stored with the answer so another assistant can continue from it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=MAX_CODE_CHARS, description="The code, in full.")
+    path: str | None = Field(
+        default=None, pattern=r"^[^\n\r`]{1,300}$", description="The file it belongs in, if any, e.g. 'src/client.py'."
+    )
+    language: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9_+#.-]{1,30}$", description="Language name, e.g. 'python'."
+    )
 
 
 # --- MCP tool results ----------------------------------------------------------------
@@ -229,6 +297,8 @@ class SearchHit(BaseModel):
 
 
 class SearchResult(ReadResult):
+    note: str | None = None
+    """CHAT_ORDER_NOTE when the results include chat messages."""
     results: list[SearchHit] = Field(default_factory=list)
 
 
@@ -268,6 +338,7 @@ class ConversationView(BaseModel):
 
 
 class RecentConversations(ReadResult):
+    note: str = CHAT_ORDER_NOTE
     conversations: list[ConversationView] = Field(default_factory=list)
 
 
@@ -304,3 +375,12 @@ class AuditFilter(BaseModel):
     client: str | None = None
     tool: str | None = None
     limit: int = Field(default=50, ge=1, le=10_000)
+
+
+class CaptureRequest(BaseModel):
+    """Options for `openmcp capture`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sources: list[CaptureSource] = Field(default_factory=list)
+    days: int | None = Field(default=None, ge=1, le=3650)

@@ -38,10 +38,10 @@ def looks_like_injection(text: str) -> bool:
     return bool(_INJECTION.search(text))
 
 
-def wrap(content: str, *, source: str, id: int | str) -> str:
+def wrap(content: str, *, source: str, id: int | str, max_chars: int = MAX_ITEM_CHARS) -> str:
     """Wrap one stored item for return to a model."""
-    if len(content) > MAX_ITEM_CHARS:
-        content = content[: MAX_ITEM_CHARS - len(TRUNCATION_MARK)] + TRUNCATION_MARK
+    if len(content) > max_chars:
+        content = content[: max_chars - len(TRUNCATION_MARK)] + TRUNCATION_MARK
     flagged = looks_like_injection(content)
     # Neutralize the tag itself (in either direction) so content can't close or forge a wrapper.
     body = _TAG.sub(lambda m: f"&lt;{m.group(1)}{m.group(2)}", content)

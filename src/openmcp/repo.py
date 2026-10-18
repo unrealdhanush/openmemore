@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from openmcp.models import (
     AuditEntry,
     AuditFilter,
+    CaptureFile,
     ChunkMatch,
     Conversation,
     Kind,
@@ -251,6 +252,30 @@ def insert_conversation(conn: sqlite3.Connection, c: NewConversation) -> int:
     return cur.lastrowid
 
 
+def upsert_conversation(conn: sqlite3.Connection, c: NewConversation) -> int:
+    """Insert, or update the conversation with the same provider and external_id. On update
+    the scope is kept (the user may have moved it), a None title keeps the stored one,
+    metadata is merged, and timestamps only widen."""
+    row = conn.execute(
+        """
+        INSERT INTO conversations (provider, external_id, title, scope, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (provider, external_id) DO UPDATE SET
+          title = COALESCE(excluded.title, conversations.title),
+          metadata = json_patch(conversations.metadata, excluded.metadata),
+          created_at = COALESCE(conversations.created_at, excluded.created_at),
+          updated_at = CASE WHEN excluded.updated_at > COALESCE(conversations.updated_at, '')
+                            THEN excluded.updated_at ELSE conversations.updated_at END
+        RETURNING id
+        """,
+        (
+            c.provider, c.external_id, c.title, c.scope, json.dumps(c.metadata),
+            _iso_or_none(c.created_at), _iso_or_none(c.updated_at),
+        ),
+    ).fetchone()
+    return row[0]
+
+
 def get_conversation(conn: sqlite3.Connection, conversation_id: int) -> Conversation | None:
     row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
     return _conversation(row) if row else None
@@ -301,9 +326,9 @@ def insert_message(conn: sqlite3.Connection, m: NewMessage) -> tuple[int, bool]:
     """Insert unless the conversation already has a message with this content_hash.
     Returns (message id, whether it was inserted)."""
     row = conn.execute(
-        "INSERT INTO messages (conversation_id, role, content, created_at, content_hash) VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT (conversation_id, content_hash) DO NOTHING RETURNING id",
-        (m.conversation_id, m.role, m.content, _iso_or_none(m.created_at), m.content_hash),
+        "INSERT INTO messages (conversation_id, role, content, created_at, content_hash, external_id) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (conversation_id, content_hash) DO NOTHING RETURNING id",
+        (m.conversation_id, m.role, m.content, _iso_or_none(m.created_at), m.content_hash, m.external_id),
     ).fetchone()
     if row:
         return row[0], True
@@ -311,6 +336,32 @@ def insert_message(conn: sqlite3.Connection, m: NewMessage) -> tuple[int, bool]:
         "SELECT id FROM messages WHERE conversation_id = ? AND content_hash = ?", (m.conversation_id, m.content_hash)
     ).fetchone()
     return existing[0], False
+
+
+def upsert_message(conn: sqlite3.Connection, m: NewMessage) -> tuple[int, bool]:
+    """Insert or update the message with this external_id in the conversation.
+    Returns (message id, whether its content changed, i.e. its chunks need rebuilding)."""
+    if m.external_id is None:
+        raise ValueError("upsert_message needs an external_id")
+    row = conn.execute(
+        "SELECT id, content FROM messages WHERE conversation_id = ? AND external_id = ?",
+        (m.conversation_id, m.external_id),
+    ).fetchone()
+    if row is None:
+        return insert_message(conn, m)
+    if row["content"] == m.content:
+        return row["id"], False
+    # OR IGNORE: if the new content duplicates another message in the conversation, keep the old text.
+    changed = conn.execute(
+        "UPDATE OR IGNORE messages SET content = ?, content_hash = ?, created_at = ? WHERE id = ?",
+        (m.content, m.content_hash, _iso_or_none(m.created_at), row["id"]),
+    ).rowcount
+    return row["id"], changed > 0
+
+
+def replace_chunks(conn: sqlite3.Connection, message_id: int, texts: Sequence[str]) -> list[int]:
+    conn.execute("DELETE FROM chunks WHERE message_id = ?", (message_id,))
+    return insert_chunks(conn, message_id, texts)
 
 
 def insert_chunks(conn: sqlite3.Connection, message_id: int, texts: Sequence[str]) -> list[int]:
@@ -360,7 +411,7 @@ def search_chunks(
         params += p
     rows = conn.execute(
         f"""
-        SELECT c.id AS chunk_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
+        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
                conv.title, conv.provider, bm25(chunks_fts) AS rank
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.rowid
@@ -373,3 +424,28 @@ def search_chunks(
         [*params, limit],
     ).fetchall()
     return [ChunkMatch.model_validate(dict(r)) for r in rows]
+
+
+# --- capture_files -------------------------------------------------------------------
+
+
+def get_capture_file(conn: sqlite3.Connection, path: str) -> CaptureFile | None:
+    row = conn.execute("SELECT * FROM capture_files WHERE path = ?", (path,)).fetchone()
+    return CaptureFile.model_validate(dict(row)) if row else None
+
+
+def save_capture_file(conn: sqlite3.Connection, f: CaptureFile) -> None:
+    conn.execute(
+        """
+        INSERT INTO capture_files (path, source, mtime_ns, size, resume_offset, conversation_id, ignored, captured_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (path) DO UPDATE SET
+          source = excluded.source, mtime_ns = excluded.mtime_ns, size = excluded.size,
+          resume_offset = excluded.resume_offset, conversation_id = excluded.conversation_id,
+          ignored = excluded.ignored, captured_at = excluded.captured_at
+        """,
+        (
+            f.path, f.source, f.mtime_ns, f.size, f.resume_offset, f.conversation_id, int(f.ignored),
+            to_iso(f.captured_at),
+        ),
+    )

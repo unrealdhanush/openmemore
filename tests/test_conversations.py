@@ -5,7 +5,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import caller
 from openmcp import repo
-from openmcp.models import RECENT_MESSAGES_PER_CONVERSATION
+from openmcp.models import RECENT_MESSAGES_PER_CONVERSATION, CodeBlock
 from openmcp.tools.conversations import _add_message, chunk_text, recent_conversations, record_exchange
 from openmcp.tools.search import search_context
 
@@ -189,3 +189,57 @@ def test_deleting_a_conversation_removes_its_messages_chunks_and_index_entries(c
     for table in ("messages", "chunks"):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'flask'").fetchone()[0] == 0
+
+
+# --- code blocks and ordering --------------------------------------------------------
+
+
+def test_code_is_stored_with_the_answer_and_read_back_in_full(conn):
+    code = "def parse_retry_after(value):\n" + "    pass\n" * 400  # well past the listing cap
+    result = record_exchange(
+        conn, DESKTOP, "Respect Retry-After?", "Added parse_retry_after().",
+        code=[CodeBlock(path="strava_client.py", language="python", content=code)],
+    )
+    answer = repo.conversation_messages(conn, result.conversation_id)[1].content
+    assert answer.startswith("Added parse_retry_after().\n\n`strava_client.py`:\n```python\ndef parse_retry_after")
+    assert answer.endswith("    pass\n```")
+
+    listed = recent_conversations(conn, GEMINI).conversations[0].messages[1].content
+    full = recent_conversations(conn, GEMINI, conversation_id=result.conversation_id).conversations[0].messages[1].content
+    assert "[truncated]" in listed
+    assert "[truncated]" not in full and code.rstrip() in full
+
+
+def test_code_containing_fences_gets_a_longer_fence(conn):
+    result = record_exchange(conn, DESKTOP, "q", "a", code=[CodeBlock(content="```\nnested\n```")])
+    answer = repo.conversation_messages(conn, result.conversation_id)[1].content
+    assert answer == "a\n\n````\n```\nnested\n```\n````"
+
+
+def test_secrets_in_code_and_titles_are_redacted(conn):
+    result = record_exchange(
+        conn, DESKTOP, "q", "a", title="Fix ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+        code=[CodeBlock(content='TOKEN = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"')],
+    )
+    stored = repo.conversation_messages(conn, result.conversation_id)[1].content
+    assert "ghp_" not in stored and "ghp_" not in repo.get_conversation(conn, result.conversation_id).title
+    assert result.redacted == ["contains a GitHub token"]
+
+
+def test_later_turns_of_a_conversation_rank_first(conn):
+    cid = record_exchange(conn, DESKTOP, "Retries for the poller?", "Use 3-4 attempts with backoff.").conversation_id
+    record_exchange(conn, DESKTOP, "Decided: backoff capped at 5 attempts.", "Noted: 5 attempts.", conversation_id=cid)
+
+    hits = search_context(conn, GEMINI, "attempts backoff").results
+    times = [h.created_at for h in hits]
+    assert times == sorted(times, reverse=True)
+    assert "5 attempts" in hits[0].content
+
+
+def test_chat_results_carry_the_ordering_note(conn):
+    from conftest import insert
+    insert(conn, "Prefers Flask.", kind="preference")
+    assert search_context(conn, DESKTOP, "flask").note is None
+    record_exchange(conn, DESKTOP, "Flask question", "Flask answer")
+    assert "later one is current" in search_context(conn, DESKTOP, "flask").note
+    assert "later one is current" in recent_conversations(conn, DESKTOP).note

@@ -1,4 +1,9 @@
+import json
+import os
+import shutil
+import sys
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -124,3 +129,50 @@ def test_conversations_rm(chats):
     assert result.exit_code == 0 and "2 messages" in result.output
     assert [r[0] for r in conn.execute("SELECT id FROM conversations")] == [b]
     assert run("conversations", "rm", str(b), input="n\n").exit_code == 1
+
+
+# --- setup and capture ---------------------------------------------------------------
+
+
+def desktop_config_path(user_home):
+    from openmcp.setup import Context, claude_desktop_config
+    return claude_desktop_config(Context(base=user_home, user_home=user_home, platform=sys.platform, command=("x",)))
+
+
+def test_setup_dry_run_changes_nothing(home):
+    user_home = Path(os.environ["HOME"])
+    result = run("setup", "claude-desktop", "--dry-run")
+    assert result.exit_code == 0 and "dry run: not changed" in result.output
+    assert "Settings → Profile" in result.output
+    assert not desktop_config_path(user_home).exists()
+
+
+def test_setup_writes_the_client_config(home):
+    user_home = Path(os.environ["HOME"])
+    result = run("setup", "claude-desktop")
+    assert result.exit_code == 0, result.output
+    entry = json.loads(desktop_config_path(user_home).read_text())["mcpServers"]["openmcp"]
+    assert entry["args"][-3:] == ["serve", "--client", "claude-desktop"]
+    assert entry["env"] == {"OPENMCP_HOME": str(home)}  # tests use a non-default data directory
+
+
+def test_setup_turns_on_capture_and_catches_up(home, monkeypatch):
+    monkeypatch.setenv("PATH", "")  # never run the real claude CLI from a test
+    user_home = Path(os.environ["HOME"])
+    project = user_home / ".claude" / "projects" / "-home-test-poller"
+    project.mkdir(parents=True)
+    shutil.copy(Path(__file__).parent / "fixtures" / "claude_code" / "session.jsonl", project / "s.jsonl")
+
+    result = run("setup", "claude-code")
+    assert result.exit_code == 1  # no claude CLI on the test PATH: that step is printed instead
+    assert "claude mcp add" in result.output
+    assert "4 messages added or updated in 1 conversations" in result.output
+    assert "Poller retry strategy" in run("conversations", "list").output
+
+
+def test_capture_command(home):
+    assert "Transcript capture is off" in run("capture").output
+    result = run("capture", "--source", "slack")
+    assert result.exit_code == 2 and "--source" in result.output
+    result = run("capture", "--source", "vscode-copilot", "--days", "7")
+    assert result.exit_code == 0 and "read 0 transcript files" in result.output
