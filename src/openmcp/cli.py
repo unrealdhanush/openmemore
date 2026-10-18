@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
+import textwrap
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -18,7 +20,15 @@ from rich.table import Table
 from rich.text import Text
 
 from openmcp import audit, config, db, repo
-from openmcp.models import KINDS, AuditFilter, ClientName, ConversationFilter, MemoryFilter
+from openmcp.models import (
+    CAPTURE_SOURCES,
+    KINDS,
+    AuditFilter,
+    CaptureRequest,
+    ClientName,
+    ConversationFilter,
+    MemoryFilter,
+)
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Local-first shared context store for AI assistants.")
 console = Console()
@@ -66,16 +76,58 @@ def serve(
     # stdout carries the MCP protocol: nothing else may be printed to it.
     from openmcp.server import build_server
 
-    try:
-        client = TypeAdapter(ClientName).validate_python(client)
-    except ValidationError:
-        raise typer.BadParameter(
-            "use 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit",
-            param_hint="--client",
-        ) from None
+    client = _client_name(client, "--client")
     base = config.home()
     initialize(base)
     build_server(client, base).run(transport="stdio")
+
+
+def _client_name(value: str, option: str) -> str:
+    try:
+        return TypeAdapter(ClientName).validate_python(value)
+    except ValidationError:
+        raise typer.BadParameter(
+            "use 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit", param_hint=option
+        ) from None
+
+
+@app.command()
+def setup(
+    client: str = typer.Argument(
+        ..., help="claude-desktop, vscode-copilot, or claude-code (others get printed instructions)."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the steps without changing anything."),
+) -> None:
+    """Connect an AI assistant to OpenMCP and install the standing instruction it needs."""
+    from openmcp import setup as client_setup
+
+    client = _client_name(client, "CLIENT")
+    base = config.home()
+    initialize(base)
+    ctx = client_setup.Context(
+        base=base, user_home=Path.home(), platform=sys.platform, command=client_setup.openmcp_command()
+    )
+    incomplete = False
+    for number, step in enumerate(client_setup.plan(client, ctx), start=1):
+        console.print(f"[bold]{number}. {step.description}[/bold]")
+        if step.apply is not None:
+            if dry_run:
+                console.print("   [dim]dry run: not changed[/dim]")
+            else:
+                try:
+                    detail = step.apply()
+                except client_setup.SetupError as e:
+                    incomplete = True
+                    console.print("   [yellow]Not done automatically:[/yellow]")
+                    console.print(textwrap.indent(str(e), "   "), markup=False, highlight=False)
+                else:
+                    console.print(f"   [green]done[/green] [dim]{detail or ''}[/dim]")
+        if step.manual:
+            console.print(textwrap.indent(step.manual, "   "), markup=False, highlight=False)
+    if client in CAPTURE_SOURCES and not dry_run:
+        _run_capture(CaptureRequest(sources=[client]))
+    if incomplete:
+        raise typer.Exit(1)
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -295,6 +347,43 @@ def conversations_rm(
             repo.delete_conversation(conn, conversation_id)
             call.result_count = count
     console.print(f"Deleted conversation {conversation_id} ({count} messages).")
+
+
+# --- capture -------------------------------------------------------------------------
+
+
+def _run_capture(request: CaptureRequest) -> None:
+    from openmcp.capture import capture
+
+    cfg = config.load_config(config.config_path(config.home()))
+    sources = request.sources or list(cfg.capture.sources)
+    if not sources:
+        console.print("Transcript capture is off. Turn it on with: openmcp setup claude-code (or vscode-copilot)")
+        return
+    days = request.days or cfg.capture.days
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "capture") as call:
+        call.summary = f"{', '.join(sources)}, {days} days"
+        report = capture(conn, cfg, sources=sources, days=days)
+        call.result_count = report.messages
+    console.print(
+        f"Captured from {', '.join(sources)} (last {days} days): read {report.files_read} transcript files, "
+        f"{report.messages} messages added or updated in {report.conversations} conversations."
+    )
+    for error in report.errors:
+        console.print(f"[yellow]Skipped[/yellow] {error}", markup=True, highlight=False)
+
+
+@app.command("capture")
+def capture_command(
+    source: list[str] = typer.Option(
+        [], "--source", help=f"Only this source ({', '.join(CAPTURE_SOURCES)}). Repeatable."
+    ),
+    days: int | None = typer.Option(None, "--days", help="Read transcripts changed in this many days (default: config)."),
+) -> None:
+    """Store new conversations from the transcripts of clients with capture turned on.
+
+    Servers already do this before each search; run it to catch up on older history."""
+    _run_capture(_validated(CaptureRequest, {"sources": "--source", "days": "--days"}, sources=source, days=days))
 
 
 # --- audit ---------------------------------------------------------------------------

@@ -4,15 +4,19 @@ each assistant, so another assistant can pick up where it left off."""
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
 from openmcp import db, repo
 from openmcp.models import (
+    MAX_CODE_CHARS,
     RECENT_MESSAGES_PER_CONVERSATION,
+    CodeBlock,
     ConversationMessage,
     ConversationView,
     NewConversation,
@@ -28,6 +32,8 @@ from openmcp.tools import Caller
 CHUNK_CHARS = 1000
 TITLE_CHARS = 80
 SINGLE_CONVERSATION_MESSAGES = 50
+FULL_MESSAGE_CHARS = MAX_CODE_CHARS + 5000
+"""Per-message cap when one conversation is read in full: room for a code block and its summary."""
 
 
 def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
@@ -56,7 +62,19 @@ def message_hash(role: Role, content: str, created_at: datetime | None) -> str:
     return hashlib.sha256(f"{role}\n{stamp}\n{content}".encode()).hexdigest()
 
 
-def _default_title(question: str) -> str:
+def with_code(summary: str, code: Sequence[CodeBlock]) -> str:
+    """The answer summary followed by each code block, fenced so it renders as code."""
+    parts = [summary]
+    for block in code:
+        longest = max((len(run) for run in re.findall(r"`+", block.content)), default=0)
+        fence = "`" * max(3, longest + 1)
+        label = f"`{block.path}`:\n" if block.path else ""
+        body = block.content.rstrip("\n")
+        parts.append(f"{label}{fence}{block.language or ''}\n{body}\n{fence}")
+    return "\n\n".join(parts)
+
+
+def default_title(question: str) -> str:
     first_line = question.strip().splitlines()[0]
     return first_line if len(first_line) <= TITLE_CHARS else first_line[: TITLE_CHARS - 1] + "…"
 
@@ -86,10 +104,12 @@ def record_exchange(
     answer_summary: str,
     conversation_id: int | None = None,
     title: str | None = None,
+    code: Sequence[CodeBlock] = (),
 ) -> RecordExchangeResult:
     question, q_reasons = redact(question)
-    answer_summary, a_reasons = redact(answer_summary)
-    reasons = list(dict.fromkeys(q_reasons + a_reasons))
+    answer, a_reasons = redact(with_code(answer_summary, code))
+    title, t_reasons = redact(title) if title else (None, [])
+    reasons = list(dict.fromkeys(q_reasons + a_reasons + t_reasons))
     now = datetime.now(UTC)
 
     with db.transaction(conn):
@@ -108,7 +128,7 @@ def record_exchange(
                 NewConversation(
                     provider=caller.client,
                     external_id=uuid.uuid4().hex,
-                    title=title or _default_title(question),
+                    title=title or default_title(question),
                     scope=caller.scopes.write_scope,
                     metadata={"capture": "record_exchange"},
                     created_at=now,
@@ -117,7 +137,7 @@ def record_exchange(
             )
         ids = [
             _add_message(conn, conversation_id, "user", question, now),
-            _add_message(conn, conversation_id, "assistant", answer_summary, now),
+            _add_message(conn, conversation_id, "assistant", answer, now),
         ]
     return RecordExchangeResult(conversation_id=conversation_id, message_ids=ids, redacted=reasons)
 
@@ -135,8 +155,11 @@ def recent_conversations(
     if conversation_id is not None and not convs:
         raise ToolError(f"conversation {conversation_id} not found")
     counts = repo.message_counts(conn, [c.id for c in convs])
-    # A single requested conversation shows much more of itself; listings show the latest turns.
-    last = SINGLE_CONVERSATION_MESSAGES if conversation_id is not None else RECENT_MESSAGES_PER_CONVERSATION
+    # A single requested conversation shows much more of itself, in full; listings show
+    # the latest turns, each cut to the default length.
+    single = conversation_id is not None
+    last = SINGLE_CONVERSATION_MESSAGES if single else RECENT_MESSAGES_PER_CONVERSATION
+    wrap_options = {"max_chars": FULL_MESSAGE_CHARS} if single else {}
     return RecentConversations(
         conversations=[
             ConversationView(
@@ -148,7 +171,9 @@ def recent_conversations(
                 message_count=counts.get(c.id, 0),
                 messages=[
                     ConversationMessage(
-                        role=m.role, content=wrap(m.content, source=c.provider, id=m.id), created_at=m.created_at
+                        role=m.role,
+                        content=wrap(m.content, source=c.provider, id=m.id, **wrap_options),
+                        created_at=m.created_at,
                     )
                     for m in repo.conversation_messages(conn, c.id, last=last)
                 ],

@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections import defaultdict
 from collections.abc import Sequence
 
 from openmcp import repo
-from openmcp.models import ChunkMatch, Kind, Memory, SearchHit, SearchResult
+from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, SearchHit, SearchResult
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
 
@@ -39,6 +40,21 @@ def fts_query(text: str) -> str | None:
     if not terms:
         return None
     return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
+
+
+def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
+    """Within each conversation, put later messages ahead of earlier ones, keeping the
+    positions that conversation holds in the ranking. A conversation often discusses
+    options before settling on one, and the settled answer comes later."""
+    positions: dict[int, list[int]] = defaultdict(list)
+    for i, c in enumerate(chunks):
+        positions[c.conversation_id].append(i)
+    out = list(chunks)
+    for slots in positions.values():
+        newest_first = sorted((chunks[i] for i in slots), key=lambda c: (c.message_id, c.chunk_id), reverse=True)
+        for slot, chunk in zip(slots, newest_first):
+            out[slot] = chunk
+    return out
 
 
 def _memory_hit(m: Memory, score: float) -> SearchHit:
@@ -92,9 +108,12 @@ def search_context(
         scored.append((score, 0, rank, _memory_hit(m, score)))
     # Chats have no kind or project, so filtering on either excludes them.
     if include_chats and not kinds and project is None:
-        for rank, c in enumerate(repo.search_chunks(conn, match, scopes=read, limit=limit), start=1):
+        chunks = later_turns_first(repo.search_chunks(conn, match, scopes=read, limit=limit))
+        for rank, c in enumerate(chunks, start=1):
             score = 1 / (RRF_K + rank)
             scored.append((score, 1, rank, _chat_hit(c, score)))
 
     scored.sort(key=lambda s: (-s[0], s[1], s[2]))
-    return SearchResult(results=[hit for *_, hit in scored[:limit]])
+    hits = [hit for *_, hit in scored[:limit]]
+    has_chats = any(h.type == "chat" for h in hits)
+    return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)

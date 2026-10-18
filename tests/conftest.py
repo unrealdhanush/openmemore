@@ -11,6 +11,20 @@ from openmcp.tools import Caller
 from openmcp.tools.memories import content_hash
 
 
+@pytest.fixture(autouse=True)
+def isolated_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test gets an empty home directory, on every OS, so nothing (transcript
+    capture, setup) can read or edit the real user's files. Path.home() reads HOME on
+    macOS/Linux and USERPROFILE on Windows; app data dirs come from APPDATA and
+    XDG_CONFIG_HOME."""
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+    for var in ("APPDATA", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "OPENMCP_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    return user_home
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """An isolated OPENMCP_HOME so tests never touch ~/.openmcp."""

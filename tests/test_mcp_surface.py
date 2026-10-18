@@ -1,17 +1,22 @@
 """The tools as a model sees them: over MCP, in-process and across real stdio processes."""
 
 import json
+import shutil
 import sys
+from pathlib import Path
 
 import pytest
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 
-from openmcp import db
+from openmcp import config, db
+from openmcp.capture import vscode_copilot
 from openmcp.cli import initialize
 from openmcp.models import MAX_SAVE_ITEMS
 from openmcp.safety.wrap import NOTICE
 from openmcp.server import IMPORT_MY_MEMORY, build_server
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -20,15 +25,21 @@ def server(home):
     return lambda client="claude-desktop": build_server(client, home)
 
 
-def stdio(home, client):
+def stdio(home, client, user_home=None):
+    env = {"OPENMCP_HOME": str(home)}
+    if user_home is not None:
+        env["HOME"] = str(user_home)
     return Client(
-        StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "openmcp.cli", "serve", "--client", client],
-            env={"OPENMCP_HOME": str(home)},
-        ),
+        StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve", "--client", client], env=env),
         read_timeout_seconds=30,
     )
+
+
+def write_copilot_chat(user_home):
+    """A Copilot Chat session as VS Code saves it (synthetic fixture)."""
+    sessions = vscode_copilot.user_dir(user_home) / "workspaceStorage" / "abc123" / "chatSessions"
+    sessions.mkdir(parents=True)
+    shutil.copy(FIXTURES / "vscode_copilot" / "chat_session.json", sessions / "vs-0001.json")
 
 
 @pytest.mark.anyio
@@ -54,6 +65,61 @@ async def test_m1_done_when_another_assistant_answers_about_the_previous_questio
         found = await gemini.call_tool("search_context", {"query": "flask rate limiting"})
         hits = found.structured_content["results"]
         assert hits and hits[0]["type"] == "chat" and hits[0]["conversation_id"] == conv["id"]
+
+
+@pytest.mark.anyio
+async def test_m1_5_done_when_a_transcript_is_found_without_record_exchange(home, tmp_path):
+    """SPEC M1.5 'done when': a Copilot chat saved by VS Code (nobody calls record_exchange)
+    is answered about from Claude Desktop, in its own server process, by name and by topic."""
+    user_home = tmp_path / "user"
+    initialize(home)
+    config.enable_capture(home / "config.toml", "vscode-copilot")
+
+    async with stdio(home, "claude-desktop", user_home) as claude:
+        assert (await claude.call_tool("recent_conversations", {})).structured_content["conversations"] == []
+        write_copilot_chat(user_home)  # the user chats in VS Code while Claude Desktop is open
+
+        recent = await claude.call_tool("recent_conversations", {"source": "copilot"})
+        [conv] = recent.structured_content["conversations"]
+        assert conv["source"] == "vscode-copilot"
+        assert "Retry-After header" in conv["messages"][0]["content"]
+
+        found = await claude.call_tool("search_context", {"query": "parse Retry-After"})
+        assert found.structured_content["results"][0]["conversation_id"] == conv["id"]
+
+    rows = db.connect(home / "openmcp.db").execute(
+        "SELECT summary FROM audit_log WHERE tool = 'recent_conversations' ORDER BY id"
+    ).fetchall()
+    assert "captured 5" in rows[-1][0]
+
+
+@pytest.mark.anyio
+async def test_captured_clients_dont_get_record_exchange(server, home):
+    config.enable_capture(home / "config.toml", "claude-code")
+    async with Client(server("claude-code")) as client:
+        tools = {t.name for t in (await client.list_tools()).tools}
+        instructions = client.instructions
+    assert "record_exchange" not in tools and "recent_conversations" in tools
+    assert "captured automatically" in instructions
+    async with Client(server("claude-desktop")) as client:
+        assert "record_exchange" in {t.name for t in (await client.list_tools()).tools}
+
+
+@pytest.mark.anyio
+async def test_record_exchange_accepts_code_over_mcp(server):
+    async with Client(server()) as client:
+        result = await client.call_tool("record_exchange", {
+            "question": "Write the retry helper",
+            "answer_summary": "Wrote retry().",
+            "code": [{"path": "retry.py", "language": "python", "content": "def retry(): ..."}],
+        })
+        bad = await client.call_tool("record_exchange", {
+            "question": "q", "answer_summary": "a", "code": [{"content": "x", "language": "py\n```"}],
+        })
+        cid = result.structured_content["conversation_id"]
+        full = await client.call_tool("recent_conversations", {"conversation_id": cid})
+    assert "```python\ndef retry(): ...\n```" in full.structured_content["conversations"][0]["messages"][1]["content"]
+    assert bad.is_error and "code.0.language" in bad.content[0].text
 
 
 @pytest.mark.anyio
@@ -180,7 +246,8 @@ async def test_tool_descriptions_tell_models_when_to_act(server):
     assert "Never save secrets" in tools["save_memories"]
     assert "start of a conversation" in tools["get_profile"]
     assert "explicitly asks" in tools["forget"]
-    assert "after each substantive question" in tools["record_exchange"]
+    assert "after every answer" in tools["record_exchange"]
+    assert "later one is current" in tools["recent_conversations"]
     assert "what did I ask Claude earlier?" in tools["recent_conversations"]
 
 

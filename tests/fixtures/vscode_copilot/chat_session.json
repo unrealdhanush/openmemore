@@ -1,0 +1,119 @@
+{
+  "version": 3,
+  "requesterUsername": "test-user",
+  "responderUsername": "GitHub Copilot",
+  "initialLocation": "panel",
+  "sessionId": "vs-0001",
+  "creationDate": 1790000000000,
+  "lastMessageDate": 1790000120000,
+  "isImported": false,
+  "requests": [
+    {
+      "requestId": "request_1",
+      "responseId": "response_1",
+      "timestamp": 1790000000000,
+      "message": {
+        "text": "How do I parse the Retry-After header?",
+        "parts": [
+          {
+            "kind": "text",
+            "text": "How do I parse the Retry-After header?"
+          }
+        ]
+      },
+      "response": [
+        {
+          "value": "Parse it as delta-seconds or an HTTP-date, as ",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/test/poller/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "inlineReference",
+          "inlineReference": {
+            "$mid": 1,
+            "fsPath": "/home/test/poller/client.py",
+            "path": "/home/test/poller/client.py",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": " already does for 429s.",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/test/poller/",
+            "scheme": "file"
+          }
+        }
+      ],
+      "isCanceled": false,
+      "agent": {
+        "id": "github.copilot.editsAgent"
+      },
+      "result": {
+        "metadata": {}
+      },
+      "variableData": {
+        "variables": []
+      },
+      "followups": [],
+      "contentReferences": [],
+      "codeCitations": []
+    },
+    {
+      "requestId": "request_2",
+      "responseId": "response_2",
+      "timestamp": 1790000060000,
+      "message": {
+        "text": "What did I ask Claude earlier?",
+        "parts": []
+      },
+      "response": [
+        {
+          "kind": "toolInvocationSerialized",
+          "toolCallId": "call-1",
+          "isComplete": true,
+          "isConfirmed": true,
+          "invocationMessage": {
+            "value": "Running recent_conversations"
+          },
+          "pastTenseMessage": {
+            "value": "Ran recent_conversations"
+          },
+          "toolSpecificData": {
+            "kind": "input",
+            "rawInput": {}
+          }
+        },
+        {
+          "value": "You asked Claude how to structure retries.",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/test/poller/",
+            "scheme": "file"
+          }
+        }
+      ],
+      "isCanceled": false
+    },
+    {
+      "requestId": "request_3",
+      "responseId": "response_3",
+      "timestamp": 1790000120000,
+      "message": {
+        "text": "Never mind",
+        "parts": []
+      },
+      "response": [],
+      "isCanceled": true
+    }
+  ]
+}
