@@ -11,6 +11,7 @@ from mcp.client.stdio import StdioServerParameters
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
+from conftest import plain
 from openmcp import config, db
 from openmcp.cli import app, initialize
 from openmcp.config import DEFAULT_CONFIG, ClientScopes, Config, load_config, resolve_client
@@ -102,7 +103,7 @@ def test_startup_under_budget(home):
 def test_serve_rejects_bad_client_names(home, name):
     result = runner.invoke(app, ["serve", "--client", name])
     assert result.exit_code != 0
-    assert "--client" in result.output
+    assert "--client" in plain(result.output)
     assert not (home / "openmcp.db").exists()
 
 

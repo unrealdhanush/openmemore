@@ -43,7 +43,5 @@ def test_init_db_is_migrated_and_wal(home):
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
-def test_home_defaults_to_dot_openmcp(monkeypatch, tmp_path):
-    monkeypatch.delenv("OPENMCP_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert config.home() == tmp_path / ".openmcp"
+def test_home_defaults_to_dot_openmcp(isolated_user):
+    assert config.home() == isolated_user / ".openmcp"

@@ -3,12 +3,13 @@ import os
 import shutil
 import sys
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from conftest import caller, insert
+from conftest import caller, insert, plain
 from openmcp import db
 from openmcp.audit import percentile, stats
 from openmcp.cli import app, initialize
@@ -28,8 +29,15 @@ def store(home):
         yield conn, (a, b, c)
 
 
-def run(*args, input=None):
-    return runner.invoke(app, list(args), input=input, env={"COLUMNS": "200"})
+@dataclass
+class Run:
+    exit_code: int
+    output: str
+
+
+def run(*args, input=None) -> Run:
+    result = runner.invoke(app, list(args), input=input, env={"COLUMNS": "200"})
+    return Run(result.exit_code, plain(result.output))
 
 
 def test_list_shows_active_memories_from_every_scope(store):

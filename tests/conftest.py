@@ -1,3 +1,4 @@
+import re
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,14 @@ from openmcp.config import ClientScopes
 from openmcp.models import NewMemory
 from openmcp.tools import Caller
 from openmcp.tools.memories import content_hash
+
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(text: str) -> str:
+    """CLI output without terminal styling (rich colors output on CI, e.g. GitHub Actions)."""
+    return ANSI_ESCAPE.sub("", text)
 
 
 @pytest.fixture(autouse=True)

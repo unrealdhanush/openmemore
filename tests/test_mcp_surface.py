@@ -28,7 +28,7 @@ def server(home):
 def stdio(home, client, user_home=None):
     env = {"OPENMCP_HOME": str(home)}
     if user_home is not None:
-        env["HOME"] = str(user_home)
+        env["HOME"] = env["USERPROFILE"] = str(user_home)  # Path.home(): HOME on POSIX, USERPROFILE on Windows
     return Client(
         StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve", "--client", client], env=env),
         read_timeout_seconds=30,
