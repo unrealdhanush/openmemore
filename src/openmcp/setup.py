@@ -11,6 +11,7 @@ printed instructions only, until their config formats are checked on a real inst
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import openmcp
 from openmcp import config
 from openmcp.capture import vscode_copilot
 from openmcp.instructions import STANDING_PREFIX, standing_instruction
@@ -30,6 +32,13 @@ SERVER_NAME = "openmcp"
 BLOCK_START = "<!-- openmcp:start -->"
 BLOCK_END = "<!-- openmcp:end -->"
 COPILOT_INSTRUCTIONS = "github.copilot.chat.codeGeneration.instructions"
+
+# How each application names itself over MCP (clientInfo.name), read from the apps
+# themselves: VS Code sends product.json's nameLong; Claude Code's identity is bundled in
+# Claude.app. Claude Desktop's own name couldn't be confirmed, so it isn't pinned (VS
+# Code still can't pass as claude-desktop: it's pinned to vscode-copilot).
+APP_NAMES = {"vscode-copilot": "Visual Studio Code", "claude-code": "claude-code"}
+VSCODE_DISCOVERY = "chat.mcp.discovery.enabled"
 
 
 class SetupError(Exception):
@@ -65,6 +74,44 @@ def openmcp_command() -> tuple[str, ...]:
     if found:
         return (found,)
     return (sys.executable, "-m", "openmcp.cli")
+
+
+def development_checkout() -> Path | None:
+    """The source checkout this openmcp runs from, if it's a development (editable)
+    install rather than an installed copy."""
+    package = Path(openmcp.__file__).resolve().parent
+    if "site-packages" in package.parts:
+        return None
+    return next((p for p in package.parents if (p / "pyproject.toml").is_file()), None)
+
+
+def installed_command(
+    checkout: Path,
+    *,
+    path: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> tuple[str, ...] | None:
+    """An installed openmcp outside `checkout`: a `uv tool install` first, then any
+    `openmcp` on PATH. None if there isn't one."""
+    exe = "openmcp.exe" if os.name == "nt" else "openmcp"
+    candidates: list[Path] = []
+    if which("uv"):
+        done = run(["uv", "tool", "dir"], capture_output=True, text=True)
+        if done.returncode == 0 and done.stdout.strip():
+            tool = Path(done.stdout.strip()) / "openmcp"
+            candidates += [tool / "bin" / exe, tool / "Scripts" / exe]
+    for directory in (os.environ.get("PATH", "") if path is None else path).split(os.pathsep):
+        if directory:
+            candidates.append(Path(directory) / exe)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError:
+            continue
+        if checkout not in resolved.parents and os.access(resolved, os.X_OK):
+            return (str(resolved),)
+    return None
 
 
 def server_entry(ctx: Context, client: str) -> dict[str, Any]:
@@ -113,6 +160,19 @@ def _set_block(path: Path, text: str) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(updated, encoding="utf-8")
     return str(path)
+
+
+def _pin_app(ctx: Context, client: str) -> Step:
+    app = APP_NAMES[client]
+
+    def apply() -> str:
+        config.set_client_app(config.config_path(ctx.base), client, app)
+        return str(config.config_path(ctx.base))
+
+    return Step(
+        f"Record in config.toml that client name '{client}' is for '{app}', so another app using it is flagged",
+        apply=apply,
+    )
 
 
 def _enable_capture(ctx: Context, source: CaptureSource) -> Step:
@@ -178,6 +238,13 @@ def _vscode_copilot(ctx: Context) -> list[Step]:
     def add_server_to_mcp_json(data: dict[str, Any]) -> None:
         data.setdefault("servers", {})[SERVER_NAME] = entry
 
+    def no_discovery(data: dict[str, Any]) -> None:
+        current = data.get(VSCODE_DISCOVERY)
+        if isinstance(current, dict):  # per-application in newer VS Code
+            current["claude-desktop"] = False
+        else:
+            data[VSCODE_DISCOVERY] = False
+
     def add_instruction(data: dict[str, Any]) -> None:
         existing = data.get(COPILOT_INSTRUCTIONS)
         items = existing if isinstance(existing, list) else []
@@ -199,11 +266,17 @@ def _vscode_copilot(ctx: Context) -> list[Step]:
     return [
         server_step,
         Step(
+            "Stop VS Code from also starting MCP servers configured for Claude Desktop "
+            f"({VSCODE_DISCOVERY}): Copilot would run as claude-desktop, with its scopes and tools",
+            apply=lambda: _edit_json(settings, no_discovery, json.dumps({VSCODE_DISCOVERY: False}, indent=4)),
+        ),
+        Step(
             f"Add the standing instruction to Copilot's custom instructions in {settings}",
             apply=lambda: _edit_json(
                 settings, add_instruction, json.dumps({COPILOT_INSTRUCTIONS: [{"text": instruction}]}, indent=4)
             ),
         ),
+        _pin_app(ctx, "vscode-copilot"),
         _enable_capture(ctx, "vscode-copilot"),
         Step(
             "Reload VS Code",
@@ -237,6 +310,7 @@ def _claude_code(ctx: Context) -> list[Step]:
             f"Add the standing instruction to {memory}",
             apply=lambda: _set_block(memory, standing_instruction(captured=True)),
         ),
+        _pin_app(ctx, "claude-code"),
         _enable_capture(ctx, "claude-code"),
         Step("Start a new Claude Code session", manual="Running sessions don't pick up new MCP servers."),
     ]
