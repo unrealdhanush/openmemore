@@ -135,9 +135,25 @@ openmcp consolidate run      # now, instead of at 03:00
 openmcp consolidate off
 ```
 
-A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
+What OpenMCP sends and expects is in [docs/consolidation-endpoint.md](docs/consolidation-endpoint.md). A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
 
 A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmcp review` prints.
+
+## Use it from your own programs (experimental)
+
+Agents and scripts you write can share the same memory, in-process, with no server:
+
+```python
+from openmcp import Memory
+
+memory = Memory("trip-planner")       # a client name, scoped like any app
+
+@memory.recall(query="request")       # related memories passed in as `context`
+@memory.remember(question="request")  # each call stored as an exchange your assistants can find
+def plan(request: str, context: str = "") -> str: ...
+```
+
+See [docs/library.md](docs/library.md).
 
 ## Import and export
 
