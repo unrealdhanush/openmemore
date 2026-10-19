@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from openmcp import db, embed, repo
+from openmcp import setup as client_setup
 from openmcp.config import ClientScopes
 from openmcp.models import NewMemory
 from openmcp.tools import Caller
@@ -75,6 +76,16 @@ def no_model(monkeypatch: pytest.MonkeyPatch) -> None:
     that hasn't run `openmcp embed`. Tests opt in with `fake_embedder` or
     `real_embedder`, whose patch runs after this one and wins."""
     monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: None)
+
+
+REAL_DEVELOPMENT_CHECKOUT = client_setup.development_checkout
+
+
+@pytest.fixture(autouse=True)
+def installed_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests run from a development checkout, so `openmcp setup` would hand off to the
+    machine's installed copy. By default, behave like an installed copy instead."""
+    monkeypatch.setattr(client_setup, "development_checkout", lambda: None)
 
 
 @pytest.fixture

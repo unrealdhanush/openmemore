@@ -1,6 +1,10 @@
-"""Recall exchanges ("what did I ask Copilot?") are marked and ranked below the
-conversations they recap. Reproduces the 2026-10-18 manual test, where recaps of a
-Copilot chat about cat names outranked the chat itself."""
+"""Recall turns ("what did I ask Copilot?") are marked and ranked below the conversations
+they recap. Reproduces the 2026-10-18 manual test, where recaps of a Copilot chat about
+cat names outranked the chat itself.
+
+Only captured transcripts are marked: they show which tools a turn called. Marking
+record_exchange calls by timing (a lookup shortly before) failed in the follow-up
+manual test, so models are told to skip recording pure lookups instead."""
 
 import json
 
@@ -12,7 +16,7 @@ from openmcp import db, embed
 from openmcp.capture import capture, claude_code, vscode_copilot
 from openmcp.cli import initialize
 from openmcp.config import CaptureConfig, Config
-from openmcp.server import RECALL_WINDOW_S, RecallTracker, build_server
+from openmcp.server import build_server
 from openmcp.tools.conversations import record_exchange
 from openmcp.tools.search import search_context
 from test_capture import add_claude_session, add_vscode_session, bump_mtime
@@ -35,67 +39,36 @@ def user_home(tmp_path):
     return tmp_path / "user"
 
 
+def mark_recall(conn, conversation_id):
+    conn.execute("UPDATE messages SET recall = 1 WHERE conversation_id = ?", (conversation_id,))
+
+
 def store_case(conn):
-    """The original Copilot chat, then Claude Desktop's recaps of it (marked recall)."""
+    """The original Copilot chat, then recaps of it, marked recall (as transcript
+    capture marks a turn that called a recall tool)."""
     original = record_exchange(conn, COPILOT, *ORIGINAL).conversation_id
     for question, answer in RECAPS:
-        record_exchange(conn, DESKTOP, question, answer, recall=True)
+        mark_recall(conn, record_exchange(conn, DESKTOP, question, answer).conversation_id)
     return original
 
 
-# --- spotting recalls from the order of calls ----------------------------------------
-
-
-class Clock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
-
-
-def test_tracker():
-    clock = Clock()
-    t = RecallTracker(clock)
-    assert t.next_exchange_is_recall(has_code=False) is False
-
-    t.returned_context()
-    assert t.next_exchange_is_recall(has_code=False) is True
-    assert t.next_exchange_is_recall(has_code=False) is False  # one read marks one exchange
-
-    t.returned_context()
-    assert t.next_exchange_is_recall(has_code=True) is False  # the lookup led to real work
-
-    t.returned_context()
-    clock.now += RECALL_WINDOW_S + 1
-    assert t.next_exchange_is_recall(has_code=False) is False
+# --- record_exchange isn't marked by timing ------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_an_exchange_right_after_a_lookup_is_marked_recall(home):
+async def test_record_exchange_after_a_lookup_is_not_marked(home):
+    """The manual test's living-room case: the user asked Claude for its own opinion
+    right after a lookup. A timing rule marked that new content as a recap."""
     initialize(home)
     conn = db.connect(home / "openmcp.db")
     record_exchange(conn, COPILOT, *ORIGINAL)
-
     async with Client(build_server("claude-desktop", home)) as client:
-        await client.call_tool("get_profile", {})
-        first = await client.call_tool("record_exchange", {"question": "Plan my week", "answer_summary": "Drafted."})
         await client.call_tool("recent_conversations", {"source": "copilot"})
-        recap = await client.call_tool("record_exchange", {
-            "question": RECAPS[0][0], "answer_summary": RECAPS[0][1],
+        result = await client.call_tool("record_exchange", {
+            "question": "What's your opinion on Copilot's suggestion?", "answer_summary": "Good idea, because...",
         })
-        await client.call_tool("search_context", {"query": "zzzz nothing matches"})
-        after_empty = await client.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})
-
-    def recall_flags(result):
-        ids = result.structured_content["message_ids"]
-        return {r[0] for r in conn.execute(f"SELECT recall FROM messages WHERE id IN ({ids[0]}, {ids[1]})")}
-
-    assert recall_flags(first) == {0}  # get_profile doesn't count
-    assert recall_flags(recap) == {1}
-    assert recall_flags(after_empty) == {0}  # the lookup found nothing to recap
-    summaries = [r[0] for r in conn.execute("SELECT summary FROM audit_log WHERE tool = 'record_exchange' ORDER BY id")]
-    assert [s.endswith(", recall") for s in summaries] == [False, True, False]
+    ids = result.structured_content["message_ids"]
+    assert {r[0] for r in conn.execute(f"SELECT recall FROM messages WHERE id IN ({ids[0]}, {ids[1]})")} == {0}
 
 
 # --- transcripts ---------------------------------------------------------------------
@@ -150,7 +123,7 @@ def test_recaps_rank_below_the_conversation_they_recap(conn, monkeypatch):
 
 
 def test_without_better_matches_recaps_are_still_returned(conn):
-    record_exchange(conn, DESKTOP, *RECAPS[0], recall=True)
+    mark_recall(conn, record_exchange(conn, DESKTOP, *RECAPS[0]).conversation_id)
     hits = search_context(conn, DESKTOP, "Marmalade").results
     assert hits and all(h.recall for h in hits)
 

@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 from contextlib import closing
 from dataclasses import dataclass
@@ -206,3 +207,36 @@ def test_embed_without_a_model_says_so(store):
 def test_capture_still_succeeds_without_a_model(home):
     result = run("capture", "--source", "vscode-copilot")
     assert result.exit_code == 0 and "Semantic search unavailable" in result.output
+
+
+# --- setup from a development checkout -----------------------------------------------
+
+
+@pytest.fixture
+def checkout(monkeypatch, tmp_path):
+    from openmcp import setup as client_setup
+    monkeypatch.setattr(client_setup, "development_checkout", lambda: tmp_path / "repo")
+    return client_setup
+
+
+def test_setup_from_a_checkout_hands_off_to_the_installed_copy(home, checkout, monkeypatch):
+    calls = []
+    monkeypatch.setattr(checkout, "installed_command", lambda root: ("/opt/tools/openmcp",))
+    monkeypatch.setattr("openmcp.cli.subprocess.run", lambda args: calls.append(args) or subprocess.CompletedProcess(args, 0))
+    result = run("setup", "vscode-copilot", "--dry-run")
+    assert result.exit_code == 0 and "installed openmcp at /opt/tools/openmcp" in " ".join(result.output.split())
+    assert calls == [["/opt/tools/openmcp", "setup", "vscode-copilot", "--dry-run"]]
+    assert not (Path(os.environ["HOME"]) / "Library").exists()  # nothing configured from the checkout
+
+
+def test_setup_from_a_checkout_without_an_installed_copy_stops(home, checkout, monkeypatch):
+    monkeypatch.setattr(checkout, "installed_command", lambda root: None)
+    result = run("setup", "claude-desktop")
+    assert result.exit_code == 2 and "no installed openmcp was found" in " ".join(result.output.split())
+
+
+def test_setup_dev_registers_the_checkout(home, checkout, monkeypatch):
+    monkeypatch.setattr(checkout, "installed_command", lambda root: pytest.fail("shouldn't look"))
+    result = run("setup", "claude-desktop", "--dev")
+    assert result.exit_code == 0, result.output
+    assert json.loads(desktop_config_path(Path(os.environ["HOME"])).read_text())["mcpServers"]["openmcp"]

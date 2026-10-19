@@ -47,9 +47,12 @@ def _in(column: str, values: Sequence[object]) -> tuple[str, list[object]]:
 
 def insert_audit(conn: sqlite3.Connection, entry: AuditEntry) -> int:
     cur = conn.execute(
-        "INSERT INTO audit_log (ts, client, tool, summary, result_count, duration_ms) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (to_iso(entry.ts), entry.client, entry.tool, entry.summary, entry.result_count, entry.duration_ms),
+        "INSERT INTO audit_log (ts, client, tool, summary, result_count, duration_ms, app) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            to_iso(entry.ts), entry.client, entry.tool, entry.summary, entry.result_count, entry.duration_ms,
+            entry.app,
+        ),
     )
     return cur.lastrowid
 
@@ -68,6 +71,14 @@ def list_audit(conn: sqlite3.Connection, f: AuditFilter) -> list[AuditEntry]:
         [*params, f.limit],
     ).fetchall()
     return [AuditEntry.model_validate(dict(r)) for r in rows]
+
+
+def apps_for(conn: sqlite3.Connection, client: str) -> list[str]:
+    """Every application recorded calling as `client`, in order of first appearance."""
+    rows = conn.execute(
+        "SELECT app FROM audit_log WHERE client = ? AND app IS NOT NULL GROUP BY app ORDER BY MIN(id)", (client,)
+    )
+    return [r[0] for r in rows]
 
 
 def audit_durations(conn: sqlite3.Connection) -> dict[str, list[float]]:

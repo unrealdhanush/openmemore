@@ -38,6 +38,9 @@ class ClientOverride(BaseModel):
 
     read_scopes: tuple[Scope, ...] | None = None
     write_scope: Scope | None = None
+    app: str | None = Field(default=None, min_length=1, max_length=200)
+    """The application this client name is for, as it names itself over MCP (clientInfo.name),
+    e.g. 'Visual Studio Code'. Another application using the name gets a warning."""
 
 
 class CaptureConfig(BaseModel):
@@ -101,6 +104,17 @@ def enable_capture(path: Path, source: CaptureSource) -> bool:
     if source in cfg.capture.sources:
         return False
     cfg.capture.sources = (*cfg.capture.sources, source)
+    save_config(path, cfg)
+    return True
+
+
+def set_client_app(path: Path, client: str, app: str) -> bool:
+    """Record which application a client name is for. Returns False if already set to it."""
+    cfg = load_config(path)
+    entry = cfg.clients.setdefault(client, ClientOverride())
+    if entry.app == app:
+        return False
+    entry.app = app
     save_config(path, cfg)
     return True
 

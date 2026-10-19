@@ -75,6 +75,8 @@ class AuditEntry(BaseModel):
     summary: str | None = Field(default=None, max_length=SUMMARY_MAX)
     result_count: int | None = Field(default=None, ge=0)
     duration_ms: float = Field(ge=0)
+    app: str | None = Field(default=None, max_length=SUMMARY_MAX)
+    """The application that made the call (MCP clientInfo.name), when it says."""
 
 
 class NewMemory(BaseModel):
@@ -252,6 +254,10 @@ class PingResult(BaseModel):
     schema_version: int
     semantic_search: str
     """'ready (<model>)', or why only keyword search is available."""
+    connected_app: str | None = None
+    """What the application on the other end calls itself (MCP clientInfo.name)."""
+    warning: str | None = None
+    """Set when a different application than usual is using this client name."""
 
 
 class PossibleDuplicate(BaseModel):
