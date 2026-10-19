@@ -168,7 +168,9 @@ def test_memories_and_chats_are_interleaved_by_rank(conn):
     hits = search_context(conn, DESKTOP, "flask").results
     assert hits[0].type == "memory" and hits[0].id == mem
     assert hits[1].type == "chat"
-    assert hits[0].score == hits[1].score  # both rank 1 in their own list
+    # Both rank 1 in their own list; only the memory gets activation's small tie-breaker.
+    from openmcp.tools.search import MEMORY_ACTIVATION_WEIGHT
+    assert 0 <= hits[0].score - hits[1].score <= MEMORY_ACTIVATION_WEIGHT + 1e-9
 
 
 def test_chat_results_can_be_excluded(conn):

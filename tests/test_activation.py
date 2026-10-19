@@ -54,7 +54,7 @@ def test_activation_breaks_ties_between_equal_matches(conn, monkeypatch):
     one rank step; the shipped weight is tuned with the benchmark.)"""
     from openmcp.tools import search
 
-    monkeypatch.setattr(search, "ACTIVATION_WEIGHT", 0.01)
+    monkeypatch.setattr(search, "MEMORY_ACTIVATION_WEIGHT", 0.01)
     older = insert(conn, "Prefers green tea.", kind="preference", when=days_ago(400))
     newer = insert(conn, "Prefers green tea.", kind="preference", when=days_ago(2))
 
@@ -94,3 +94,17 @@ async def test_what_clients_are_shown_is_counted(home):
     Memory("agent", home=home).search("green tea")
     with closing(db.connect(home / "openmcp.db")) as conn:
         assert repo.get_memory(conn, memory_id).presented == 3
+
+
+def test_chats_get_no_age_weighting(conn):
+    """Tuned with the benchmark: old conversations are as much evidence as new ones."""
+    from openmcp.ingest import store_conversation
+    from openmcp.models import ParsedConversation, ParsedMessage
+    from openmcp.tools import search
+
+    for name, age in (("old", 400), ("new", 2)):
+        store_conversation(conn, ParsedConversation(provider="vscode-copilot", external_id=name, messages=[
+            ParsedMessage(external_id="1", role="user", content="Plan a vegetable garden.", created_at=days_ago(age))]),
+            "personal")
+    hits = search_context(conn, ME, "vegetable garden", now=NOW, explain=True).results
+    assert search.CHAT_ACTIVATION_WEIGHT == 0 and all(h.explain["activation"] == 0 for h in hits)

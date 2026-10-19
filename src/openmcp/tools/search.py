@@ -173,8 +173,14 @@ def similar_enough(
 
 ACTIVATION_DECAY = 0.5
 """ACT-R's d: how fast a presentation's influence fades (power law, not a half-life)."""
-ACTIVATION_WEIGHT = 0.0005
-"""Rank boost at full activation. Tuned with the benchmark (bench/RESULTS.md)."""
+MEMORY_ACTIVATION_WEIGHT = 0.0005
+"""Rank boost at full activation, for memories: a tie-breaker by recent and frequent use
+and confirmation. Which version is current is decided by the timelines, not by this. Not
+measured: the benchmarks have no memories and no usage."""
+CHAT_ACTIVATION_WEIGHT = 0.0
+"""For conversation messages: none. Tuned with M7.6 (bench/RESULTS.md, 2026-10-19): any
+age weighting lowered evidence recall on LongMemEval and LoCoMo, more so the stronger it
+was, since questions often ask about older conversations."""
 MIN_AGE_DAYS = 1 / 24
 """Ages are counted from an hour: a just-made item isn't infinitely active."""
 
@@ -197,9 +203,12 @@ def activation(created: datetime | None, presented: int, last: datetime | None, 
     return math.log(recent ** -d + rest)
 
 
-def activation_boost(created: datetime | None, presented: int, last: datetime | None, now: datetime) -> float:
-    """Activation as a rank boost: ACTIVATION_WEIGHT times its logistic (0 to 1)."""
-    return ACTIVATION_WEIGHT / (1 + math.exp(-activation(created, presented, last, now)))
+def activation_boost(created: datetime | None, presented: int, last: datetime | None, now: datetime,
+                     weight: float) -> float:
+    """Activation as a rank boost: `weight` times its logistic (0 to 1)."""
+    if not weight:
+        return 0.0
+    return weight / (1 + math.exp(-activation(created, presented, last, now)))
 
 
 CONFIDENCE_WEIGHT = 0.002
@@ -286,8 +295,10 @@ def search_context(
     for entry in fused.values():
         item = entry.item
         entry.signals["fusion"] = entry.score
+        memory = isinstance(item, Memory)
         entry.signals["activation"] = activation_boost(
-            item.updated_at if isinstance(item, Memory) else item.created_at, item.presented, item.last_presented_at, now)
+            item.updated_at if memory else item.created_at, item.presented, item.last_presented_at, now,
+            MEMORY_ACTIVATION_WEIGHT if memory else CHAT_ACTIVATION_WEIGHT)
         entry.score += entry.signals["activation"]
         if isinstance(item, Memory):
             entry.signals["confidence"] = confidence_boost(item.confidence)

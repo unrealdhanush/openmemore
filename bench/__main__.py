@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--judge-api", default="responses", choices=["responses", "chat-completions"])
     parser.add_argument("--record", action="store_true", help="Append the summary to bench/RESULTS.md.")
     parser.add_argument("--set", action="append", default=[], metavar="MODULE.NAME=VALUE",
-                        help="Override a constant for tuning, e.g. openmcp.tools.search.ACTIVATION_WEIGHT=0.002.")
+                        help="Override a constant for tuning, e.g. openmcp.tools.search.CHAT_ACTIVATION_WEIGHT=0.002.")
     args = parser.parse_args(argv)
     ks = sorted({int(k) for k in args.k.split(",")})
     settings = apply_settings(args.set)
