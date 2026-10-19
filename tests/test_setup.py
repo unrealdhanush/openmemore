@@ -173,12 +173,12 @@ def test_claude_code_instruction_block_is_replaced_not_duplicated(ctx):
 
 
 def test_unverified_clients_get_printed_instructions_only(ctx, clipboard):
-    steps = plan("cursor", ctx)
+    steps = plan("windsurf", ctx)
     assert run(steps) == []
     assert [p for p in ctx.user_home.rglob("*") if ".openmcp" not in p.parts] == []  # only the clipboard
     assert clipboard == [pointer_instruction()]
     manual = "\n".join(s.manual for s in steps if s.manual)
-    assert '"--client"' in manual and '"cursor"' in manual and pointer_instruction() in manual
+    assert '"--client"' in manual and '"windsurf"' in manual and pointer_instruction() in manual
 
 
 # --- operating systems ---------------------------------------------------------------
