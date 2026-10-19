@@ -487,6 +487,12 @@ class ProposalInput(MemoryInput):
     reason: str | None = Field(
         default=None, max_length=MAX_REASON_CHARS, description="Why this is worth remembering, in a few words."
     )
+    replaces: int | None = Field(
+        default=None,
+        ge=1,
+        description="If this updates an existing memory (e.g. a project's state has moved on), that memory's id "
+        "from get_profile or search_context. Approving it then makes this a new version of that memory.",
+    )
 
 
 class DoneConversation(BaseModel):
@@ -558,6 +564,9 @@ class NewProposal(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     content_hash: str
     similar_memory_id: int | None = None
+    """A near-duplicate the vectors found; kept alongside unless the user chooses to replace it."""
+    replaces_memory_id: int | None = None
+    """The memory the proposing model says this updates; replaced unless the user keeps both."""
     created_at: AwareDatetime
     conversation_ids: list[int] = Field(default_factory=list)
     memory_ids: list[int] = Field(default_factory=list)

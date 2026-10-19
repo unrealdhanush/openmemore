@@ -694,10 +694,10 @@ def mark_consolidated(conn: sqlite3.Connection, conversation_id: int, through: i
 def insert_proposal(conn: sqlite3.Connection, p: NewProposal) -> int:
     cur = conn.execute(
         "INSERT INTO proposals (action, kind, content, subject, project, scope, reason, source_client, confidence, "
-        "content_hash, similar_memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, similar_memory_id, replaces_memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             p.action, p.kind, p.content, p.subject, p.project, p.scope, p.reason, p.source_client, p.confidence,
-            p.content_hash, p.similar_memory_id, to_iso(p.created_at),
+            p.content_hash, p.similar_memory_id, p.replaces_memory_id, to_iso(p.created_at),
         ),
     )
     proposal_id = cur.lastrowid

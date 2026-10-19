@@ -76,7 +76,7 @@ def consolidation_batch(conn: sqlite3.Connection, caller: Caller, limit: int) ->
             "Read these conversations and call propose_memories with the durable things they show about the "
             "user (preferences, facts, decisions and why, projects and their current state), each citing the "
             "conversation_ids it comes from. Skip one-off questions, small talk, and anything already in their "
-            "profile. In `done`, list every conversation above with its through_message_id, including ones that "
+            "profile; where something updates a memory in their profile, set `replaces` to that memory's id. In `done`, list every conversation above with its through_message_id, including ones that "
             "gave nothing, so they aren't read again. "
             + (f"{remaining} more conversations are due after this batch: call consolidation_batch again."
                if remaining else "This is the last batch. " + REVIEW_HINT)
@@ -93,6 +93,16 @@ def _readable(conn: sqlite3.Connection, caller: Caller, conversation_id: int) ->
     return conversation
 
 
+def _replaced(conn: sqlite3.Connection, caller: Caller, memory_id: int) -> Memory:
+    """The current memory a proposal says it updates, if this client can read it."""
+    memory = repo.get_memory(conn, memory_id)
+    if memory is None or not caller.can_read(memory.scope):
+        raise ToolError(f"memory {memory_id} not found")
+    if not memory.active:
+        raise ToolError(f"memory {memory_id} was already replaced by memory {memory.superseded_by}; name that one")
+    return memory
+
+
 def _similar_memory(conn: sqlite3.Connection, scope: str, kind: Kind, vector: bytes) -> Memory | None:
     """The most similar current memory of the same kind in `scope`, if it's a near-duplicate."""
     nearest = repo.knn_memories(conn, vector, k=NEAR_DUPLICATE_CANDIDATES, scopes=[scope], kinds=[kind])
@@ -105,15 +115,17 @@ def propose_memories(
     conn: sqlite3.Connection, caller: Caller, items: list[ProposalInput], done: list[DoneConversation]
 ) -> ProposeResult:
     """Queue memories for the user's review. A proposal takes the scope of the
-    conversations it came from (which this client must be able to read), or this
-    client's write scope when it cites none."""
+    conversations it came from and of the memory it replaces (which this client must be
+    able to read, and which must agree), or this client's write scope when it cites none."""
     result = ProposeResult(note=REVIEW_HINT)
     accepted: list[tuple[int, ProposalInput, str]] = []
     for index, item in enumerate(items):
         scopes = {_readable(conn, caller, cid).scope for cid in item.conversation_ids}
+        if item.replaces is not None:
+            scopes.add(_replaced(conn, caller, item.replaces).scope)
         if len(scopes) > 1:
             raise ToolError(
-                f"item {index} cites conversations in different scopes ({', '.join(sorted(scopes))}); "
+                f"item {index} cites conversations or a memory in different scopes ({', '.join(sorted(scopes))}); "
                 "propose it separately for each"
             )
         if reason := secret_in(item.content, item.subject, item.project, item.reason):
@@ -133,6 +145,8 @@ def propose_memories(
                 result.skipped_duplicates += 1
                 continue
             similar = _similar_memory(conn, scope, item.kind, vector) if vector is not None else None
+            if similar and similar.id == item.replaces:
+                similar = None  # already named
             proposal_id = repo.insert_proposal(conn, NewProposal(
                 action="add",
                 **item.model_dump(include={"kind", "content", "subject", "project", "confidence", "reason"}),
@@ -140,6 +154,7 @@ def propose_memories(
                 source_client=caller.client,
                 content_hash=digest,
                 similar_memory_id=similar.id if similar else None,
+                replaces_memory_id=item.replaces,
                 created_at=now,
                 conversation_ids=item.conversation_ids,
             ))

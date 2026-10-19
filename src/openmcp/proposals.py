@@ -33,6 +33,8 @@ class Approval(BaseModel):
     project: Label | None = None
     replace_similar: bool = False
     """Replace the similar memory (a new version of it) instead of adding another."""
+    keep_replaced: bool = False
+    """Keep the memory the proposal says it updates, instead of replacing it."""
 
 
 def _pending(conn: sqlite3.Connection, proposal_id: int) -> Proposal:
@@ -50,7 +52,7 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
     that supersedes every memory in the group."""
     edits = edits or Approval()
     proposal = _pending(conn, proposal_id)
-    changed = edits.model_dump(exclude_unset=True, exclude={"replace_similar"})
+    changed = edits.model_dump(exclude_unset=True, exclude={"replace_similar", "keep_replaced"})
     fields = {**proposal.model_dump(include={"kind", "content", "subject", "project"}), **changed}
     if reason := secret_in(fields["content"], fields["subject"], fields["project"]):
         raise ProposalError(f"not saved: {reason}")
@@ -64,11 +66,20 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
             replaced = [m for mid in proposal.memory_ids if (m := repo.get_memory(conn, mid))]
             if len(replaced) != len(proposal.memory_ids) or not all(m.active for m in replaced):
                 raise ProposalError("these memories changed since the merge was proposed; find duplicates again")
-        elif edits.replace_similar:
-            similar = repo.get_memory(conn, proposal.similar_memory_id) if proposal.similar_memory_id else None
-            if similar is None or not similar.active:
-                raise ProposalError("the similar memory was changed or deleted since; approve this as a new memory")
-            replaced = [similar]
+        else:
+            if proposal.replaces_memory_id and not edits.keep_replaced:
+                named = repo.get_memory(conn, proposal.replaces_memory_id)
+                if named is None or not named.active:
+                    raise ProposalError(
+                        f"memory {proposal.replaces_memory_id} was changed since this was proposed; keep both, or reject this"
+                    )
+                replaced.append(named)
+            if edits.replace_similar:
+                similar = repo.get_memory(conn, proposal.similar_memory_id) if proposal.similar_memory_id else None
+                if similar is None or not similar.active:
+                    raise ProposalError("the similar memory was changed or deleted since; approve this as a new memory")
+                if similar not in replaced:
+                    replaced.append(similar)
 
         digest = content_hash(fields["content"])
         existing = repo.find_active_duplicate(conn, proposal.scope, digest)
