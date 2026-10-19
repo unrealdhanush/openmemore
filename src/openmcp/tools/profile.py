@@ -22,16 +22,49 @@ def _item(m: Memory) -> ProfileItem:
     )
 
 
+MIN_PARTIAL = 3
+"""Shortest name matched as part of another ('hackathon' in 'Open Agent Hackathon 2026')."""
+
+
+def match_projects(asked: str, labels: list[str]) -> list[str]:
+    """The stored project labels a model's `project` means. Models guess the name ('zetaris',
+    'hackathon', 'openmcp'), so: the same name ignoring case; otherwise labels containing
+    it, or contained in it."""
+    key = asked.casefold().strip()
+    same = [label for label in labels if label.casefold() == key]
+    if same or len(key) < MIN_PARTIAL:
+        return same
+    return [
+        label for label in labels
+        if key in label.casefold() or (len(label) >= MIN_PARTIAL and label.casefold() in key)
+    ]
+
+
 def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = None) -> Profile:
     """With `project`, each group holds that project's memories first, then general
-    (untagged) ones, since general preferences still apply inside a project."""
+    (untagged) ones, since general preferences still apply inside a project. A project
+    that matches no stored one gives the whole profile, and the projects there are, rather
+    than an empty answer a model might take as "nothing stored"."""
+    note, known, projects = None, None, None
+    if project is not None:
+        labels = repo.project_labels(conn, caller.scopes.read_scopes)
+        projects = match_projects(project, labels)
+        if not projects:
+            projects = None
+            known = labels
+            note = f"No memories are tagged with project {project!r}, so this is the whole profile. " + (
+                "Projects with memories: " + ", ".join(repr(label) for label in labels) + "."
+                if labels else "No memories are tagged with any project."
+            )
+        elif projects != [project]:
+            note = "Showing project " + ", ".join(repr(label) for label in projects) + f" for {project!r}."
 
     def group(kind: Kind, updated_since: datetime | None = None) -> list[ProfileItem]:
         memories = repo.list_memories(
             conn,
             scopes=caller.scopes.read_scopes,
             kinds=[kind],
-            project=project,
+            project=projects,
             include_general=True,
             updated_since=updated_since,
             limit=PROFILE_GROUP_CAP,
@@ -43,4 +76,6 @@ def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = 
         facts=group("fact"),
         active_projects=group("project", datetime.now(UTC) - timedelta(days=ACTIVE_PROJECT_DAYS)),
         recent_decisions=group("decision"),
+        project_note=note,
+        known_projects=known,
     )
