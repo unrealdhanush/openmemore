@@ -251,3 +251,39 @@ def test_a_file_that_shrank_is_read_from_the_top(conn, user_home):
     assert capture(conn, CFG, user_home=user_home, days=36500).errors == []
     [conv] = repo.list_conversations(conn, scopes=None)
     assert len(contents(conn, conv.id)) == 4  # nothing lost, nothing duplicated
+
+
+def test_vscode_tool_messages_can_be_plain_strings(tmp_path):
+    """File-editing tools store invocationMessage as a string, not {"value": ...}: a
+    Copilot chat that wrote code crashed capture in the 2026-10-18 manual test."""
+    path = add_vscode_session(tmp_path)
+    data = json.loads(path.read_text())
+    data["requests"].append({
+        "requestId": "request_4", "responseId": "response_4", "timestamp": 1790000180000,
+        "message": {"text": "Write a function that waters plants on a schedule"},
+        "response": [
+            {"kind": "toolInvocationSerialized", "invocationMessage": "Creating water.py", "toolCallId": "t9"},
+            {"kind": "textEditGroup", "uri": {"path": "/home/test/water.py"}, "edits": []},
+            {"value": "```python\ndef water_plants(schedule): ...\n```"},
+        ],
+        "result": {"metadata": {"toolCallRounds": [{"toolCalls": [{"name": "create_file", "arguments": "{}", "id": "c9"}]}]}},
+    })
+    path.write_text(json.dumps(data))
+    parsed, _ = vscode_copilot.parse(path)
+    assert parsed.messages[-1].content == "```python\ndef water_plants(schedule): ...\n```"
+    assert not parsed.messages[-1].recall
+
+
+def test_one_broken_transcript_doesnt_stop_the_others(conn, user_home, monkeypatch):
+    from openmcp import capture as capture_module
+    add_claude_session(user_home)
+    add_vscode_session(user_home)
+    original = capture_module.SOURCES["vscode-copilot"]
+
+    def broken(path, offset):
+        raise AttributeError("'str' object has no attribute 'get'")
+
+    monkeypatch.setitem(capture_module.SOURCES, "vscode-copilot", capture_module.Source(original.files, broken))
+    report = capture(conn, CFG, user_home=user_home, days=36500)
+    assert report.conversations == 1  # Claude Code's session still stored
+    assert len(report.errors) == 1 and "AttributeError" in report.errors[0]
