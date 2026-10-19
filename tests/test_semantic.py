@@ -8,7 +8,7 @@ from conftest import FakeEmbedder, caller, insert
 from openmcp import embed, repo
 from openmcp.cli import initialize
 from openmcp.models import MemoryInput
-from openmcp.server import build_server
+from conftest import connect
 from openmcp.tools.conversations import record_exchange
 from openmcp.tools.memories import save_memories, update_memory
 from openmcp.tools.search import SIMILARITY_FLOOR, search_context
@@ -195,7 +195,7 @@ def test_kind_and_project_filters_apply_to_vector_hits(conn, fake_embedder):
 @pytest.mark.anyio
 async def test_ping_reports_semantic_search(home, monkeypatch):
     initialize(home)
-    async with Client(build_server("claude-desktop", home)) as client:
+    async with connect(home, "claude-desktop") as client:
         off = (await client.call_tool("ping", {})).structured_content["semantic_search"]
         monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: FakeEmbedder())
         on = (await client.call_tool("ping", {})).structured_content["semantic_search"]

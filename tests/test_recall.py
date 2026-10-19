@@ -16,7 +16,7 @@ from openmcp import db, embed
 from openmcp.capture import capture, claude_code, vscode_copilot
 from openmcp.cli import initialize
 from openmcp.config import CaptureConfig, Config
-from openmcp.server import build_server
+from conftest import connect
 from openmcp.tools.conversations import record_exchange
 from openmcp.tools.search import search_context
 from test_capture import add_claude_session, add_vscode_session, bump_mtime
@@ -62,7 +62,7 @@ async def test_record_exchange_after_a_lookup_is_not_marked(home):
     initialize(home)
     conn = db.connect(home / "openmcp.db")
     record_exchange(conn, COPILOT, *ORIGINAL)
-    async with Client(build_server("claude-desktop", home)) as client:
+    async with connect(home, "claude-desktop") as client:
         await client.call_tool("recent_conversations", {"source": "copilot"})
         result = await client.call_tool("record_exchange", {
             "question": "What's your opinion on Copilot's suggestion?", "answer_summary": "Good idea, because...",

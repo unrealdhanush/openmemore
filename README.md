@@ -17,7 +17,7 @@ Python builds disable.
 ```sh
 uv sync
 uv run openmcp init                       # creates ~/.openmcp (override with OPENMCP_HOME)
-uv run openmcp serve --client my-client   # MCP server over stdio
+uv run openmcp serve                      # MCP server over stdio (names the client from what it reports)
 uv run openmcp setup [client]             # connect any MCP client (vscode-copilot, cursor, claude-code use their own installers)
 uv run openmcp clients                    # the MCP clients that have connected, and their scopes
 uv run openmcp capture                    # catch up on transcripts of clients with capture on

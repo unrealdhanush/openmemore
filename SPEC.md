@@ -49,7 +49,7 @@ Models do not "learn from each other." They read and write a shared store. No we
 ```
  Claude Desktop     Cursor      Gemini CLI      (each spawns its own stdio process)
        |              |             |
-   openmcp serve  openmcp serve  openmcp serve   --client <name>
+   openmcp serve  openmcp serve  openmcp serve   (each names its client from clientInfo)
        \              |             /
         \             |            /
          +----- ~/.openmcp/openmcp.db  (SQLite, WAL mode) -----+
@@ -444,28 +444,25 @@ This doesn't make injection impossible. It makes it visible and harder. Say so h
 
 ## 9. Clients and scopes
 
-`config.toml`, created by `openmcp init`:
+**A client is named by what its application reports when it connects** (MCP `clientInfo`), made config-friendly: `claude-ai` (Claude Desktop), `visual-studio-code`, `cursor-vscode`, `Some Editor 2` → `some-editor-2`. There's no client table, no `--client` option, and no renaming: `openmcp clients` lists the names of the applications that have connected, with their scopes. (Earlier versions had `--client` and config `app` pins; M3.5 made them unnecessary and they were removed. A config that still has an `app` key fails to load, naming the key.)
+
+`config.toml`, created by `openmcp init`, starts with only `[defaults]` and a commented example:
 
 ```toml
 [defaults]
 read_scopes = ["personal"]
 write_scope = "personal"
 
-[clients.claude-desktop]
-read_scopes = ["personal", "work"]
-write_scope = "personal"
-
-[clients.cursor]
-read_scopes = ["work"]
-write_scope = "work"
+# [clients.cursor-vscode]
+# read_scopes = ["work", "personal"]
+# write_scope = "work"
 ```
 
-- The client name comes from `openmcp serve --client <name>` or, without `--client` (M3.5), from the name the application reports when it connects (MCP `clientInfo`): the `app` pins in config first, otherwise a name made from the application's own (`Some Editor 2` → `some-editor-2`). `ping` says which (`identified_by`).
-- Clients without a `[clients.<name>]` table fall back to `[defaults]`.
+- Clients without a `[clients.<name>]` table use `[defaults]`.
 - Scopes are free-form strings; `personal` and `work` are just the starting set.
-- With these defaults, Cursor can't read what Claude Desktop writes (`personal`). That's the isolation working as designed. For the cross-assistant tests (M1, v1), use a client that reads `personal` (e.g. Gemini CLI, which falls back to `[defaults]`) or add `personal` to Cursor's `read_scopes`.
+- A client configured to read only `work` can't read what others write to `personal`. That's the isolation working as designed; the cross-assistant tests (M1, v1) need clients that share a scope.
 
-`[capture]` (M1.5) lists the clients whose transcripts are captured; it starts empty:
+`[capture]` (M1.5) lists the transcript readers in use; it starts empty:
 
 ```toml
 [capture]
@@ -473,20 +470,9 @@ sources = ["claude-code", "vscode-copilot"]
 days = 30            # only transcripts changed within this many days
 ```
 
-Captured conversations take the source client's `write_scope`.
+Captured conversations are stored under the reader's name (`vscode-copilot`, so "what did I ask Copilot?" finds them), in the write scope of the application the reader belongs to (`visual-studio-code`), the same client its live calls come from. Each reader declares that application's `clientInfo` name, which is also how a captured client's `record_exchange` calls are recognized and skipped instead of stored twice: the server instructions go out before a client says who it is, so every client gets the recording variant.
 
-`openmcp setup <client>` does the per-client work (`--dry-run` shows it first). Each file it edits gets a `.bak` copy, and files it can't parse (e.g. VS Code settings with comments) are left alone with the snippet printed instead.
-
-- **Run from a development checkout** (an editable install, e.g. `uv run openmcp setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmcp` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
-- **VS Code** can also start MCP servers configured for other apps (`chat.mcp.discovery.enabled`). It started Claude Desktop's openmcp entry, so Copilot ran as `claude-desktop` with that client's scopes and tools. `setup vscode-copilot` turns that off (only Claude Desktop's, where the setting is per application).
-- **Client identity check.** The client name comes from `--client` in whatever config launched the server, so it can be wrong. Every audit row records the application on the other end (MCP `clientInfo.name`). Which application a name is for comes from config, `app` under `[clients.<name>]`, never from which app connected first (that made the outcome depend on startup order). Since M3.5 these pins are the user's alone (setup writes none), and without `--client` each app is named by what it reports, so this check matters only for a shared `--client`. A warning (in `ping`, the audit summary, and stderr) goes to an application that:
-  - uses a name pinned to a different application;
-  - is pinned to a different client name (VS Code as `claude-desktop`);
-  - shares an unpinned name with other unexplained applications: all of them are flagged as ambiguous, with the `app` line to add.
-
-  App names aren't authenticated, so this catches misconfiguration, not attacks.
-
-`openmcp setup [client]` connects a client (M3.5). It never edits another app's files: it uses the vendor's own mechanism where there is one, and otherwise prints the snippet that works in every MCP client (`--config <path>` merges it into a JSON file you name). The standing instruction is the pointer, put on the clipboard.
+`openmcp setup [client]` connects a client (M3.5, `--dry-run` shows it first). It never edits another app's files: it uses the vendor's own mechanism where there is one, and otherwise prints the snippet that works in every MCP client (`--config <path>` merges it into a JSON file you name, keeping a `.bak`). The standing instruction is the pointer, put on the clipboard.
 
 | Client | How setup adds the server | Capture |
 |---|---|---|
@@ -495,18 +481,18 @@ Captured conversations take the source client's `write_scope`.
 | `claude-code` | `claude mcp add --scope user` | transcripts |
 | anything else, Claude Desktop included | the generic snippet, printed (or merged with `--config`) | `record_exchange` |
 
-Example Claude Desktop config (README should include one per supported client):
+The generic snippet (the same for every client):
 
 ```json
 {
   "mcpServers": {
-    "openmcp": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/openmcp", "run", "openmcp", "serve", "--client", "claude-desktop"]
-    }
+    "openmcp": {"command": "/path/to/openmcp", "args": ["serve"]}
   }
 }
 ```
+
+- **Run from a development checkout** (an editable install, e.g. `uv run openmcp setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmcp` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
+- **VS Code** can also start MCP servers configured for other apps (`chat.mcp.discovery.enabled`). That once ran Claude Desktop's entry, with `--client claude-desktop`, as Copilot. With clients named by what they report, a server started that way is still named after VS Code, so discovery is harmless.
 
 ---
 
@@ -545,7 +531,7 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 ### M0 — Skeleton
 - `pyproject.toml`, `uv` setup, console script.
 - `openmcp init` creates data dir, DB (migration 001), and default config.
-- `openmcp serve --client X` starts a FastMCP stdio server with a `ping` tool.
+- `openmcp serve` starts a FastMCP stdio server with a `ping` tool (M0 had `--client X`; M3.5 removed it).
 - `models.py` and `repo.py` exist with the base pattern (one model, one repository function) so later milestones follow it.
 - **Done when:** MCP Inspector connects and `ping` works; startup is under 500ms; tests cover init and migrations.
 
@@ -584,21 +570,21 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
 **Goal: OpenMCP works with every MCP client and every assistant provider, not a fixed list.**
 
 **Principle: the core needs no per-client knowledge.** A first version kept a registry of clients (config file locations, entry shapes, instruction locations, `clientInfo` names). Every fact in it belonged to another vendor and could change without notice; Cursor showed it, reporting `cursor-vscode` where its code suggested `Cursor`. So anything client-specific is optional, isolated so that when it breaks nothing else does, and delegated to interfaces the vendor maintains:
-- **Naming:** a client is named by what its application reports when the session starts (MCP `clientInfo`): `Some Editor 2` becomes `some-editor-2`, and `[clients.some-editor-2]` gives it scopes. Config pins (`app = "..."` under `[clients.<name>]`) rename; `--client` still overrides, for configs written before. No table of client names.
+- **Naming:** a client is named by what its application reports when the session starts (MCP `clientInfo`): `Some Editor 2` becomes `some-editor-2`, and `[clients.some-editor-2]` gives it scopes. No table of client names. (`--client` and config `app` pins first stayed as overrides, then were removed: nothing needed them.)
 - **Connecting:** one snippet, identical for every client: `openmcp serve`. Setup never edits another app's files. Where a vendor provides a way to add an MCP server, setup uses it, detected when it runs rather than assumed from a version table: VS Code's `code --add-mcp <json>`, Cursor's install link (`cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64>`, which opens Cursor's own review prompt), and `claude mcp add`. Everywhere else, Claude Desktop included, it prints the snippet; `--config <path>` merges it into a JSON file the user names. (Cursor's CLI also accepts `--add-mcp`, a leftover from VS Code that writes a settings file Cursor's agent doesn't read; checked, and not used.)
 - **Instructions:** the pointer instruction, on the clipboard, pasted wherever the client reads the user's own instructions. A variant for captured clients says not to call `record_exchange`.
-- **Capture:** transcript readers are the only client-specific code that's hard to avoid: there's no standard for transcripts. They're optional (`record_exchange` covers every client) and isolated (a reader that fails is reported and skipped). Each declares the application it reads, as that application reports itself, so a captured client connecting without `--client` still isn't recorded twice: its `record_exchange` calls are skipped.
+- **Capture:** transcript readers are the only client-specific code that's hard to avoid: there's no standard for transcripts. They're optional (`record_exchange` covers every client) and isolated (a reader that fails is reported and skipped). Each declares the application it reads, as that application reports itself, so a captured client isn't recorded twice: its `record_exchange` calls are skipped.
 - **`openmcp clients`** lists the applications that have actually connected (from the audit log), with the scopes each gets.
 - **History from any provider:** importers are a registry (`openmcp.ingest.registry`) with `register()`; OpenMCP's own conversation format is the third importer, a provider-neutral way in through a converter.
 - Web-only assistants (ChatGPT, claude.ai, Gemini on the web) can't start a local server: they're reachable through exports (M3) or remote access (Section 12). Documented, not hidden.
-- **Done when:** a client with no special support and no `--client` (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; the vendor install paths are each checked against a real install; a provider's importer can be added through the registry alone; existing setups keep working.
+- **Done when:** a client with no special support (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; the vendor install paths are each checked against a real install; a provider's importer can be added through the registry alone; existing setups keep working.
 - **Status (2026-10-18):** all built and tested. Real installs: Cursor 3.25.9 (connected from a config setup wrote, reported `cursor-vscode`, followed the pointer: `get_profile`, `record_exchange` reusing the conversation, topic search, lookups not recorded); VS Code 1.99.3's `--add-mcp` (writes its own settings and replaces an earlier entry, checked against a throwaway profile); Cursor's install link (used for real: Cursor's prompt wrote `openmcp serve` with no `--client` into its own `~/.cursor/mcp.json`; its server then reported `cursor-vscode`, was named `cursor` through the config pin, and answered from a `personal` memory); `claude mcp add` (its help output; the old registry-era run used the same command). Open: one-click bundles (e.g. for Claude Desktop); plug-in transcript readers in `[capture] sources`.
 
 ### M4 — Scopes and ownership
 - Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
 - `openmcp export` dumps all memories and conversations to JSON.
 - README: install, client setup (the generic snippet, and the vendor installers setup uses), the safety model, honest limitations.
-- **Done when:** a `cursor` client scoped to `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
+- **Done when:** a client configured to read only `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 
 ### v1 success test
 Start a project in Claude Desktop and work on it over a few exchanges. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**, including picking up the questions you asked and the answers you got.

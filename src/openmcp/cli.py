@@ -71,22 +71,15 @@ def init() -> None:
 
 
 @app.command()
-def serve(
-    client: str | None = typer.Option(
-        None, "--client",
-        help="Client name, e.g. claude-desktop. Optional: by default the server names the client from what it "
-        "reports when it connects.",
-    ),
-) -> None:
-    """Run the MCP server over stdio for one client."""
+def serve() -> None:
+    """Run the MCP server over stdio for whichever MCP client starts it (it names the
+    client from what it reports when it connects)."""
     # stdout carries the MCP protocol: nothing else may be printed to it.
     from openmcp.server import build_server
 
-    if client is not None:
-        client = _client_name(client, "--client")
     base = config.home()
     initialize(base)
-    build_server(client, base).run(transport="stdio")
+    build_server(base).run(transport="stdio")
 
 
 def _client_name(value: str, option: str) -> str:
@@ -186,15 +179,15 @@ def clients_command() -> None:
         table.add_column(column, no_wrap=column != "application")
     for client, app, calls, last in seen:
         scopes = config.resolve_client(cfg, client)
-        source = captured_source(client, app, cfg.capture.sources)
+        source = captured_source(app, cfg.capture.sources)
         table.add_row(
             client, Text(app or "(unknown)"), ", ".join(scopes.read_scopes), scopes.write_scope,
             f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
         )
     console.print(table)
     console.print(
-        "\nA client's name is what its application reports, unless config pins another: app = \"...\" under "
-        "[clients.<name>]. Give a client scopes with read_scopes and write_scope there."
+        "\nA client's name is what its application reports. Give it scopes with read_scopes and write_scope "
+        "under [clients.<name>] in config.toml."
     )
 
 

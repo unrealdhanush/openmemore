@@ -8,13 +8,15 @@ from pathlib import Path
 import pytest
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
+from mcp.types import Implementation
 
 from openmcp import config, db
 from openmcp.capture import vscode_copilot
 from openmcp.cli import initialize
+from conftest import connect, example_clients
 from openmcp.models import MAX_SAVE_ITEMS
 from openmcp.safety.wrap import NOTICE
-from openmcp.server import IMPORT_MY_MEMORY, build_server
+from openmcp.server import IMPORT_MY_MEMORY
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -22,16 +24,19 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def server(home):
     initialize(home)
-    return lambda client="claude-desktop": build_server(client, home)
+    example_clients(home)
+    return lambda app="claude-desktop": connect(home, app)
 
 
-def stdio(home, client, user_home=None):
+def stdio(home, app, user_home=None):
+    """`openmcp serve` in its own process, as MCP clients start it; `app` is the
+    application name the client reports."""
     env = {"OPENMCP_HOME": str(home)}
     if user_home is not None:
         env["HOME"] = env["USERPROFILE"] = str(user_home)  # Path.home(): HOME on POSIX, USERPROFILE on Windows
     return Client(
-        StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve", "--client", client], env=env),
-        read_timeout_seconds=30,
+        StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve"], env=env),
+        client_info=Implementation(name=app, version="test"), read_timeout_seconds=30,
     )
 
 
@@ -94,20 +99,22 @@ async def test_m1_5_done_when_a_transcript_is_found_without_record_exchange(home
 
 
 @pytest.mark.anyio
-async def test_captured_clients_dont_get_record_exchange(server, home):
+async def test_captured_clients_exchanges_arent_stored_twice(server, home):
+    """Every client gets record_exchange (tools are set before a client says who it is);
+    for an app whose transcripts are captured, calls are skipped."""
     config.enable_capture(home / "config.toml", "claude-code")
-    async with Client(server("claude-code")) as client:
-        tools = {t.name for t in (await client.list_tools()).tools}
-        instructions = client.instructions
-    assert "record_exchange" not in tools and "recent_conversations" in tools
-    assert "captured automatically" in instructions
-    async with Client(server("claude-desktop")) as client:
+    async with server("claude-code") as client:
         assert "record_exchange" in {t.name for t in (await client.list_tools()).tools}
+        skipped = (await client.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
+    assert skipped["conversation_id"] is None and "captured" in skipped["note"]
+    async with server("claude-desktop") as client:
+        stored = (await client.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
+    assert stored["conversation_id"] is not None
 
 
 @pytest.mark.anyio
 async def test_record_exchange_accepts_code_over_mcp(server):
-    async with Client(server()) as client:
+    async with server() as client:
         result = await client.call_tool("record_exchange", {
             "question": "Write the retry helper",
             "answer_summary": "Wrote retry().",
@@ -123,9 +130,11 @@ async def test_record_exchange_accepts_code_over_mcp(server):
 
 
 @pytest.mark.anyio
-async def test_default_scopes_keep_personal_chats_from_a_work_only_client(home):
-    """With the default config, Cursor reads only 'work', so it can't see what Claude
-    Desktop recorded in 'personal'. The cross-assistant test needs a client that can."""
+async def test_a_work_only_client_cant_see_personal_chats(home):
+    """A client configured to read only 'work' can't see what another recorded in
+    'personal'. The cross-assistant test needs a client that can."""
+    initialize(home)
+    example_clients(home)
     async with stdio(home, "claude-desktop") as claude:
         await claude.call_tool("record_exchange", {"question": "Flask rate limits?", "answer_summary": "Use Flask-Limiter."})
     async with stdio(home, "cursor") as cursor:
@@ -157,12 +166,12 @@ async def test_preferences_survive_into_a_new_session(home):
 
 @pytest.mark.anyio
 async def test_another_client_sees_memories_in_shared_scopes_only(server):
-    async with Client(server("claude-desktop")) as desktop:
+    async with server("claude-desktop") as desktop:
         await desktop.call_tool("save_memories", {"items": [{"kind": "fact", "content": "Has a cat named Miso."}]})
-    async with Client(server("cursor")) as cursor:  # reads only 'work'
+    async with server("cursor") as cursor:  # reads only 'work'
         result = await cursor.call_tool("search_context", {"query": "cat"})
         assert result.structured_content["results"] == []
-    async with Client(server("gemini-cli")) as gemini:  # unknown client: defaults read 'personal'
+    async with server("gemini-cli") as gemini:  # unknown client: defaults read 'personal'
         result = await gemini.call_tool("search_context", {"query": "cat"})
         assert len(result.structured_content["results"]) == 1
 
@@ -176,7 +185,7 @@ async def test_another_client_sees_memories_in_shared_scopes_only(server):
     ({"items": [{"kind": "fact", "content": f"m{i}"} for i in range(MAX_SAVE_ITEMS + 1)]}, "items"),
 ])
 async def test_invalid_arguments_come_back_as_clear_errors(server, args, expected):
-    async with Client(server()) as client:
+    async with server() as client:
         result = await client.call_tool("save_memories", args)
     assert result.is_error
     assert expected in result.content[0].text
@@ -184,14 +193,14 @@ async def test_invalid_arguments_come_back_as_clear_errors(server, args, expecte
 
 @pytest.mark.anyio
 async def test_search_limit_is_capped(server):
-    async with Client(server()) as client:
+    async with server() as client:
         result = await client.call_tool("search_context", {"query": "x", "limit": 26})
     assert result.is_error and "limit" in result.content[0].text
 
 
 @pytest.mark.anyio
 async def test_anticipated_failures_reach_the_model(server):
-    async with Client(server()) as client:
+    async with server() as client:
         result = await client.call_tool("forget", {"id": 42})
     assert result.is_error and "memory 42 not found" in result.content[0].text
 
@@ -199,7 +208,7 @@ async def test_anticipated_failures_reach_the_model(server):
 @pytest.mark.anyio
 async def test_every_call_is_audited_with_a_short_summary(server, home):
     long_query = "python " * 50
-    async with Client(server()) as client:
+    async with server() as client:
         await client.call_tool("save_memories", {"items": [{"kind": "fact", "content": "Uses python."}]})
         await client.call_tool("search_context", {"query": long_query})
         await client.call_tool("get_profile", {})
@@ -217,7 +226,7 @@ async def test_every_call_is_audited_with_a_short_summary(server, home):
 
 @pytest.mark.anyio
 async def test_import_my_memory_prompt(server):
-    async with Client(server()) as client:
+    async with server() as client:
         prompts = await client.list_prompts()
         assert [p.name for p in prompts.prompts] == ["import_my_memory"]
         result = await client.get_prompt("import_my_memory")
@@ -226,7 +235,7 @@ async def test_import_my_memory_prompt(server):
 
 @pytest.mark.anyio
 async def test_profile_resource_matches_get_profile(server):
-    async with Client(server()) as client:
+    async with server() as client:
         await client.call_tool("save_memories", {"items": [{"kind": "preference", "content": "Prefers dark mode."}]})
         resource = await client.read_resource("openmcp://profile")
         tool = await client.call_tool("get_profile", {})
@@ -237,7 +246,7 @@ async def test_profile_resource_matches_get_profile(server):
 
 @pytest.mark.anyio
 async def test_tool_descriptions_tell_models_when_to_act(server):
-    async with Client(server()) as client:
+    async with server() as client:
         tools = {t.name: t.description for t in (await client.list_tools()).tools}
     assert set(tools) == {
         "ping", "save_memories", "search_context", "get_profile", "update_memory", "forget",
@@ -253,6 +262,6 @@ async def test_tool_descriptions_tell_models_when_to_act(server):
 
 @pytest.mark.anyio
 async def test_server_instructions_ask_models_to_record_and_recall(server):
-    async with Client(server()) as client:
+    async with server() as client:
         instructions = client.instructions
     assert "record_exchange" in instructions and "recent_conversations" in instructions

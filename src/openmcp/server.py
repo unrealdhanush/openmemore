@@ -17,8 +17,8 @@ from typing import Annotated
 from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field
 
-from openmcp import __version__, audit, config, db, embed, repo
-from openmcp.clients import client_for_app
+from openmcp import __version__, audit, config, db, embed
+from openmcp.clients import client_name
 from openmcp.instructions import server_instructions
 from openmcp.models import (
     MAX_ANSWER_CHARS,
@@ -68,104 +68,40 @@ def app_name(ctx: Context | None) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
-class ClientIdentity:
-    """Notices when an application uses a client name that isn't its own.
-
-    Rarely needed since M3.5: without `--client`, every application is named by what it
-    reports. It still catches a shared `--client` (an older config, or VS Code starting
-    servers configured for another app) using only what the user put in config:
-
-    - the name has an `app` pin: any other application is flagged;
-    - the application is pinned to another client name: flagged;
-    - otherwise, if two or more applications not explained by those rules have used the
-      name, each is flagged as ambiguous, without picking one.
-
-    A warning (ping, audit summary, stderr), not a refusal: application names aren't
-    authenticated, so this catches misconfiguration, not attacks.
-    """
-
-    def __init__(self, client: str, cfg: config.Config) -> None:
-        self.client = client
-        self.expected = cfg.clients[client].app if client in cfg.clients else None
-        self.owners = {o.app: name for name, o in cfg.clients.items() if o.app and name != client}
-        self.app: str | None = None
-        self._warnings: dict[str, str | None] = {}
-        self._lock = threading.Lock()
-
-    def _warning(self, conn: sqlite3.Connection, app: str) -> str | None:
-        fix = f"Check {app}'s MCP config (VS Code can start servers configured for Claude Desktop: chat.mcp.discovery.enabled)."
-        if self.expected is not None:
-            if app == self.expected:
-                return None
-            return f"'{app}' is using client name '{self.client}', which is for '{self.expected}'. {fix}"
-        if app in self.owners:
-            return f"'{app}' is the app for client '{self.owners[app]}' but is using '{self.client}', with its scopes. {fix}"
-        seen = {a for a in repo.apps_for(conn, self.client) if a not in self.owners} | {app}
-        if len(seen) > 1:
-            return (
-                f"Client name '{self.client}' is used by several apps ({', '.join(sorted(seen))}). Say which one "
-                f'it\'s for with app = "..." under [clients.{self.client}] in config.toml. {fix}'
-            )
-        return None
-
-    def check(self, conn: sqlite3.Connection, app: str | None) -> str | None:
-        with self._lock:
-            if app is None:
-                app = self.app  # resources get no context; one process serves one application
-            else:
-                self.app = app
-            if app is None:
-                return None
-            if app not in self._warnings:
-                self._warnings[app] = self._warning(conn, app)
-                if self._warnings[app]:
-                    print(f"openmcp: warning: {self._warnings[app]}", file=sys.stderr)
-            return self._warnings[app]
-
-
 class ClientSession:
-    """Which client this server process serves, and with what scopes (SPEC.md M3.5).
+    """Which client this server process serves, and with what scopes (SPEC.md Section 9).
 
-    With `--client`, that's fixed at start. Without it, the first call settles it from
-    the name the application reports (MCP clientInfo): the user's config pins, then the
-    client registry, then a name made from the application's own. That's what lets one
-    snippet, identical for every client, work anywhere. A stdio server process serves a
-    single application, so the answer doesn't change once settled.
+    A client is named by what its application reports when the session starts (MCP
+    clientInfo): 'Some Editor 2' is the client 'some-editor-2', with the scopes under
+    [clients.some-editor-2]. A stdio server process serves a single application, so the
+    name is settled by the first call and doesn't change.
     """
 
-    def __init__(self, cfg: config.Config, explicit: str | None) -> None:
+    def __init__(self, cfg: config.Config) -> None:
         self.cfg = cfg
-        self.explicit = explicit
-        self.pins = {o.app: name for name, o in cfg.clients.items() if o.app}
         self._lock = threading.Lock()
-        self._settled = self._make(explicit) if explicit else None
+        self._settled: Caller | None = None
 
-    @property
-    def identified_by(self) -> str:
-        return "--client" if self.explicit else "clientInfo"
+    def _make(self, app: str | None) -> Caller:
+        name = client_name(app)
+        return Caller(client=name, scopes=config.resolve_client(self.cfg, name))
 
-    def _make(self, name: str) -> tuple[str, Caller, ClientIdentity]:
-        return name, Caller(client=name, scopes=config.resolve_client(self.cfg, name)), ClientIdentity(name, self.cfg)
-
-    def get(self, app: str | None) -> tuple[str, Caller, ClientIdentity]:
+    def get(self, app: str | None) -> Caller:
         with self._lock:
             if self._settled is None:
                 if app is None:  # no application name yet (a resource read first): don't settle on a guess
-                    return self._make(client_for_app(None, self.pins))
-                self._settled = self._make(client_for_app(app, self.pins))
+                    return self._make(None)
+                self._settled = self._make(app)
             return self._settled
 
 
-def build_server(client: str | None, base: Path) -> MCPServer:
-    """Build the server for one client: the one named by `client` (`--client`), or else
-    the one that connects. `base` is the data directory (already initialized)."""
+def build_server(base: Path) -> MCPServer:
+    """Build the server for whichever client connects. `base` is the data directory
+    (already initialized)."""
     path = config.db_path(base)
     db.open_db(path).close()
     cfg = config.load_config(config.config_path(base))
-    session = ClientSession(cfg, client)
-    # Clients whose transcripts are captured from disk don't need to record exchanges
-    # themselves. Only known for a named client: instructions go out before any app does.
-    captured = client is not None and client in cfg.capture.sources
+    session = ClientSession(cfg)
     last_app: list[str | None] = [None]
 
     @contextmanager
@@ -176,12 +112,9 @@ def build_server(client: str | None, base: Path) -> MCPServer:
         # that created them, so each call opens its own short-lived connection.
         app = app_name(ctx) or last_app[0]  # resources get no context; one process serves one application
         last_app[0] = app
-        name, caller, identity = session.get(app)
-        with closing(db.connect(path)) as conn, audit.audited(conn, name, tool, app) as call:
-            warning = identity.check(conn, app)
+        caller = session.get(app)
+        with closing(db.connect(path)) as conn, audit.audited(conn, caller.client, tool, app) as call:
             yield conn, call, caller
-            if warning:
-                call.summary = f"{call.summary}; unexpected app" if call.summary else "unexpected app"
 
     def refresh_transcripts(conn: sqlite3.Connection) -> str | None:
         """Capture transcripts changed since the last read, so another assistant's latest
@@ -203,25 +136,24 @@ def build_server(client: str | None, base: Path) -> MCPServer:
         embed.embed_pending(conn, embed.get_embedder(), budget_ms=embed.WRITE_BUDGET_MS)
         return f"captured {report.messages}"
 
-    server = MCPServer(name="openmcp", version=__version__, instructions=server_instructions(captured))
+    # Every client gets the recording variant: instructions go out before the client says
+    # who it is. A captured client's record_exchange calls are skipped instead (below).
+    server = MCPServer(name="openmcp", version=__version__, instructions=server_instructions(captured=False))
 
     @server.tool()
     def ping(ctx: Context) -> PingResult:
         """Check that the OpenMCP server is running and reachable. Returns the server
         version, the name this client connected as, its scopes, and the schema version."""
         with tool_call("ping", ctx) as (conn, _, caller):
-            identity = session.get(app_name(ctx))[2]
             return PingResult(
                 ok=True,
                 version=__version__,
                 client=caller.client,
-                identified_by=session.identified_by,
                 read_scopes=list(caller.scopes.read_scopes),
                 write_scope=caller.scopes.write_scope,
                 schema_version=db.schema_version(conn),
                 semantic_search=embed.status(),
                 connected_app=app_name(ctx),
-                warning=identity.check(conn, app_name(ctx)),
             )
 
     @server.tool()
@@ -398,12 +330,12 @@ def build_server(client: str | None, base: Path) -> MCPServer:
         Secrets and credentials are replaced with [REDACTED] before anything is stored.
         """
         with tool_call("record_exchange", ctx) as (conn, call, caller):
-            if not captured and cfg.capture.sources:
-                # A client named from clientInfo can still be one whose transcripts are
-                # captured (its tools were set before it said who it is): don't store twice.
+            if cfg.capture.sources:
+                # This client's transcripts may be captured already (its tools were set
+                # before it said who it is): don't store the exchange twice.
                 from openmcp.capture import captured_source
 
-                if source := captured_source(caller.client, app_name(ctx), cfg.capture.sources):
+                if source := captured_source(app_name(ctx), cfg.capture.sources):
                     call.summary = f"skipped: captured from {source} transcripts"
                     return RecordExchangeResult(
                         conversation_id=None,
@@ -421,8 +353,7 @@ def build_server(client: str | None, base: Path) -> MCPServer:
             call.result_count = len(result.message_ids)
             return result
 
-    if not captured:
-        server.tool()(record_exchange)
+    server.tool()(record_exchange)
 
     @server.tool()
     def recent_conversations(
