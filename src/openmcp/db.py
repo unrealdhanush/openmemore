@@ -7,6 +7,8 @@ open short explicit transactions with `transaction()`.
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import re
 import sqlite3
 import time
@@ -16,8 +18,20 @@ from importlib import resources
 from pathlib import Path
 
 BUSY_TIMEOUT_MS = 5000
+MMAP_BYTES = 1 << 30
 
 _MIGRATION_NAME = re.compile(r"^(\d+)_.*\.sql$")
+
+
+@functools.cache
+def _vec_extension() -> str:
+    """sqlite-vec's loadable extension (vec0.dylib/.so/.dll; SQLite adds the suffix),
+    found without importing the sqlite_vec package, whose __init__ pulls in numpy:
+    ~35ms of server startup (SPEC.md Section 4.3)."""
+    spec = importlib.util.find_spec("sqlite_vec")
+    if spec is None or spec.origin is None:
+        raise RuntimeError("sqlite-vec is not installed")
+    return str(Path(spec.origin).parent / "vec0")
 
 
 def _use_wal(conn: sqlite3.Connection) -> None:
@@ -38,8 +52,16 @@ def _use_wal(conn: sqlite3.Connection) -> None:
 def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    # sqlite-vec's vec0 tables (migration 006) and their triggers need it on every connection.
+    conn.enable_load_extension(True)
+    conn.load_extension(_vec_extension())
+    conn.enable_load_extension(False)
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
     _use_wal(conn)
+    # Each tool call opens its own connection, which starts with an empty page cache;
+    # memory-mapping lets connections share the OS's copy of the file instead of
+    # re-reading it (vector search over 100k chunks: ~66ms -> ~59ms, fewer outliers).
+    conn.execute(f"PRAGMA mmap_size = {MMAP_BYTES}")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

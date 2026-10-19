@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from openmcp import audit, config, db, repo
+from openmcp import audit, config, db, embed, repo
 from openmcp.models import (
     CAPTURE_SOURCES,
     KINDS,
@@ -124,8 +124,11 @@ def setup(
                     console.print(f"   [green]done[/green] [dim]{detail or ''}[/dim]")
         if step.manual:
             console.print(textwrap.indent(step.manual, "   "), markup=False, highlight=False)
-    if client in CAPTURE_SOURCES and not dry_run:
-        _run_capture(CaptureRequest(sources=[client]))
+    if not dry_run:
+        if client in CAPTURE_SOURCES:
+            _run_capture(CaptureRequest(sources=[client]))
+        else:
+            _run_embed()
     if incomplete:
         raise typer.Exit(1)
 
@@ -371,6 +374,7 @@ def _run_capture(request: CaptureRequest) -> None:
     )
     for error in report.errors:
         console.print(f"[yellow]Skipped[/yellow] {error}", markup=True, highlight=False)
+    _run_embed()
 
 
 @app.command("capture")
@@ -384,6 +388,42 @@ def capture_command(
 
     Servers already do this before each search; run it to catch up on older history."""
     _run_capture(_validated(CaptureRequest, {"sources": "--source", "days": "--days"}, sources=source, days=days))
+
+
+# --- embeddings ----------------------------------------------------------------------
+
+
+def _run_embed() -> bool:
+    """Download the model if needed and embed every pending memory and chunk. Returns
+    False (after saying so) if the model couldn't be loaded."""
+    from rich.progress import Progress
+
+    with _db() as conn:
+        pending = repo.count_pending_embeddings(conn)
+        with console.status(f"Loading the embedding model ({embed.MODEL}; downloads ~70MB the first time)..."):
+            embedder = embed.get_embedder(allow_download=True)
+        if embedder is None:
+            console.print(
+                "[yellow]Semantic search unavailable:[/yellow] the embedding model couldn't be loaded "
+                f"into {embed.model_dir()}. Keyword search still works; run `openmcp embed` to retry."
+            )
+            return False
+        with audit.audited(conn, CLI_CLIENT, "embed") as call, Progress(console=console, transient=True) as bar:
+            task = bar.add_task("Embedding", total=pending)
+            report = embed.embed_pending(conn, embedder, progress=lambda n: bar.advance(task, n))
+            call.result_count = report.memories + report.chunks
+    console.print(
+        f"Semantic search ready: embedded {report.memories} memories and {report.chunks} conversation chunks."
+    )
+    return True
+
+
+@app.command("embed")
+def embed_command() -> None:
+    """Download the embedding model (once) and embed memories and conversations that don't have
+    embeddings yet, so search can match by meaning. Servers never download the model themselves."""
+    if not _run_embed():
+        raise typer.Exit(1)
 
 
 # --- audit ---------------------------------------------------------------------------
