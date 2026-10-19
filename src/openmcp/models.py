@@ -377,6 +377,11 @@ class Profile(ReadResult):
     facts: list[ProfileItem] = Field(default_factory=list)
     active_projects: list[ProfileItem] = Field(default_factory=list)
     recent_decisions: list[ProfileItem] = Field(default_factory=list)
+    project_note: str | None = None
+    """When `project` was asked for: which stored project it was taken to mean, or that
+    none matched (then the profile is unfiltered)."""
+    known_projects: list[str] | None = None
+    """The projects that have memories, when the one asked for matched none of them."""
 
 
 class ConversationMessage(BaseModel):
