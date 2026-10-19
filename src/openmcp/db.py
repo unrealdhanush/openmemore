@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib import resources
@@ -19,11 +20,26 @@ BUSY_TIMEOUT_MS = 5000
 _MIGRATION_NAME = re.compile(r"^(\d+)_.*\.sql$")
 
 
+def _use_wal(conn: sqlite3.Connection) -> None:
+    """Switch to WAL mode (persistent, so usually already done). The switch fails with
+    'database is locked' without waiting on busy_timeout when another connection holds
+    the file, as when several servers open a new database at once, so retry it."""
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() > deadline:
+                raise
+            time.sleep(0.01)
+
+
 def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA journal_mode = WAL")
+    _use_wal(conn)
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -51,7 +67,7 @@ def migrations() -> list[tuple[int, str]]:
     for entry in resources.files("openmcp.migrations").iterdir():
         match = _MIGRATION_NAME.match(entry.name)
         if match:
-            found.append((int(match.group(1)), entry.read_text()))
+            found.append((int(match.group(1)), entry.read_text(encoding="utf-8")))
     found.sort()
     versions = [v for v, _ in found]
     if len(set(versions)) != len(versions):

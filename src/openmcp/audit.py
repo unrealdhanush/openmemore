@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -19,6 +20,31 @@ class AuditCall:
 
     summary: str | None = None
     result_count: int | None = None
+
+
+@dataclass(frozen=True)
+class ToolStats:
+    tool: str
+    calls: int
+    p50_ms: float
+    p95_ms: float
+    max_ms: float
+
+
+def percentile(values: list[float], p: float) -> float:
+    """Nearest-rank percentile (p in 0..100) of a non-empty list."""
+    ordered = sorted(values)
+    rank = max(1, math.ceil(p / 100 * len(ordered)))
+    return ordered[rank - 1]
+
+
+def stats(durations: dict[str, list[float]]) -> list[ToolStats]:
+    """p50/p95 per tool, for checking the SPEC.md Section 4.3 performance budget."""
+    return [
+        ToolStats(tool, len(ms), percentile(ms, 50), percentile(ms, 95), max(ms))
+        for tool, ms in sorted(durations.items())
+        if ms
+    ]
 
 
 @contextmanager
