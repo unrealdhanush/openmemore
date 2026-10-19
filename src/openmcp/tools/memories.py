@@ -36,14 +36,14 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def _secret_in(*fields: str | None) -> str | None:
+def secret_in(*fields: str | None) -> str | None:
     for text in fields:
         if text and (reason := find_secret(text)):
             return reason
     return None
 
 
-def _embed(texts: list[str]) -> list[bytes | None]:
+def embed_texts(texts: list[str]) -> list[bytes | None]:
     """Vectors for new memories, computed before the write transaction opens so it stays
     short. Without a model, Nones: the rows stay pending for `openmcp embed`."""
     embedder = embed.get_embedder()
@@ -76,11 +76,11 @@ def save_memories(
     result = SaveMemoriesResult()
     accepted: list[tuple[int, MemoryInput]] = []
     for index, item in enumerate(items):
-        if reason := _secret_in(item.content, item.subject, item.project):
+        if reason := secret_in(item.content, item.subject, item.project):
             result.rejected.append(Rejection(index=index, reason=reason))
         else:
             accepted.append((index, item))
-    vectors = _embed([embed.memory_text(item.subject, item.content) for _, item in accepted])
+    vectors = embed_texts([embed.memory_text(item.subject, item.content) for _, item in accepted])
 
     now = datetime.now(UTC)
     with db.transaction(conn):
@@ -118,12 +118,12 @@ def save_memories(
 def update_memory(
     conn: sqlite3.Connection, caller: Caller, memory_id: int, content: str, subject: str | None = None
 ) -> UpdateMemoryResult:
-    if reason := _secret_in(content, subject):
+    if reason := secret_in(content, subject):
         raise ToolError(f"not saved: {reason}")
     # The subject may come from the old version, which needs a read first; embedding
     # needs the final text. Read, embed outside the transaction, then write.
     current = require_writable(caller, repo.get_memory(conn, memory_id), memory_id)
-    [vector] = _embed([embed.memory_text(subject if subject is not None else current.subject, content)])
+    [vector] = embed_texts([embed.memory_text(subject if subject is not None else current.subject, content)])
     now = datetime.now(UTC)
     with db.transaction(conn):
         old = require_writable(caller, repo.get_memory(conn, memory_id), memory_id)

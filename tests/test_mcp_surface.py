@@ -228,7 +228,7 @@ async def test_every_call_is_audited_with_a_short_summary(server, home):
 async def test_import_my_memory_prompt(server):
     async with server() as client:
         prompts = await client.list_prompts()
-        assert [p.name for p in prompts.prompts] == ["import_my_memory"]
+        assert sorted(p.name for p in prompts.prompts) == ["consolidate", "import_my_memory"]
         result = await client.get_prompt("import_my_memory")
     assert result.messages[0].content.text == IMPORT_MY_MEMORY
 
@@ -250,7 +250,7 @@ async def test_tool_descriptions_tell_models_when_to_act(server):
         tools = {t.name: t.description for t in (await client.list_tools()).tools}
     assert set(tools) == {
         "ping", "save_memories", "search_context", "get_profile", "update_memory", "forget",
-        "record_exchange", "recent_conversations",
+        "record_exchange", "recent_conversations", "consolidation_batch", "propose_memories",
     }
     assert "Never save secrets" in tools["save_memories"]
     assert "start of a conversation" in tools["get_profile"]
@@ -258,6 +258,8 @@ async def test_tool_descriptions_tell_models_when_to_act(server):
     assert "after every answer" in tools["record_exchange"]
     assert "later one is current" in tools["recent_conversations"]
     assert "what did I ask Claude earlier?" in tools["recent_conversations"]
+    assert "only when the user asks you to consolidate" in tools["consolidation_batch"]
+    assert "openmcp review" in tools["propose_memories"]
 
 
 @pytest.mark.anyio
