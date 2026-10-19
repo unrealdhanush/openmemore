@@ -20,8 +20,16 @@ jobs:
       # Windows), so CI only catches gross startup regressions; the 500ms budget in
       # SPEC.md Section 4.3 is checked on real machines.
       OPENMCP_STARTUP_BUDGET_MS: "3000"
+      # The real embedding model (~70MB) for tests marked real_model: cached between runs,
+      # and a failed download fails the build instead of skipping those tests.
+      OPENMCP_TEST_MODEL_DIR: ${{ github.workspace }}/.model-cache
+      OPENMCP_REQUIRE_MODEL: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: .model-cache
+          key: embedding-model-bge-small-en-v1.5
       - run: uv sync --frozen
       - run: uv run pytest -q

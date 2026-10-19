@@ -13,3 +13,4 @@ build/
 !tests/fixtures/**
 # Editor local history (e.g. VS Code Local History extension)
 .history/
+.model-cache/

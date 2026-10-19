@@ -27,6 +27,7 @@ from openmcp.models import (
     NewConversation,
     NewMemory,
     NewMessage,
+    VectorTable,
 )
 
 
@@ -35,7 +36,7 @@ def to_iso(dt: datetime) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def _in(column: str, values: Sequence[str]) -> tuple[str, list[str]]:
+def _in(column: str, values: Sequence[object]) -> tuple[str, list[object]]:
     if not values:
         return "0", []
     return f"{column} IN ({', '.join('?' * len(values))})", list(values)
@@ -185,6 +186,42 @@ def list_memories(
     order = "(project IS NULL), " if project is not None and include_general else ""
     sql += f" ORDER BY {order}updated_at DESC, id DESC LIMIT ?"
     return [_memory(r) for r in conn.execute(sql, [*params, limit])]
+
+
+def knn_memories(
+    conn: sqlite3.Connection,
+    query: bytes,
+    *,
+    k: int,
+    scopes: Sequence[str] | None,
+    kinds: Sequence[Kind] = (),
+    project: str | None = None,
+) -> list[tuple[Memory, float]]:
+    """The `k` memories nearest to `query` (an embedding), then filtered like
+    search_memories. Returns (memory, cosine distance) pairs, nearest first."""
+    where = ["m.superseded_by IS NULL"]
+    params: list[object] = [query, k]
+    if scopes is not None:
+        clause, p = _in("m.scope", scopes)
+        where.append(clause)
+        params += p
+    if kinds:
+        clause, p = _in("m.kind", kinds)
+        where.append(clause)
+        params += p
+    if project is not None:
+        where.append("m.project = ?")
+        params.append(project)
+    rows = conn.execute(
+        f"""
+        WITH knn AS (SELECT rowid, distance FROM memories_vec WHERE embedding MATCH ? AND k = ?)
+        SELECT m.*, knn.distance AS rank FROM knn JOIN memories m ON m.id = knn.rowid
+        WHERE {' AND '.join(where)}
+        ORDER BY knn.distance
+        """,
+        params,
+    ).fetchall()
+    return [(_memory(r), r["rank"]) for r in rows]
 
 
 def search_memories(
@@ -399,31 +436,133 @@ def message_counts(conn: sqlite3.Connection, conversation_ids: Sequence[int]) ->
     return {cid: n for cid, n in rows}
 
 
+def stems(conn: sqlite3.Connection, words: Sequence[str]) -> list[str | None]:
+    """Each word as the chunk index stores it (same tokenizer, so 'deploys' -> 'deploi'),
+    or None if it has no indexable token. Uses a scratch FTS table in the connection's
+    temp schema."""
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS temp.query_words USING fts5(word, tokenize = 'porter unicode61 remove_diacritics 2')"
+    )
+    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.query_stems USING fts5vocab(temp, query_words, 'instance')")
+    conn.execute("DELETE FROM temp.query_words")
+    conn.executemany("INSERT INTO temp.query_words (rowid, word) VALUES (?, ?)", list(enumerate(words, start=1)))
+    found = {doc: term for term, doc in conn.execute("SELECT term, doc FROM temp.query_stems")}
+    return [found.get(i) for i in range(1, len(words) + 1)]
+
+
+def chunk_term_counts(conn: sqlite3.Connection, terms: Sequence[str]) -> dict[str, int]:
+    """How many chunks each indexed term appears in (terms not in the index are left out)."""
+    if not terms:
+        return {}
+    clause, params = _in("term", list(dict.fromkeys(terms)))
+    return dict(conn.execute(f"SELECT term, doc FROM chunks_fts_terms WHERE {clause}", params).fetchall())
+
+
+FTS_CANDIDATES_PER_RESULT = 4
+"""Keyword matches fetched per requested chunk, before the scope filter."""
+
+
 def search_chunks(
     conn: sqlite3.Connection, match: str, *, scopes: Sequence[str] | None, limit: int = 10
 ) -> list[ChunkMatch]:
-    """FTS5 search over conversation chunks, best first. `match` is an FTS5 query string."""
-    where = ["chunks_fts MATCH ?"]
-    params: list[object] = [match]
+    """FTS5 search over conversation chunks, best first. `match` is an FTS5 query string.
+
+    The best-ranked matches are taken from the index first and joined afterwards:
+    joining every match before ranking took ~200ms on 100k chunks when a query word
+    was common. Out-of-scope matches can crowd the candidates out, so this may return
+    fewer than `limit`.
+    """
+    where = ["1"]
+    params: list[object] = [match, limit * FTS_CANDIDATES_PER_RESULT]
     if scopes is not None:
         clause, p = _in("conv.scope", scopes)
         where.append(clause)
         params += p
     rows = conn.execute(
         f"""
+        WITH best AS (
+          SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?
+        )
         SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
-               conv.title, conv.provider, bm25(chunks_fts) AS rank
-        FROM chunks_fts
-        JOIN chunks c ON c.id = chunks_fts.rowid
+               conv.title, conv.provider, best.rank
+        FROM best
+        JOIN chunks c ON c.id = best.rowid
         JOIN messages msg ON msg.id = c.message_id
         JOIN conversations conv ON conv.id = msg.conversation_id
         WHERE {' AND '.join(where)}
-        ORDER BY rank, msg.created_at DESC
+        ORDER BY best.rank, msg.created_at DESC
         LIMIT ?
         """,
         [*params, limit],
     ).fetchall()
     return [ChunkMatch.model_validate(dict(r)) for r in rows]
+
+
+def knn_chunks(conn: sqlite3.Connection, query: bytes, *, k: int, scopes: Sequence[str] | None) -> list[ChunkMatch]:
+    """The `k` chunks nearest to `query` (an embedding), restricted to `scopes`, nearest
+    first; `rank` is the cosine distance."""
+    where = ["1"]
+    params: list[object] = [query, k]
+    if scopes is not None:
+        clause, p = _in("conv.scope", scopes)
+        where.append(clause)
+        params += p
+    rows = conn.execute(
+        f"""
+        WITH knn AS (SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?)
+        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
+               conv.title, conv.provider, knn.distance AS rank
+        FROM knn
+        JOIN chunks c ON c.id = knn.rowid
+        JOIN messages msg ON msg.id = c.message_id
+        JOIN conversations conv ON conv.id = msg.conversation_id
+        WHERE {' AND '.join(where)}
+        ORDER BY knn.distance
+        """,
+        params,
+    ).fetchall()
+    return [ChunkMatch.model_validate(dict(r)) for r in rows]
+
+
+# --- embeddings ----------------------------------------------------------------------
+
+
+def pending_embeddings(
+    conn: sqlite3.Connection, table: VectorTable, limit: int
+) -> list[tuple[int, str | None, str]]:
+    """Rows without a vector yet, newest first, as (id, subject, text); subject is None for chunks."""
+    if table == "memories":
+        sql = (
+            "SELECT id, subject, content FROM memories WHERE embedded = 0 AND superseded_by IS NULL "
+            "ORDER BY id DESC LIMIT ?"
+        )
+    else:
+        sql = "SELECT id, NULL, text FROM chunks WHERE embedded = 0 ORDER BY id DESC LIMIT ?"
+    return [(r[0], r[1], r[2]) for r in conn.execute(sql, (limit,))]
+
+
+def count_pending_embeddings(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0 AND superseded_by IS NULL)"
+        " + (SELECT COUNT(*) FROM chunks WHERE embedded = 0)"
+    ).fetchone()[0]
+
+
+def store_vectors(conn: sqlite3.Connection, table: VectorTable, vectors: Sequence[tuple[int, bytes]]) -> int:
+    """Store embeddings for rows that still exist (and, for memories, are still active),
+    replacing any earlier vector: another server may have embedded the same row
+    meanwhile. Marks them embedded. Returns how many were stored."""
+    if not vectors:
+        return 0
+    ids = [id_ for id_, _ in vectors]
+    clause, params = _in("id", ids)
+    live_filter = " AND superseded_by IS NULL" if table == "memories" else ""
+    live = {r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE {clause}{live_filter}", params)}
+    stored = [(id_, v) for id_, v in vectors if id_ in live]
+    conn.executemany(f"DELETE FROM {table}_vec WHERE rowid = ?", [(id_,) for id_, _ in stored])
+    conn.executemany(f"INSERT INTO {table}_vec (rowid, embedding) VALUES (?, ?)", stored)
+    conn.executemany(f"UPDATE {table} SET embedded = 1 WHERE id = ?", [(id_,) for id_, _ in stored])
+    return len(stored)
 
 
 # --- capture_files -------------------------------------------------------------------
