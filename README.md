@@ -81,6 +81,14 @@ write_scope = "work"
 
 `openmcp setup vscode-copilot` and `openmcp setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmcp capture`; it reads chats changed in the last 30 days (`[capture] days`).
 
+To capture only some projects, list folders under `[capture]`. This works for apps whose transcripts record the folder a chat was in, which Claude Code and VS Code both do. Subfolders count, and exclusions win:
+
+```toml
+[capture]
+include_folders = ["~/projects"]          # only chats from these folders
+exclude_folders = ["~/projects/client"]   # never chats from these
+```
+
 ## Capture in the background
 
 ```sh

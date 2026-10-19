@@ -10,7 +10,9 @@ record_exchange (openmcp.ingest.store_conversation, shared with imports).
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -45,6 +47,29 @@ SOURCES: dict[CaptureSource, Source] = {
 }
 
 
+def _normal(folder: str) -> str:
+    path = os.path.normpath(os.path.expanduser(folder))
+    # macOS and Windows file systems ignore case by default.
+    return path.casefold() if sys.platform in ("darwin", "win32") else path
+
+
+def _within(folder: str, roots: Iterable[str]) -> bool:
+    f = _normal(folder)
+    return any(f == r or f.startswith(r.rstrip(os.sep) + os.sep) for r in map(_normal, roots))
+
+
+def folder_captured(folder: str | None, cfg: Config) -> bool:
+    """Whether a conversation from this project folder is captured: not inside an
+    excluded folder, and inside an included one if any are listed. A conversation with
+    no known folder is captured unless include_folders is set."""
+    include, exclude = cfg.capture.include_folders, cfg.capture.exclude_folders
+    if folder is None:
+        return not include
+    if _within(folder, exclude):
+        return False
+    return not include or _within(folder, include)
+
+
 def captured_source(app: str | None, enabled: Iterable[str]) -> str | None:
     """The enabled transcript reader for this application, if any."""
     for name in enabled:
@@ -62,6 +87,8 @@ class CaptureReport:
     """Messages added or changed."""
     deferred: int = 0
     """Changed files left for next time because the time budget ran out."""
+    filtered: int = 0
+    """Changed files not read: their folder isn't captured ([capture] include/exclude_folders)."""
     errors: list[str] = field(default_factory=list)
 
 
@@ -94,28 +121,48 @@ def capture(
 
     for mtime_ns, name, path, size in candidates:
         state = repo.get_capture_file(conn, str(path))
-        if state is not None and (state.ignored or (state.mtime_ns, state.size) == (mtime_ns, size)):
+        if state is not None and state.ignored:
+            continue
+        changed = state is None or (state.mtime_ns, state.size) != (mtime_ns, size)
+        if state is not None and not folder_captured(state.folder, cfg):
+            # Its folder isn't captured: noted, not read (a file with no known folder is
+            # read again only when it changes, in case it now says where it belongs).
+            if changed and state.folder is not None:
+                repo.save_capture_file(conn, state.model_copy(update={
+                    "mtime_ns": mtime_ns, "size": size, "filtered": True, "captured_at": datetime.now(UTC)}))
+                report.filtered += 1
+                continue
+            if not changed or state.folder is not None:
+                continue
+        elif not changed and not state.filtered:
             continue
         if budget_ms is not None and (time.perf_counter() - start) * 1000 > budget_ms:
             report.deferred += 1
             continue
-        # A file that shrank was rewritten, not appended to: read it from the top.
-        offset = state.resume_offset if state is not None and size >= state.size else 0
+        # A file that shrank was rewritten, not appended to; one skipped before for its
+        # folder was never stored: read either from the top.
+        whole = state is None or state.filtered or size < state.size
+        offset = 0 if whole else state.resume_offset
         conversation_id = state.conversation_id if state is not None else None
         try:
             parsed, resume = SOURCES[name].parse(path, offset)
         except Exception as e:  # noqa: BLE001 - one unreadable transcript mustn't stop the others
             report.errors.append(f"{path}: {type(e).__name__}: {e}")
             parsed, resume = None, offset
+        folder = parsed.metadata.get("folder") if parsed is not None else (state.folder if state else None)
+        folder = folder if isinstance(folder, str) else None
+        allowed = folder_captured(folder, cfg)
         with db.transaction(conn):
-            if parsed is not None:
+            if parsed is not None and allowed:
                 # Stored under the reader's descriptive name ('vscode-copilot'), in the scope of
                 # the application it reads, the same client its live calls come from.
                 scope = resolve_client(cfg, client_name(SOURCES[name].app)).write_scope
-                conversation_id, changed = store_conversation(conn, parsed, scope)
-                if changed:
+                conversation_id, stored = store_conversation(conn, parsed, scope)
+                if stored:
                     report.conversations += 1
-                    report.messages += changed
+                    report.messages += stored
+            elif parsed is not None:
+                report.filtered += 1
             repo.save_capture_file(
                 conn,
                 CaptureFile(
@@ -125,6 +172,8 @@ def capture(
                     size=size,
                     resume_offset=resume,
                     conversation_id=conversation_id,
+                    folder=folder,
+                    filtered=not allowed,
                     captured_at=datetime.now(UTC),
                 ),
             )

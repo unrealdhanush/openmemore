@@ -175,6 +175,10 @@ class CaptureFile(BaseModel):
     conversation_id: int | None = None
     ignored: bool = False
     """The user deleted the conversation, so changes to the file are no longer captured."""
+    folder: str | None = None
+    """The project folder the conversation belongs to, when the transcript says."""
+    filtered: bool = False
+    """Not captured because of [capture] include_folders / exclude_folders."""
     captured_at: AwareDatetime
 
 

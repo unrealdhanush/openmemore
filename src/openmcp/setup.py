@@ -49,6 +49,8 @@ class Step:
     """Does the step; may return a detail to show."""
     manual: str | None = None
     """What the user does by hand (shown for every step that has it)."""
+    note: str | None = None
+    """A quiet aside, shown dimmed."""
 
 
 @dataclass(frozen=True)
@@ -273,6 +275,7 @@ def _enable_capture(ctx: Context, source: CaptureSource) -> Step:
         f"Turn on transcript capture for {source} in config.toml, so its conversations are stored "
         "without the model calling record_exchange",
         apply=apply,
+        note="Only some projects? List folders under include_folders or exclude_folders in [capture].",
     )
 
 

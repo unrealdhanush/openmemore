@@ -160,6 +160,8 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
             for key, field in (("cwd", "cwd"), ("gitBranch", "git_branch")):
                 if isinstance(line.get(key), str) and line[key]:
                     metadata[field] = line[key]
+            if "cwd" in metadata:
+                metadata["folder"] = metadata["cwd"]
 
             if kind == "user":
                 text = _prompt_text(line)

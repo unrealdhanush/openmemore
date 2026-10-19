@@ -17,6 +17,7 @@ from typing import TypeVar
 import typer
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
@@ -154,6 +155,8 @@ def setup(
                     console.print(f"   [green]done[/green] [dim]{detail or ''}[/dim]")
         if step.manual:
             console.print(textwrap.indent(step.manual, "   "), markup=False, highlight=False)
+        if step.note:
+            console.print(f"   [dim]{escape(step.note)}[/dim]", highlight=False)
     if not dry_run:
         if client in CAPTURE_SOURCES:
             _run_capture(CaptureRequest(sources=[client]))
@@ -458,6 +461,9 @@ def _run_capture(request: CaptureRequest) -> None:
         f"Captured from {', '.join(sources)} (last {days} days): read {report.files_read} transcript files, "
         f"{report.messages} messages added or updated in {report.conversations} conversations."
     )
+    if report.filtered:
+        console.print(f"[dim]Not captured: {report.filtered} from folders outside [capture] include_folders / "
+                      "exclude_folders.[/dim]")
     for error in report.errors:
         console.print(f"[yellow]Skipped[/yellow] {error}", markup=True, highlight=False)
     _run_embed()

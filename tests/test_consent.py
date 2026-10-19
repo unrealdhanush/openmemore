@@ -133,6 +133,14 @@ def test_dry_run_doesn_t_ask(home, installs, consent_answers):
     assert code == 0 and installs == [] and consent_answers == ["allowed"] and "after asking you" in out
 
 
+def free_port():
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 def test_setup_offers_it_only_when_there_is_something_to_capture(home, installs, consent_answers):
     initialize(home)
     consent_answers.append("allowed")
@@ -141,6 +149,7 @@ def test_setup_offers_it_only_when_there_is_something_to_capture(home, installs,
     path = home / "config.toml"
     cfg = config.load_config(path)
     cfg.capture.sources = ("vscode-copilot",)
+    cfg.daemon.port = free_port()  # not the default: a real daemon may be running on this machine
     config.save_config(path, cfg)
     _offer_daemon()
     assert len(installs) == 1 and consent_answers == []
