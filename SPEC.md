@@ -625,10 +625,12 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 
 - [ ] Get employer approval for publishing open source work in this area. Keep the repo private until then.
 - [ ] Pick a final name and check package-registry and GitHub availability.
-- [ ] Confirm no real personal data exists anywhere in the git history. **Scanned 2026-10-19** (all 38 commits, 248 file versions, commit messages, PR texts): file contents hold only synthetic data, now that the test data in commit 315a64b is replaced. Still to do before publishing:
-  - commit 315a64b's message names a real project from a live test: rewrite or squash the history;
-  - most commits carry a personal email address as author: rewrite them to a GitHub noreply address;
-  - rescan after the rewrite.
+- [ ] Confirm no real personal data exists anywhere in the git history.
+  - **Done (2026-10-19), for `main`:**
+    - **Scan:** all commits, file versions, commit messages and PR texts. One real project name from a live test was found in a test, a docstring, a commit message and a PR description.
+    - **Rewrite:** `git filter-repo` replaced that name with synthetic text, and moved every commit's author email to the GitHub noreply address. The rewritten `main` was force-pushed; the final tree was unchanged and the tests passed.
+    - **Cleanup:** the merged feature branches were deleted, the PR description was edited, and a rescan found nothing.
+  - **Still on GitHub:** each PR's original commits under `refs/pull/N/head`. Git can't delete these, so PR pages still show the old commits and authors. Before going public, either publish as a new repository with only the clean `main`, or ask GitHub Support to purge them. A new repository is simpler, and fits the rename. Rescan whatever gets published.
 - [ ] Choose a license (MIT or Apache-2.0 are the usual picks).
 
 ## 14. Open questions
