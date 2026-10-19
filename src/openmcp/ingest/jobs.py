@@ -151,6 +151,7 @@ def _import_memories(conn: sqlite3.Connection, export: Export, scope: str, keep_
                 kind=m.kind, content=m.content, subject=m.subject, project=m.project, scope=target,
                 source_client=m.source_client, confidence=m.confidence, content_hash=digest, metadata=m.metadata,
                 created_at=m.created_at, updated_at=m.updated_at,
+                valid_from=m.valid_from, valid_to=m.valid_to,
             ))
             report.memories += 1
 

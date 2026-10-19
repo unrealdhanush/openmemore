@@ -116,8 +116,11 @@ def save_memories(
 
 
 def update_memory(
-    conn: sqlite3.Connection, caller: Caller, memory_id: int, content: str, subject: str | None = None
+    conn: sqlite3.Connection, caller: Caller, memory_id: int, content: str, subject: str | None = None,
+    valid_from: datetime | None = None,
 ) -> UpdateMemoryResult:
+    """A new version of the memory. The old one is kept as history: it stopped being true
+    when the new one started (`valid_from`, default now)."""
     if reason := secret_in(content, subject):
         raise ToolError(f"not saved: {reason}")
     # The subject may come from the old version, which needs a read first; embedding
@@ -141,9 +144,10 @@ def update_memory(
             content_hash=content_hash(content),
             created_at=now,
             updated_at=now,
+            valid_from=valid_from or now,
         )
         new_id = repo.insert_memory(conn, new)
-        repo.mark_superseded(conn, old.id, new_id, now)
+        repo.mark_superseded(conn, old.id, new_id, now, valid_until=valid_from or now)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(new_id, vector)])
     return UpdateMemoryResult(new_id=new_id, previous_id=old.id)

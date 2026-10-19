@@ -105,13 +105,23 @@ def _memory(row: sqlite3.Row) -> Memory:
     return Memory.model_validate(data)
 
 
+def current_sql(alias: str = "") -> str:
+    """SQL for a current memory: not replaced, and its validity not ended (SPEC.md M7.7).
+    Timestamps are stored in to_iso's format, the same as SQLite's own, so text compares."""
+    a = f"{alias}." if alias else ""
+    return (f"{a}superseded_by IS NULL AND ({a}valid_to IS NULL "
+            f"OR {a}valid_to > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+
+
 def insert_memory(conn: sqlite3.Connection, m: NewMemory) -> int:
     cur = conn.execute(
         "INSERT INTO memories (kind, subject, content, project, scope, source_client, confidence, "
-        "content_hash, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, metadata, created_at, updated_at, valid_from, valid_to) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             m.kind, m.subject, m.content, m.project, m.scope, m.source_client, m.confidence,
             m.content_hash, json.dumps(m.metadata), to_iso(m.created_at), to_iso(m.updated_at),
+            to_iso(m.valid_from or m.created_at), _iso_or_none(m.valid_to),
         ),
     )
     return cur.lastrowid
@@ -130,10 +140,17 @@ def find_active_duplicate(conn: sqlite3.Connection, scope: str, content_hash: st
     return _memory(row) if row else None
 
 
-def mark_superseded(conn: sqlite3.Connection, old_id: int, new_id: int, now: datetime) -> None:
+def mark_superseded(conn: sqlite3.Connection, old_id: int, new_id: int, now: datetime,
+                    valid_until: datetime | None = None) -> None:
+    """Replace `old_id` with `new_id`: OpenMCP learned this `now`, and the old memory
+    stopped being true at `valid_until` (default `now`), unless it had already ended. It
+    never ends before it began."""
+    until = to_iso(valid_until or now)
     conn.execute(
-        "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?",
-        (new_id, to_iso(now), old_id),
+        "UPDATE memories SET superseded_by = ?, updated_at = ?, superseded_at = ?, "
+        "valid_to = CASE WHEN valid_to IS NOT NULL AND valid_to <= ? THEN valid_to "
+        "ELSE MAX(?, COALESCE(valid_from, ?)) END WHERE id = ?",
+        (new_id, to_iso(now), to_iso(now), until, until, until, old_id),
     )
 
 
@@ -198,7 +215,7 @@ def list_memories(
         where.append("updated_at >= ?")
         params.append(to_iso(updated_since))
     if not include_superseded:
-        where.append("superseded_by IS NULL")
+        where.append(current_sql())
     sql = "SELECT * FROM memories"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -209,7 +226,7 @@ def list_memories(
 
 def project_labels(conn: sqlite3.Connection, scopes: Sequence[str] | None) -> list[str]:
     """Project labels of current memories in these scopes, most recently used first."""
-    where, params = ["superseded_by IS NULL", "project IS NOT NULL"], []
+    where, params = [current_sql(), "project IS NOT NULL"], []
     if scopes is not None:
         clause, params = _in("scope", scopes)
         where.append(clause)
@@ -231,7 +248,7 @@ def knn_memories(
 ) -> list[tuple[Memory, float]]:
     """The `k` memories nearest to `query` (an embedding), then filtered like
     search_memories. Returns (memory, cosine distance) pairs, nearest first."""
-    where = ["m.superseded_by IS NULL"]
+    where = [current_sql("m")]
     params: list[object] = [query, k]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
@@ -270,7 +287,7 @@ def search_memories(
     Returns (memory, bm25) pairs, best first; bm25 is lower-is-better.
     Subject matches weigh twice as much as content matches.
     """
-    where = ["memories_fts MATCH ?", "m.superseded_by IS NULL"]
+    where = ["memories_fts MATCH ?", current_sql("m")]
     params: list[object] = [match]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
@@ -701,10 +718,12 @@ def mark_consolidated(conn: sqlite3.Connection, conversation_id: int, through: i
 def insert_proposal(conn: sqlite3.Connection, p: NewProposal) -> int:
     cur = conn.execute(
         "INSERT INTO proposals (action, kind, content, subject, project, scope, reason, source_client, confidence, "
-        "content_hash, similar_memory_id, replaces_memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, similar_memory_id, replaces_memory_id, created_at, valid_from, valid_to) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             p.action, p.kind, p.content, p.subject, p.project, p.scope, p.reason, p.source_client, p.confidence,
             p.content_hash, p.similar_memory_id, p.replaces_memory_id, to_iso(p.created_at),
+            _iso_or_none(p.valid_from), _iso_or_none(p.valid_to),
         ),
     )
     proposal_id = cur.lastrowid
@@ -792,7 +811,7 @@ def active_memory_vectors(conn: sqlite3.Connection) -> list[tuple[Memory, bytes]
     """Every current memory that has been embedded, with its vector."""
     rows = conn.execute(
         "SELECT m.*, v.embedding AS vector FROM memories m JOIN memories_vec v ON v.rowid = m.id "
-        "WHERE m.superseded_by IS NULL ORDER BY m.id"
+        f"WHERE {current_sql('m')} ORDER BY m.id"
     ).fetchall()
     out = []
     for r in rows:
@@ -884,7 +903,7 @@ def store_counts(conn: sqlite3.Connection) -> dict[str, object]:
     """What's stored, for `openmcp status`."""
     by_provider = dict(conn.execute("SELECT provider, COUNT(*) FROM conversations GROUP BY provider ORDER BY provider"))
     return {
-        "memories": conn.execute("SELECT COUNT(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0],
+        "memories": conn.execute(f"SELECT COUNT(*) FROM memories WHERE {current_sql()}").fetchone()[0],
         "conversations": by_provider,
         "messages": conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
         "pending_embeddings": count_pending_embeddings(conn),

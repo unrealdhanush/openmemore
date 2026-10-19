@@ -165,26 +165,30 @@ class Memory:
     # --- writing --------------------------------------------------------------------
 
     def save(self, content: str, *, kind: Kind = "note", subject: str | None = None,
-             project: str | None = None) -> int | None:
-        """Save a memory in this client's write scope. Returns its id, or None if the
-        same statement is already stored."""
+             project: str | None = None, valid_from: Any = None, valid_to: Any = None) -> int | None:
+        """Save a memory in this client's write scope. `valid_from` / `valid_to` say when
+        it became and stopped being true ("2024-03", a date, or a datetime), if not now.
+        Returns its id, or None if the same statement is already stored."""
         from openmcp.tools.memories import save_memories
 
         with self._call("save_memories") as (conn, call, caller):
             result = save_memories(conn, caller, [MemoryInput(kind=kind, content=content, subject=subject,
-                                                              project=project)])
+                                                              project=project, valid_from=valid_from,
+                                                              valid_to=valid_to)])
             call.summary, call.result_count = "1 items", len(result.saved)
         if result.rejected:
             raise OpenMCPError(f"not saved: {result.rejected[0].reason}")
         return result.saved[0] if result.saved else None
 
-    def update(self, memory_id: int, content: str) -> int:
-        """Correct a memory; returns the new version's id (the old one is kept as history)."""
+    def update(self, memory_id: int, content: str, *, valid_from: Any = None) -> int:
+        """Correct a memory; returns the new version's id. The old one is kept as history,
+        true until the change (`valid_from`, default now)."""
+        from openmcp.models import _moment
         from openmcp.tools.memories import update_memory
 
         with self._call("update_memory") as (conn, call, caller):
             call.summary = f"id={memory_id}"
-            return update_memory(conn, caller, memory_id, content).new_id
+            return update_memory(conn, caller, memory_id, content, valid_from=_moment(valid_from)).new_id
 
     def forget(self, memory_id: int) -> int:
         """Delete a memory and its history; returns how many versions were deleted."""

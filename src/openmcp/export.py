@@ -38,6 +38,7 @@ def export_document(conn: sqlite3.Connection, scopes: Sequence[str] | None = Non
                 "id": m.id, "kind": m.kind, "content": m.content, "subject": m.subject, "project": m.project,
                 "scope": m.scope, "source": m.source_client, "confidence": m.confidence, "metadata": m.metadata,
                 "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at), "superseded_by": m.superseded_by,
+                "valid_from": _iso(m.valid_from), "valid_to": _iso(m.valid_to), "superseded_at": _iso(m.superseded_at),
             }
             for m in memories
         ],

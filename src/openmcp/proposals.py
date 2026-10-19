@@ -86,8 +86,13 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
         if existing and not replaced:  # saved meanwhile, by a client or an earlier approval
             repo.decide_proposal(conn, proposal.id, "approved", now, existing.id)
             return existing.id
+        # True since the statement was made (or, for a merge, since the earliest version).
+        valid_from = min((m.valid_from for m in replaced if m.valid_from), default=None) \
+            if proposal.action == "merge" else proposal.valid_from
         memory_id = repo.insert_memory(conn, NewMemory(
             **fields,
+            valid_from=valid_from or now,
+            valid_to=proposal.valid_to,
             scope=proposal.scope,
             source_client=proposal.source_client,
             confidence=proposal.confidence,
@@ -101,7 +106,8 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
             updated_at=now,
         ))
         for old in replaced:
-            repo.mark_superseded(conn, old.id, memory_id, now)
+            repo.mark_superseded(conn, old.id, memory_id, now,
+                                 valid_until=None if proposal.action == "merge" else valid_from or now)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(memory_id, vector)])
         repo.decide_proposal(conn, proposal.id, "approved", now, memory_id)

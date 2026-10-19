@@ -5,10 +5,11 @@ Nothing reaches the repository (repo.py) without passing through one of these.
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
 
 from openmcp.safety.wrap import NOTICE
 
@@ -29,6 +30,30 @@ Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 MemoryText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 MemoryId = Annotated[int, Field(ge=1)]
+
+
+def _moment(value: Any) -> Any:
+    """A date as people give it ("2024", "2024-03", "2024-03-01", or a full timestamp),
+    as an aware datetime; no time zone means UTC."""
+    if isinstance(value, str):
+        text = value.strip()
+        if re.fullmatch(r"\d{4}", text):
+            text += "-01-01"
+        elif re.fullmatch(r"\d{4}-\d{2}", text):
+            text += "-01"
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return value  # Pydantic reports it
+    elif isinstance(value, date) and not isinstance(value, datetime):
+        value = datetime(value.year, value.month, value.day)
+    if isinstance(value, datetime) and value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value
+
+
+Moment = Annotated[AwareDatetime, BeforeValidator(_moment)]
+"""A point in time on the timeline of when something was true (SPEC.md M7.7)."""
 
 Role = Literal["user", "assistant", "system", "tool"]
 
@@ -94,7 +119,12 @@ class NewMemory(BaseModel):
     content_hash: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: AwareDatetime
+    """When OpenMCP learned it (recorded time)."""
     updated_at: AwareDatetime
+    valid_from: AwareDatetime | None = None
+    """When it became true in the user's life; stored as created_at when not given."""
+    valid_to: AwareDatetime | None = None
+    """When it stopped being true; None while it still is."""
 
 
 class Memory(NewMemory):
@@ -102,10 +132,17 @@ class Memory(NewMemory):
 
     id: int
     superseded_by: int | None = None
+    superseded_at: AwareDatetime | None = None
+    """When OpenMCP learned it had been corrected (recorded time)."""
 
     @property
     def active(self) -> bool:
+        """Not replaced by a newer version (it may still have ended: see `current`)."""
         return self.superseded_by is None
+
+    def current(self, now: datetime | None = None) -> bool:
+        """Not replaced, and still true: its validity hasn't ended."""
+        return self.active and (self.valid_to is None or self.valid_to > (now or datetime.now(UTC)))
 
 
 class NewConversation(BaseModel):
@@ -231,6 +268,9 @@ class ParsedConversation(BaseModel):
 class ParsedMemory(BaseModel):
     """A memory read from an OpenMCP export, before it is stored."""
 
+    valid_from: AwareDatetime | None = None
+    valid_to: AwareDatetime | None = None
+
     kind: Kind
     content: MemoryText
     subject: Label | None = None
@@ -263,6 +303,18 @@ class MemoryInput(BaseModel):
     subject: Label | None = Field(default=None, description="Short label, e.g. 'coding style'.")
     project: Label | None = Field(default=None, description="Project name, if this belongs to one.")
     confidence: float | None = Field(default=None, ge=0, le=1, description="How sure you are, 0 to 1.")
+    valid_from: Moment | None = Field(
+        default=None, description="When this became true, if not now: an ISO date such as 2024-03 or 2024-03-15."
+    )
+    valid_to: Moment | None = Field(
+        default=None, description="When it stopped being true, for something that's over (an ISO date)."
+    )
+
+    @model_validator(mode="after")
+    def _ordered(self) -> MemoryInput:
+        if self.valid_from and self.valid_to and self.valid_to < self.valid_from:
+            raise ValueError("valid_to is before valid_from")
+        return self
 
 
 class CodeBlock(BaseModel):
@@ -571,6 +623,9 @@ class NewProposal(BaseModel):
     """A near-duplicate the vectors found; kept alongside unless the user chooses to replace it."""
     replaces_memory_id: int | None = None
     """The memory the proposing model says this updates; replaced unless the user keeps both."""
+    valid_from: AwareDatetime | None = None
+    """When the statement became true: the model's date, or its conversations' latest."""
+    valid_to: AwareDatetime | None = None
     created_at: AwareDatetime
     conversation_ids: list[int] = Field(default_factory=list)
     memory_ids: list[int] = Field(default_factory=list)

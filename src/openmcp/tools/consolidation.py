@@ -120,7 +120,8 @@ def propose_memories(
     result = ProposeResult(note=REVIEW_HINT)
     accepted: list[tuple[int, ProposalInput, str]] = []
     for index, item in enumerate(items):
-        scopes = {_readable(conn, caller, cid).scope for cid in item.conversation_ids}
+        sources = [_readable(conn, caller, cid) for cid in item.conversation_ids]
+        scopes = {c.scope for c in sources}
         if item.replaces is not None:
             scopes.add(_replaced(conn, caller, item.replaces).scope)
         if len(scopes) > 1:
@@ -131,7 +132,10 @@ def propose_memories(
         if reason := secret_in(item.content, item.subject, item.project, item.reason):
             result.rejected.append(Rejection(index=index, reason=reason))
             continue
-        accepted.append((index, item, scopes.pop() if scopes else caller.scopes.write_scope))
+        # True since the model says, or since the conversation it came from (not since approval).
+        said = max((c.updated_at for c in sources if c.updated_at), default=None)
+        accepted.append((index, item.model_copy(update={"valid_from": item.valid_from or said}),
+                         scopes.pop() if scopes else caller.scopes.write_scope))
     for d in done:
         _readable(conn, caller, d.conversation_id)
     vectors = embed_texts([embed.memory_text(item.subject, item.content) for _, item, _ in accepted])
@@ -155,6 +159,8 @@ def propose_memories(
                 content_hash=digest,
                 similar_memory_id=similar.id if similar else None,
                 replaces_memory_id=item.replaces,
+                valid_from=item.valid_from,
+                valid_to=item.valid_to,
                 created_at=now,
                 conversation_ids=item.conversation_ids,
             ))

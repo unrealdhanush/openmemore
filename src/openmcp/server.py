@@ -38,6 +38,7 @@ from openmcp.models import (
     MemoryId,
     MemoryInput,
     MemoryText,
+    Moment,
     PingResult,
     Profile,
     ProposalInput,
@@ -272,15 +273,19 @@ def build_server(base: Path) -> MCPServer:
         id: Annotated[MemoryId, Field(description="The id of the memory to correct.")],
         content: Annotated[MemoryText, Field(description="The corrected, self-contained statement.")],
         subject: Annotated[Label | None, Field(description="New subject; leave unset to keep the old one.")] = None,
+        valid_from: Annotated[
+            Moment | None,
+            Field(description="When the change happened, if not now: an ISO date such as 2024-03."),
+        ] = None,
     ) -> UpdateMemoryResult:
         """Correct or refresh a memory that is wrong or out of date, e.g. when the user
         changes a preference or a project moves on. The new version replaces the old one
-        everywhere; the old version is kept as history. Find the id with search_context or
-        get_profile first.
+        everywhere; the old version is kept as history, true until the change. Find the id
+        with search_context or get_profile first.
         """
         with tool_call("update_memory", ctx) as (conn, call, caller):
             call.summary = f"id={id}"
-            result = memory_tools.update_memory(conn, caller, id, content, subject)
+            result = memory_tools.update_memory(conn, caller, id, content, subject, valid_from)
             call.result_count = 1
             return result
 
