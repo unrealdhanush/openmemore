@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import sys
 import textwrap
 from collections.abc import Iterator
@@ -97,11 +98,34 @@ def setup(
         ..., help="claude-desktop, vscode-copilot, or claude-code (others get printed instructions)."
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the steps without changing anything."),
+    dev: bool = typer.Option(
+        False, "--dev", help="Register this development checkout itself: the app then runs whatever branch is checked out."
+    ),
 ) -> None:
     """Connect an AI assistant to OpenMCP and install the standing instruction it needs."""
     from openmcp import setup as client_setup
 
     client = _client_name(client, "CLIENT")
+    checkout = client_setup.development_checkout()
+    if checkout is not None and not dev:
+        # Registering this checkout would make the app run whatever branch is checked out,
+        # and this code would migrate the real database. Hand the whole job to an installed copy.
+        installed = client_setup.installed_command(checkout)
+        if installed is None:
+            console.print(
+                f"[yellow]This is a development checkout[/yellow] ({checkout}), and no installed openmcp was "
+                "found. Registering the checkout would make the app run whatever branch is checked out, "
+                "against your real data. Install openmcp (e.g. `uv tool install --managed-python --python 3.12 "
+                f"\"openmcp @ git+<repo URL>@main\"`) and run setup again, or pass --dev to register the checkout."
+            )
+            raise typer.Exit(2)
+        console.print(
+            f"This is a development checkout ({checkout}); running setup with the installed openmcp at "
+            f"{installed[0]} instead, so the app and your data don't follow your branches. "
+            "(--dev registers the checkout.)"
+        )
+        args = [*installed, "setup", client, *(["--dry-run"] if dry_run else [])]
+        raise typer.Exit(subprocess.run(args).returncode)
     base = config.home()
     initialize(base)
     ctx = client_setup.Context(
@@ -460,7 +484,7 @@ def audit_log(
         console.print("No tool calls logged yet.")
         return
     table = Table(box=None, header_style="bold")
-    for column in ("time", "client", "tool", "summary", "results", "ms"):
+    for column in ("time", "client", "app", "tool", "summary", "results", "ms"):
         table.add_column(
             column, justify="right" if column in ("results", "ms") else "left", no_wrap=column != "summary"
         )
@@ -468,6 +492,7 @@ def audit_log(
         table.add_row(
             _when(e.ts),
             e.client,
+            Text(e.app or ""),
             e.tool,
             Text(e.summary or ""),
             "" if e.result_count is None else str(e.result_count),
