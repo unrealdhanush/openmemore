@@ -693,12 +693,28 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
   - **Not yet tested:** an actual reboot, and the Linux and Windows services on real machines (their service definitions are tested).
 
 ### M7: Automatic consolidation
-- **A model OpenMCP calls itself, opt-in:**
-  - a local model through Ollama, with nothing leaving the machine;
-  - or a hosted model with the user's own API key, clearly marked as sending chats to that provider.
-- **Scheduled by M6** (for example nightly). It writes to M5's proposal queue, so review is unchanged: nothing becomes a memory without approval.
-- **Drift detection:** the same model flags memories that recent conversations contradict, as update proposals using `replaces`, rather than overwriting.
-- **Done when:** proposals appear overnight without asking an assistant, they're as reviewable as M5's, and with the local model no network request leaves the machine (tested).
+- **Off by default, and nothing to install.** Without setup, consolidation happens only when the user asks an assistant to (M5). OpenMCP ships no model.
+- **A model OpenMCP calls itself, brought by the user,** through the open standard for LLM APIs rather than any provider's SDK:
+  - **Open Responses** (openresponses.org, spec 2026-04-24): `POST {endpoint}/responses` with `model`, `instructions` and `input`; the text is in `output` items of type `message`, as `output_text` parts. OpenAI, Ollama, LM Studio, vLLM, OpenRouter, Hugging Face and others implement it.
+  - **Chat Completions** (`api = "chat-completions"`) for servers that don't speak it yet, such as some providers' compatibility endpoints.
+  - The client is `httpx`, already a dependency of the MCP SDK and now declared. Structured output isn't part of Open Responses compliance, so the model is asked for JSON and the text is parsed leniently.
+- **Local or remote:**
+  - A local endpoint (loopback) is called with proxy settings ignored and without following redirects, so nothing leaves the machine.
+  - Any other host needs the user's permission first, from the same dialog as M6, naming the host. Its `allowed_host` is kept in config, and changing the endpoint asks again.
+  - API keys go in `~/.openmcp/consolidation.key` (0600), because the OS-run daemon doesn't get the user's environment; `OPENMCP_MODEL_API_KEY` overrides it for manual runs.
+- **The work,** the same pipeline as M5:
+  - One model call per conversation: its new messages, wrapped as data, plus up to 30 related memories in its scope (nearest by meaning, or newest).
+  - Proposals go through `propose_memories`, so scopes, the secret filter, duplicate and rejection checks, and review are unchanged; they're credited to `model:<name>`.
+  - **Drift detection:** a memory the conversation contradicts is proposed as its correction with `replaces`. A `replaces` naming a memory the model wasn't shown is cleared.
+  - A model error stops the run, and the conversation stays due.
+- **Scheduled by M6:** daily at `[consolidation] schedule` (03:00), in its own thread. A run missed while the machine slept happens when the daemon next looks. `openmcp consolidate run` runs it now.
+  - Every run is recorded in `consolidation_runs` (migration 015) and shown by `openmcp status` and `openmcp consolidate status`.
+- **CLI:** `openmcp consolidate setup --endpoint URL --model NAME [--api chat-completions] [--key]` sends a one-line test request before turning it on. `openmcp consolidate off [--forget]` turns it off, and `--forget` also deletes the key and the allowed host.
+- **Done when:** proposals appear overnight without asking an assistant, they're as reviewable as M5's, and a local endpoint sends nothing off the machine (tested). This was first written as "the local model" with Ollama in mind; the user didn't want a model install, so any local endpoint counts.
+- **Status (2026-10-19):** built and tested (`tests/test_consolidate_auto.py`).
+  - Both protocols are tested against recorded requests; the run, drift, errors, the schedule and the CLI are covered.
+  - The local-only check runs a real local stand-in server, with every outgoing connection recorded and a proxy configured in the environment. Only 127.0.0.1 is contacted, and with the guard removed the test fails.
+  - **Not yet run:** against a real model, which waits for the user to pick one.
 
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.

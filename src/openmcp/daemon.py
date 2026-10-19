@@ -162,6 +162,33 @@ def tick(base: Path) -> TickReport:
     return report
 
 
+def consolidation_due(base: Path) -> Any:
+    """The model to run today's automatic consolidation with, if it's set up, allowed,
+    and due (SPEC.md M7); else None."""
+    from openmcp import consolidate
+
+    cfg = config.load_config(config.config_path(base))
+    if not cfg.consolidation.enabled or not consolidate.permitted(cfg):
+        return None
+    model = consolidate.model_from(base, cfg)
+    if model is None:
+        return None
+    with closing(db.connect(config.db_path(base))) as conn:
+        return model if consolidate.due(conn, cfg) else None
+
+
+def consolidate_now(base: Path, model: Any, trigger: str = "schedule") -> Any:
+    from openmcp import consolidate
+
+    cfg = config.load_config(config.config_path(base))
+    with closing(db.connect(config.db_path(base))) as conn:
+        report = consolidate.run(conn, cfg, model, trigger=trigger)
+        _audit(conn, "consolidate", f"{report.conversations} conversations, {report.proposals} proposals, "
+               f"{model.model} at {consolidate.llm.host(model.endpoint)}"
+               + (f"; error: {report.errors[-1][:200]}" if report.errors else ""), report.proposals)
+    return report
+
+
 # --- running -------------------------------------------------------------------------
 
 
@@ -216,12 +243,27 @@ def run(base: Path, log: Any = None) -> None:
                                            log_level="warning"))
     stop = threading.Event()
 
+    consolidating: list[threading.Thread] = []
+
+    def consolidate_in_background(model: Any) -> None:
+        try:
+            report = consolidate_now(base, model)
+            print(f"openmcp daemon: consolidated {report.conversations} conversations into {report.proposals} "
+                  f"proposals" + "".join(f"; {e}" for e in report.errors), file=log, flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"openmcp daemon: consolidation: {type(e).__name__}: {e}", file=log, flush=True)
+
     def loop() -> None:
         while not stop.is_set():
             try:
                 report = tick(base)
                 for error in report.errors:
                     print(f"openmcp daemon: capture: {error}", file=log, flush=True)
+                # One run at a time, in its own thread: a long run mustn't hold up capture.
+                if not any(t.is_alive() for t in consolidating) and (model := consolidation_due(base)):
+                    consolidating[:] = [threading.Thread(target=consolidate_in_background, args=(model,),
+                                                         name="openmcp-consolidate", daemon=True)]
+                    consolidating[0].start()
             except Exception as e:  # noqa: BLE001 - one bad round mustn't stop the daemon
                 print(f"openmcp daemon: {type(e).__name__}: {e}", file=log, flush=True)
             interval = config.load_config(config.config_path(base)).daemon.interval
