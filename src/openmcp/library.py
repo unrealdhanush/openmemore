@@ -131,13 +131,14 @@ class Memory:
         "history" includes earlier versions and ended memories; `as_of` ("2024-03", a date)
         gives what was true then."""
         from openmcp.models import _moment
-        from openmcp.tools.search import search_context
+        from openmcp.tools.search import presented, search_context
 
         with self._call("search_context") as (conn, call, caller):
             call.summary = f"q={query[:60]!r}"
             result = search_context(conn, caller, query, kinds, project, chats, limit, mode=mode,
                                     as_of=_moment(as_of), budget_tokens=budget_tokens)
             call.result_count = len(result.results)
+            presented(conn, result)
         return [
             Hit(type=h.type, id=h.id, text=unwrap(h.content), wrapped=h.content, source=h.source, score=h.score,
                 kind=h.kind, subject=h.subject, project=h.project, conversation_id=h.conversation_id, title=h.title,
@@ -149,11 +150,13 @@ class Memory:
     def profile(self, project: str | None = None, *, budget_tokens: int | None = None) -> Profile:
         """Preferences, facts, active projects, and recent decisions (wrapped)."""
         from openmcp.tools.profile import get_profile
+        from openmcp.tools.search import presented
 
         with self._call("get_profile") as (conn, call, caller):
             result = get_profile(conn, caller, project, budget_tokens)
             call.result_count = sum(len(g) for g in (result.preferences, result.facts, result.active_projects,
                                                      result.recent_decisions))
+            presented(conn, result)
         return result
 
     def recent(self, limit: int = 5, source: str | None = None) -> RecentConversations:

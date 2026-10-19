@@ -23,8 +23,8 @@ def test_explain_says_what_made_each_score(conn):
     by_type = {}
     for hit in result.results:
         by_type.setdefault(hit.status, hit.explain)
-    assert {"memory_keyword_rank", "fusion", "recency", "confidence"} <= set(by_type["current"])
-    assert {"chat_keyword_rank", "fusion", "recency"} <= set(by_type["chat"]) and "confidence" not in by_type["chat"]
+    assert {"memory_keyword_rank", "fusion", "activation", "confidence"} <= set(by_type["current"])
+    assert {"chat_keyword_rank", "fusion", "activation"} <= set(by_type["chat"]) and "confidence" not in by_type["chat"]
     assert by_type["recap"]["recap_weight"] < 1
     assert result.trace["mode"] == "current" and result.trace["words"] == ["green", "tea"]
     assert result.trace["candidates"]["memory_keyword"] == 1 and result.trace["meaning_search"] is False

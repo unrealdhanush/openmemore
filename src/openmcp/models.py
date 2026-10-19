@@ -134,6 +134,9 @@ class Memory(NewMemory):
     superseded_by: int | None = None
     superseded_at: AwareDatetime | None = None
     """When OpenMCP learned it had been corrected (recorded time)."""
+    presented: int = 0
+    """Times a client was shown it, or it was confirmed (activation, SPEC.md M7.7)."""
+    last_presented_at: AwareDatetime | None = None
 
     @property
     def active(self) -> bool:
@@ -198,6 +201,9 @@ class ChunkMatch(BaseModel):
     title: str | None
     provider: str
     rank: float
+    presented: int = 0
+    """Times a client was shown it (activation, SPEC.md M7.7)."""
+    last_presented_at: datetime | None = None
     """Lower is better: bm25 for keyword matches, cosine distance for vector matches."""
 
 

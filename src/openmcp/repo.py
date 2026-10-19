@@ -115,6 +115,17 @@ def current_sql(alias: str = "") -> str:
             f"AND (l.from_memory = {a}id OR l.to_memory = {a}id))")
 
 
+def record_presented(conn: sqlite3.Connection, memory_ids: Sequence[int], chunk_ids: Sequence[int],
+                     now: datetime) -> None:
+    """A client was shown these: one more presentation each, for activation (SPEC.md M7.7)."""
+    at = to_iso(now)
+    for table, ids in (("memories", memory_ids), ("chunks", chunk_ids)):
+        if ids:
+            clause, params = _in("id", list(dict.fromkeys(ids)))
+            conn.execute(f"UPDATE {table} SET presented = presented + 1, last_presented_at = ? WHERE {clause}",
+                         [at, *params])
+
+
 def contradicted(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> set[int]:
     """Which of these memories are in an unresolved contradiction."""
     if not memory_ids:
@@ -595,6 +606,7 @@ def search_chunks(
           SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?
         )
         SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               c.presented, c.last_presented_at,
                conv.id AS conversation_id, conv.title, conv.provider, best.rank
         FROM best
         JOIN chunks c ON c.id = best.rowid
@@ -622,6 +634,7 @@ def knn_chunks(conn: sqlite3.Connection, query: bytes, *, k: int, scopes: Sequen
         f"""
         WITH knn AS (SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?)
         SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               c.presented, c.last_presented_at,
                conv.id AS conversation_id, conv.title, conv.provider, knn.distance AS rank
         FROM knn
         JOIN chunks c ON c.id = knn.rowid

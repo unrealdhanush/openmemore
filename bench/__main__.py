@@ -33,8 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--judge-model")
     parser.add_argument("--judge-api", default="responses", choices=["responses", "chat-completions"])
     parser.add_argument("--record", action="store_true", help="Append the summary to bench/RESULTS.md.")
+    parser.add_argument("--set", action="append", default=[], metavar="MODULE.NAME=VALUE",
+                        help="Override a constant for tuning, e.g. openmcp.tools.search.ACTIVATION_WEIGHT=0.002.")
     args = parser.parse_args(argv)
     ks = sorted({int(k) for k in args.k.split(",")})
+    settings = apply_settings(args.set)
 
     if args.keywords_only:
         runner.use_embedder(None)
@@ -66,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     report = runner.run(args.dataset, haystacks, ks, embedder_name=embedder_name, answer=answer, progress=progress)
     if args.limit:
         report["limit"] = args.limit
+    if settings:
+        report["settings"] = settings
     RESULTS.mkdir(exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     out = RESULTS / f"{stamp}-{args.dataset}-{report['commit']}.json"
@@ -76,8 +81,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.record:
         with LOG.open("a", encoding="utf-8") as log:
             log.write(f"\n## {report['ran_at'][:10]} {args.dataset}"
-                      f"{f' (limit {args.limit})' if args.limit else ''} at {report['commit']}\n\n{table}\n")
+                      f"{f' (limit {args.limit})' if args.limit else ''} at {report['commit']}"
+                      f"{''.join(f', {k}={v}' for k, v in settings.items())}\n\n{table}\n")
     return 0
+
+
+def apply_settings(pairs: list[str]) -> dict[str, object]:
+    """Set module constants from MODULE.NAME=VALUE pairs (VALUE a Python literal)."""
+    import ast
+    import importlib
+
+    applied: dict[str, object] = {}
+    for pair in pairs:
+        target, _, raw = pair.partition("=")
+        module_name, _, name = target.rpartition(".")
+        module = importlib.import_module(module_name)
+        if not hasattr(module, name):
+            raise SystemExit(f"{module_name} has no {name}")
+        value = ast.literal_eval(raw)
+        setattr(module, name, value)
+        applied[name] = value
+    return applied
 
 
 def render(report: dict) -> str:

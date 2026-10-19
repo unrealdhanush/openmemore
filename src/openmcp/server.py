@@ -262,6 +262,7 @@ def build_server(base: Path) -> MCPServer:
                 explain=explain, budget_tokens=budget_tokens,
             )
             call.result_count = len(result.results)
+            search_tools.presented(conn, result)
             return result
 
     @server.tool()
@@ -290,6 +291,7 @@ def build_server(base: Path) -> MCPServer:
             call.result_count = sum(
                 len(g) for g in (result.preferences, result.facts, result.active_projects, result.recent_decisions)
             )
+            search_tools.presented(conn, result)
             return result
 
     @server.tool()

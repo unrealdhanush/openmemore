@@ -155,6 +155,7 @@ def support(conn: sqlite3.Connection, memory_id: int, now: datetime, *, source: 
     else:
         _add(conn, "supports", memory_id, now, source, to_memory=memory_id)  # a confirmation with no conversation
     conn.execute("UPDATE memories SET confidence = ? WHERE id = ?", (confirmed(memory.confidence), memory_id))
+    repo.record_presented(conn, [memory_id], [], now)  # a confirmation is a presentation too
     return True
 
 

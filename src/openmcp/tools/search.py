@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from openmcp import embed, relations, repo
-from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, SearchHit, SearchResult
+from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, Profile, SearchHit, SearchResult
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
 
@@ -53,10 +53,6 @@ recap matches the next such question better than the conversation it recaps, and
 recall would otherwise push the original further down. 0.25 puts a recap below anything
 found on its own merits (a hit in both lists scores ≈ 0.033) without hiding it."""
 
-RECENCY_WEIGHT = 0.0005
-"""At most this much is added to a fused score (a top rank is worth 1/61 ≈ 0.016), so
-recency breaks near-ties without overriding relevance."""
-RECENCY_HALF_LIFE_DAYS = 30
 
 
 MAX_CHUNK_KEYWORD_MATCHES = 8000
@@ -175,6 +171,37 @@ def similar_enough(
     )
 
 
+ACTIVATION_DECAY = 0.5
+"""ACT-R's d: how fast a presentation's influence fades (power law, not a half-life)."""
+ACTIVATION_WEIGHT = 0.0005
+"""Rank boost at full activation. Tuned with the benchmark (bench/RESULTS.md)."""
+MIN_AGE_DAYS = 1 / 24
+"""Ages are counted from an hour: a just-made item isn't infinitely active."""
+
+
+def activation(created: datetime | None, presented: int, last: datetime | None, now: datetime,
+               decay: float | None = None) -> float:
+    """ACT-R base-level activation, ln(sum of age_j ** -d) over an item's presentations: its
+    creation, then `presented` more, the last at `last`. Petrov's (2006) approximation needs
+    only the first and last ages: ln(t_last^-d + n * (t_1^(1-d) - t_last^(1-d)) / ((1-d)(t_1 - t_last)))."""
+    d = ACTIVATION_DECAY if decay is None else decay
+    if created is None:
+        return -d * math.log(365)  # no date: as if a year old
+    first = max((now - created).total_seconds() / 86_400, MIN_AGE_DAYS)
+    if not presented or last is None:
+        return -d * math.log(first)
+    recent = min(max((now - last).total_seconds() / 86_400, MIN_AGE_DAYS), first)
+    if first - recent < 1e-9:
+        return math.log((presented + 1) * recent ** -d)
+    rest = presented * (first ** (1 - d) - recent ** (1 - d)) / ((1 - d) * (first - recent))
+    return math.log(recent ** -d + rest)
+
+
+def activation_boost(created: datetime | None, presented: int, last: datetime | None, now: datetime) -> float:
+    """Activation as a rank boost: ACTIVATION_WEIGHT times its logistic (0 to 1)."""
+    return ACTIVATION_WEIGHT / (1 + math.exp(-activation(created, presented, last, now)))
+
+
 CONFIDENCE_WEIGHT = 0.002
 """Up to about this much rank boost for a well-confirmed memory: enough to order otherwise
 close matches (a rank step is ~0.0003 near the top), not to outrank a better match."""
@@ -183,15 +210,6 @@ close matches (a rank step is ~0.0003 near the top), not to outrank a better mat
 def confidence_boost(confidence: float | None) -> float:
     c = confidence if confidence is not None else relations.DEFAULT_CONFIDENCE
     return CONFIDENCE_WEIGHT * (c - relations.DEFAULT_CONFIDENCE) / (1 - relations.DEFAULT_CONFIDENCE)
-
-
-def recency_boost(when: datetime | None, now: datetime) -> float:
-    """Halves every RECENCY_HALF_LIFE_DAYS. Age counts in whole hours, so items written
-    close together tie and the usual tie-breaks (memories first) still apply."""
-    if when is None:
-        return 0.0
-    age_days = max(0, int((now - when).total_seconds() // 3600)) / 24
-    return RECENCY_WEIGHT * 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
 
 
 @dataclass
@@ -268,8 +286,9 @@ def search_context(
     for entry in fused.values():
         item = entry.item
         entry.signals["fusion"] = entry.score
-        entry.signals["recency"] = recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
-        entry.score += entry.signals["recency"]
+        entry.signals["activation"] = activation_boost(
+            item.updated_at if isinstance(item, Memory) else item.created_at, item.presented, item.last_presented_at, now)
+        entry.score += entry.signals["activation"]
         if isinstance(item, Memory):
             entry.signals["confidence"] = confidence_boost(item.confidence)
             entry.score += entry.signals["confidence"]
@@ -298,6 +317,20 @@ def search_context(
             "candidates": {label: len(items) for label, items in [*memory_lists, *chunk_lists]},
         } if explain else None,
     )
+
+
+def presented(conn: sqlite3.Connection, result: SearchResult | Profile) -> None:
+    """Count what a client was shown, for activation (SPEC.md M7.7): the MCP tools and the
+    library call this. Evaluation calls search_context directly, so benchmark questions
+    don't reinforce each other."""
+    if isinstance(result, SearchResult):
+        memories = [h.id for h in result.results if h.type == "memory"]
+        chunks = [h.id for h in result.results if h.type == "chat"]
+    else:
+        memories = [i.id for g in (result.preferences, result.facts, result.active_projects, result.recent_decisions)
+                    for i in g]
+        chunks = []
+    repo.record_presented(conn, memories, chunks, datetime.now(UTC))
 
 
 def estimate_tokens(text: str) -> int:
