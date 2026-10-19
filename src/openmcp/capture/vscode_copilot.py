@@ -76,10 +76,20 @@ def _calls_recall_tool(request: dict[str, Any]) -> bool:
                 return True
     for part in request.get("response") or []:
         if isinstance(part, dict) and part.get("kind") == "toolInvocationSerialized":
-            message = (part.get("invocationMessage") or {}).get("value")
-            if isinstance(message, str) and any(f"`{tool}`" in message for tool in RECALL_TOOLS):
+            message = _markdown(part.get("invocationMessage"))
+            if message and any(f"`{tool}`" in message for tool in RECALL_TOOLS):
                 return True
     return False
+
+
+def _markdown(value: Any) -> str | None:
+    """VS Code stores messages as plain strings for some tools (file edits) and as
+    {"value": "..."} markdown objects for others."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("value"), str):
+        return value["value"]
+    return None
 
 
 def _workspace(path: Path) -> str | None:
