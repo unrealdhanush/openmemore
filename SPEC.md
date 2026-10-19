@@ -667,8 +667,19 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 - `openmcp daemon`, installed as a per-user service (launchd on macOS, systemd user units on Linux, a scheduled task or service on Windows). It shares the store with the `serve` processes, like any other connection (WAL).
 - **Live capture:** transcripts are captured as they change (file watching), not only when a client next reads. Client hooks are used where a client has them.
 - **An OpenTelemetry receiver** (OTLP/HTTP on 127.0.0.1) for clients that export conversation text. Claude Code 2.1 does (Section 14), so its chats arrive live with no transcript reader. Its events map onto the OpenMCP conversation format.
-- `openmcp setup` offers to install the service, and `openmcp status` reports whether it is running.
+- **Permission first:** nothing runs in the background until the user allows it. No OS asks for a per-user background task (macOS only reports it afterwards, under Login Items), so OpenMCP asks itself: a native Allow / Don't Allow dialog when there's a desktop session (osascript, a PowerShell message box, zenity or kdialog), else the terminal. The default is no, `--yes` is for scripts, and the decision is audited.
+- `openmcp setup` offers to install the service when there's something to capture, and `openmcp status` reports whether it is running.
 - **Done when:** a Claude Code chat is captured live through OpenTelemetry, with no transcript reader and no client reading first, and the service survives a reboot on macOS, Linux and Windows (CI covers what it can).
+- **Decisions while building:**
+  - **Polling:** transcripts are checked every few seconds (`[daemon] interval`) rather than watched with a file-system library. Unchanged files cost one stat each, and there's no new dependency.
+  - **OpenTelemetry:** only OTLP/HTTP with JSON is accepted, so there's no protobuf dependency; Claude Code supports it.
+  - **Receiver checks:** it needs the config's token in `x-openmcp-token`, its own `Host`, and `Content-Type: application/json`. A web page can't send that without a CORS preflight, which the receiver never grants.
+  - **Matching the transcript reader:** OpenTelemetry turns are stored with the transcript reader's ids, so the two update one conversation. Migration 012 links answer parts to their prompt as they arrive.
+  - **Never edits another app's files:** `openmcp daemon telemetry` prints Claude Code's settings rather than writing them.
+- **Status (2026-10-19):** built and tested (`tests/test_otel.py`, `tests/test_daemon.py`, including the daemon run as a real process). Verified on macOS:
+  - **A real Claude Code 2.1 chat** (`claude -p`, with the printed settings) was captured live through OpenTelemetry with transcript capture off. Its session and prompt ids matched Claude Code's own transcript, and reading that transcript afterwards added nothing. No account or identity attributes were stored.
+  - **The launchd agent** started at install, came back 10 seconds after being killed, and was fully removed by `uninstall`.
+  - **Not yet tested:** an actual reboot, and the Linux and Windows services on real machines (their service definitions are tested).
 
 ### M7: Automatic consolidation
 - **A model OpenMCP calls itself, opt-in:**

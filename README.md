@@ -81,6 +81,21 @@ write_scope = "work"
 
 `openmcp setup vscode-copilot` and `openmcp setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmcp capture`; it reads chats changed in the last 30 days (`[capture] days`).
 
+## Capture in the background
+
+```sh
+openmcp daemon install    # asks first; then starts at login (launchd, systemd, or a Windows logon task)
+openmcp daemon status
+```
+
+Nothing runs in the background without your permission. `openmcp daemon install` first asks in a dialog (Allow / Don't Allow), or in the terminal when there's no desktop, such as over SSH. `openmcp setup` offers it when there's something to capture, and scripts can pass `--yes`. On macOS it then appears under System Settings → General → Login Items, where you can also switch it off.
+
+The daemon reads transcripts from capture-enabled apps every few seconds and embeds what's new. Another assistant can then find a conversation moments after it happens, without waiting for the next lookup.
+
+It also receives Claude Code's conversations live through Claude Code's OpenTelemetry export, with no transcript file involved. `openmcp daemon telemetry` prints the settings to add to `~/.claude/settings.json`. The daemon listens on 127.0.0.1 only, and only accepts requests carrying the token from your config. It stores the conversation text and ids, never the account details the events also carry. Both sources can run at once: they update the same conversation.
+
+`openmcp daemon uninstall` stops it and removes the service.
+
 ## Consolidate and review
 
 Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. To turn chats into memories, ask any connected assistant to **"consolidate my chats"**, or use its OpenMCP `consolidate` prompt. It reads the conversations that haven't been consolidated yet, a batch at a time, and proposes memories, each citing the conversations it came from. The model that writes the proposals is your assistant's own; OpenMCP calls no model and needs no API key.
@@ -123,6 +138,7 @@ An export contains every memory, with its earlier versions, and every conversati
 | `openmcp review` | Approve proposed memories; browse, edit and delete memories |
 | `openmcp import <file>` / `openmcp export` | Bring history in, take everything out |
 | `openmcp capture` | Catch up on transcripts from capture-enabled apps |
+| `openmcp daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints Claude Code's settings |
 | `openmcp embed` | Download the model and embed whatever isn't embedded yet |
 | `openmcp status` | Import jobs, store counts, proposals waiting for review |
 | `openmcp audit [--stats]` | Every tool call: which client, which app, what, how long |
