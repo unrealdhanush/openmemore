@@ -8,6 +8,8 @@ import sqlite3
 from collections import defaultdict
 from datetime import UTC, datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from openmcp import db, embed, relations, repo
@@ -37,6 +39,9 @@ class Approval(BaseModel):
     """Replace the similar memory (a new version of it) instead of adding another."""
     keep_replaced: bool = False
     """Keep the memory the proposal says it updates, instead of replacing it."""
+    on_conflict: Literal["flag", "replace", "both"] = "flag"
+    """For a proposal that contradicts a memory: replace it (this one is right), both are
+    true, or flag the conflict to settle later (both kept out of current answers)."""
 
 
 def _pending(conn: sqlite3.Connection, proposal_id: int) -> Proposal:
@@ -54,7 +59,7 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
     that supersedes every memory in the group."""
     edits = edits or Approval()
     proposal = _pending(conn, proposal_id)
-    changed = edits.model_dump(exclude_unset=True, exclude={"replace_similar", "keep_replaced"})
+    changed = edits.model_dump(exclude_unset=True, exclude={"replace_similar", "keep_replaced", "on_conflict"})
     fields = {**proposal.model_dump(include={"kind", "content", "subject", "project"}), **changed}
     if reason := secret_in(fields["content"], fields["subject"], fields["project"]):
         raise ProposalError(f"not saved: {reason}")
@@ -76,6 +81,13 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
                         f"memory {proposal.replaces_memory_id} was changed since this was proposed; keep both, or reject this"
                     )
                 replaced.append(named)
+            if proposal.contradicts_memory_id and edits.on_conflict == "replace":
+                disputed = repo.get_memory(conn, proposal.contradicts_memory_id)
+                if disputed is None or not disputed.active:
+                    raise ProposalError(f"memory {proposal.contradicts_memory_id} was changed since; approve "
+                                        "this with both kept, or reject it")
+                if disputed not in replaced:
+                    replaced.append(disputed)
             if edits.replace_similar:
                 similar = repo.get_memory(conn, proposal.similar_memory_id) if proposal.similar_memory_id else None
                 if similar is None or not similar.active:
@@ -107,6 +119,10 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
             relations.supersede(conn, memory_id, old.id, now, source=REVIEW,
                                 valid_until=None if proposal.action == "merge" else valid_from or now)
         relations.derived_from(conn, memory_id, proposal.conversation_ids, now, source=proposal.source_client)
+        if proposal.contradicts_memory_id and edits.on_conflict == "flag":
+            disputed = repo.get_memory(conn, proposal.contradicts_memory_id)
+            if disputed is not None and disputed.active:
+                relations.contradict(conn, memory_id, disputed.id, now, source=REVIEW)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(memory_id, vector)])
         repo.decide_proposal(conn, proposal.id, "approved", now, memory_id)

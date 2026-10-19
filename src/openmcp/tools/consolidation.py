@@ -122,8 +122,9 @@ def propose_memories(
     for index, item in enumerate(items):
         sources = [_readable(conn, caller, cid) for cid in item.conversation_ids]
         scopes = {c.scope for c in sources}
-        if item.replaces is not None:
-            scopes.add(_replaced(conn, caller, item.replaces).scope)
+        for named in (item.replaces, item.contradicts):
+            if named is not None:
+                scopes.add(_replaced(conn, caller, named).scope)
         if len(scopes) > 1:
             raise ToolError(
                 f"item {index} cites conversations or a memory in different scopes ({', '.join(sorted(scopes))}); "
@@ -159,6 +160,7 @@ def propose_memories(
                 content_hash=digest,
                 similar_memory_id=similar.id if similar else None,
                 replaces_memory_id=item.replaces,
+                contradicts_memory_id=item.contradicts if item.contradicts != item.replaces else None,
                 valid_from=item.valid_from,
                 valid_to=item.valid_to,
                 created_at=now,

@@ -445,6 +445,8 @@ class Profile(ReadResult):
     facts: list[ProfileItem] = Field(default_factory=list)
     active_projects: list[ProfileItem] = Field(default_factory=list)
     recent_decisions: list[ProfileItem] = Field(default_factory=list)
+    unresolved_conflicts: int = 0
+    """Memories that disagree, waiting for the user in `openmcp review`; left out above."""
     project_note: str | None = None
     """When `project` was asked for: which stored project it was taken to mean, or that
     none matched (then the profile is unfiltered)."""
@@ -559,6 +561,12 @@ class ProposalInput(MemoryInput):
         description="If this updates an existing memory (e.g. a project's state has moved on), that memory's id "
         "from get_profile or search_context. Approving it then makes this a new version of that memory.",
     )
+    contradicts: int | None = Field(
+        default=None,
+        ge=1,
+        description="If this disagrees with an existing memory and it's unclear which is right, that memory's id. "
+        "The user decides when reviewing. Use replaces instead when this is clearly a correction.",
+    )
 
 
 class DoneConversation(BaseModel):
@@ -633,6 +641,8 @@ class NewProposal(BaseModel):
     """A near-duplicate the vectors found; kept alongside unless the user chooses to replace it."""
     replaces_memory_id: int | None = None
     """The memory the proposing model says this updates; replaced unless the user keeps both."""
+    contradicts_memory_id: int | None = None
+    """A memory this disagrees with, where it's unclear which is right; the user settles it."""
     valid_from: AwareDatetime | None = None
     """When the statement became true: the model's date, or its conversations' latest."""
     valid_to: AwareDatetime | None = None

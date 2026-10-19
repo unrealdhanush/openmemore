@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -48,6 +48,12 @@ class MemoryEdit(BaseModel):
 
     content: MemoryText
     subject: Label | None = None
+
+
+class Resolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: Literal["keep_from", "keep_to", "both"]
 
 
 class Decision(BaseModel):
@@ -124,6 +130,8 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
         view["similar"] = _memory(similar) if similar and similar.active else None
         replaces = repo.get_memory(conn, p.replaces_memory_id) if p.replaces_memory_id else None
         view["replaces"] = _memory(replaces) if replaces else None
+        disputed = repo.get_memory(conn, p.contradicts_memory_id) if p.contradicts_memory_id else None
+        view["contradicts"] = _memory(disputed) if disputed else None
         return view
 
     def index(request: Request) -> Response:
@@ -140,8 +148,11 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
                 "SELECT DISTINCT scope FROM memories UNION SELECT DISTINCT scope FROM conversations ORDER BY 1"
             ).fetchall()
             projects = repo.project_labels(conn, None)
+        with connection() as conn:
+            conflicts = repo.count_open_contradictions(conn)
         return JSONResponse({
             "pending_proposals": counts["pending_proposals"],
+            "conflicts": conflicts,
             "due_for_consolidation": counts["due_for_consolidation"],
             "memories": counts["memories"],
             "scopes": [r[0] for r in labels],
@@ -196,6 +207,35 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
             call.summary = f"{done} of {len(d.ids)} proposals"
             call.result_count = done
         return JSONResponse({"done": done, "failed": failed})
+
+    def conflicts(request: Request) -> Response:
+        from openmcp import relations
+
+        with connection() as conn:
+            items = []
+            for link in relations.open_contradictions(conn):
+                a, b = repo.get_memory(conn, link.from_memory), repo.get_memory(conn, link.to_memory)
+                if a and b:
+                    items.append({"id": link.id, "source": link.source, "created_at": repo.to_iso(link.created_at),
+                                  "from": _memory(a), "to": _memory(b)})
+        return JSONResponse(items)
+
+    async def resolve_conflict(request: Request) -> Response:
+        from datetime import UTC, datetime
+
+        from openmcp import relations
+
+        r = await body(request, Resolution)
+        link_id = int(request.path_params["id"])
+        with connection() as conn, audit.audited(conn, CLIENT, "resolve conflict") as call:
+            call.summary = f"conflict={link_id}, {r.resolution}"
+            try:
+                with db.transaction(conn):
+                    relations.resolve(conn, link_id, r.resolution, datetime.now(UTC), source=CLIENT)
+            except relations.ResolveError as e:
+                return error(str(e), 404 if "not found" in str(e) else 400)
+            call.result_count = 1
+        return JSONResponse({"ok": True})
 
     def duplicates(request: Request) -> Response:
         with connection() as conn, audit.audited(conn, CLIENT, "find duplicates") as call:
@@ -271,6 +311,8 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
         Route("/api/proposals/{id:int}/approve", approve, methods=["POST"]),
         Route("/api/proposals/{id:int}/reject", reject, methods=["POST"]),
         Route("/api/duplicates", duplicates, methods=["POST"]),
+        Route("/api/conflicts", conflicts),
+        Route("/api/conflicts/{id:int}/resolve", resolve_conflict, methods=["POST"]),
         Route("/api/memories", list_memories),
         Route("/api/memories/{id:int}/history", history),
         Route("/api/memories/{id:int}", edit_memory, methods=["POST"]),

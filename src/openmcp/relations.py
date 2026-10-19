@@ -62,6 +62,52 @@ def derived_from(conn: sqlite3.Connection, memory_id: int, conversation_ids: Ite
     ]
 
 
+def contradict(conn: sqlite3.Connection, a: int, b: int, now: datetime, source: str | None = None) -> int:
+    """`a` and `b` disagree. Until resolved, neither is current truth: both are left out of
+    current answers and labelled contradicted in history."""
+    existing = conn.execute(
+        "SELECT id FROM memory_links WHERE type = 'contradicts' AND resolved_at IS NULL "
+        "AND ((from_memory = ? AND to_memory = ?) OR (from_memory = ? AND to_memory = ?))", (a, b, b, a)).fetchone()
+    return existing[0] if existing else _add(conn, "contradicts", a, now, source, to_memory=b)
+
+
+Resolution = Literal["keep_from", "keep_to", "both"]
+
+
+class ResolveError(Exception):
+    """The contradiction can't be resolved as asked; the message says why."""
+
+
+def resolve(conn: sqlite3.Connection, link_id: int, resolution: Resolution, now: datetime,
+            source: str | None = None) -> Link:
+    """Settle a contradiction: one side was right (the other is superseded by it), or
+    both are true after all (nothing changes but the link)."""
+    row = conn.execute("SELECT * FROM memory_links WHERE id = ? AND type = 'contradicts'", (link_id,)).fetchone()
+    if row is None:
+        raise ResolveError(f"conflict {link_id} not found")
+    link = Link.model_validate(dict(row))
+    if link.resolved_at is not None:
+        raise ResolveError(f"conflict {link_id} was already resolved ({link.resolution})")
+    if resolution != "both":
+        keep, drop = (link.from_memory, link.to_memory) if resolution == "keep_from" else (link.to_memory, link.from_memory)
+        dropped = repo.get_memory(conn, drop)
+        if dropped is not None and dropped.active:
+            supersede(conn, keep, drop, now, source=source)
+    conn.execute("UPDATE memory_links SET resolved_at = ?, resolution = ? WHERE id = ?",
+                 (repo.to_iso(now), resolution, link_id))
+    return Link.model_validate(dict(conn.execute("SELECT * FROM memory_links WHERE id = ?", (link_id,)).fetchone()))
+
+
+def open_contradictions(conn: sqlite3.Connection, scopes=None) -> list[Link]:
+    where, params = "", []
+    if scopes is not None:
+        where = f" AND m.scope IN ({', '.join('?' * len(scopes))})"
+        params = list(scopes)
+    return [Link.model_validate(dict(r)) for r in conn.execute(
+        "SELECT l.* FROM memory_links l JOIN memories m ON m.id = l.from_memory "
+        f"WHERE l.type = 'contradicts' AND l.resolved_at IS NULL{where} ORDER BY l.id", params)]
+
+
 def links(conn: sqlite3.Connection, memory_id: int, type_: LinkType | None = None) -> list[Link]:
     """Every link from or to a memory, oldest first."""
     where, params = "(from_memory = ? OR to_memory = ?)", [memory_id, memory_id]

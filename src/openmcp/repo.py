@@ -110,7 +110,30 @@ def current_sql(alias: str = "") -> str:
     Timestamps are stored in to_iso's format, the same as SQLite's own, so text compares."""
     a = f"{alias}." if alias else ""
     return (f"{a}superseded_by IS NULL AND ({a}valid_to IS NULL "
-            f"OR {a}valid_to > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            f"OR {a}valid_to > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AND NOT EXISTS ("
+            f"SELECT 1 FROM memory_links l WHERE l.type = 'contradicts' AND l.resolved_at IS NULL "
+            f"AND (l.from_memory = {a}id OR l.to_memory = {a}id))")
+
+
+def contradicted(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> set[int]:
+    """Which of these memories are in an unresolved contradiction."""
+    if not memory_ids:
+        return set()
+    marks = ", ".join("?" * len(memory_ids))
+    rows = conn.execute(
+        f"SELECT from_memory, to_memory FROM memory_links WHERE type = 'contradicts' AND resolved_at IS NULL "
+        f"AND (from_memory IN ({marks}) OR to_memory IN ({marks}))", [*memory_ids, *memory_ids])
+    return {i for row in rows for i in row} & set(memory_ids)
+
+
+def count_open_contradictions(conn: sqlite3.Connection, scopes: Sequence[str] | None = None) -> int:
+    where, params = "", []
+    if scopes is not None:
+        clause, params = _in("m.scope", scopes)
+        where = f" AND {clause}"
+    return conn.execute(
+        "SELECT COUNT(*) FROM memory_links l JOIN memories m ON m.id = l.from_memory "
+        f"WHERE l.type = 'contradicts' AND l.resolved_at IS NULL{where}", params).fetchone()[0]
 
 
 def timeline_sql(alias: str = "", *, history: bool = False, as_of: datetime | None = None) -> tuple[str, list]:
@@ -734,12 +757,12 @@ def mark_consolidated(conn: sqlite3.Connection, conversation_id: int, through: i
 def insert_proposal(conn: sqlite3.Connection, p: NewProposal) -> int:
     cur = conn.execute(
         "INSERT INTO proposals (action, kind, content, subject, project, scope, reason, source_client, confidence, "
-        "content_hash, similar_memory_id, replaces_memory_id, created_at, valid_from, valid_to) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, similar_memory_id, replaces_memory_id, created_at, valid_from, valid_to, contradicts_memory_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             p.action, p.kind, p.content, p.subject, p.project, p.scope, p.reason, p.source_client, p.confidence,
             p.content_hash, p.similar_memory_id, p.replaces_memory_id, to_iso(p.created_at),
-            _iso_or_none(p.valid_from), _iso_or_none(p.valid_to),
+            _iso_or_none(p.valid_from), _iso_or_none(p.valid_to), p.contradicts_memory_id,
         ),
     )
     proposal_id = cur.lastrowid
@@ -925,4 +948,5 @@ def store_counts(conn: sqlite3.Connection) -> dict[str, object]:
         "pending_embeddings": count_pending_embeddings(conn),
         "pending_proposals": count_pending_proposals(conn),
         "due_for_consolidation": count_due_conversations(conn, None),
+        "conflicts": count_open_contradictions(conn),
     }

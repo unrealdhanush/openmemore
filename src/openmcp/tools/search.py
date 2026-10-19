@@ -113,15 +113,15 @@ def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
     return out
 
 
-def memory_status(m: Memory, now: datetime) -> str:
+def memory_status(m: Memory, now: datetime, disputed: bool = False) -> str:
     if m.superseded_by is not None:
         return "superseded"
     if m.valid_to is not None and m.valid_to <= now:
         return "ended"
-    return "current"
+    return "contradicted" if disputed else "current"
 
 
-def _memory_hit(m: Memory, score: float, now: datetime) -> SearchHit:
+def _memory_hit(m: Memory, score: float, now: datetime, disputed: bool = False) -> SearchHit:
     return SearchHit(
         type="memory",
         id=m.id,
@@ -132,7 +132,7 @@ def _memory_hit(m: Memory, score: float, now: datetime) -> SearchHit:
         source=m.source_client,
         created_at=m.created_at,
         score=score,
-        status=memory_status(m, now),
+        status=memory_status(m, now, disputed),
         replaced_by=m.superseded_by,
         valid_from=m.valid_from,
         valid_to=m.valid_to,
@@ -253,8 +253,10 @@ def search_context(
             entry.score *= RECALL_WEIGHT
 
     ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
+    disputed = repo.contradicted(conn, [e.item.id for e in ranked if isinstance(e.item, Memory)])
     hits = [
-        _memory_hit(e.item, e.score, now) if isinstance(e.item, Memory) else _chat_hit(e.item, e.score) for e in ranked
+        _memory_hit(e.item, e.score, now, e.item.id in disputed) if isinstance(e.item, Memory)
+        else _chat_hit(e.item, e.score) for e in ranked
     ]
     has_chats = any(h.type == "chat" for h in hits)
     return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)

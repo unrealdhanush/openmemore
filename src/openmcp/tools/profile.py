@@ -78,4 +78,5 @@ def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = 
         recent_decisions=group("decision"),
         project_note=note,
         known_projects=known,
+        unresolved_conflicts=repo.count_open_contradictions(conn, caller.scopes.read_scopes),
     )
