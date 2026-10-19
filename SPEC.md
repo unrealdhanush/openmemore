@@ -122,6 +122,7 @@ MCP tools / CLI  ->  Pydantic models (models.py)  ->  repository (repo.py)  ->  
 - `search_context`: p95 under 100ms once warm, on a store of 10k memories and 100k chunks.
 - `save_memories` with 20 items: p95 under 300ms once warm.
 - Every tool call records `duration_ms` in `audit_log`; `openmcp audit --stats` prints p50/p95 per tool so these budgets are checked against real numbers.
+- `scripts/benchmark.py` checks the two p95 budgets on a synthetic store (Zipf-distributed vocabulary, random unit vectors; queries and saves use the real model). Measured 2026-10-18 on an M-series Mac: `search_context` p50 72ms / p95 76ms, `save_memories` (20) p50 208ms / p95 219ms; startup ~360ms. About 60ms of each search is the exact vector scan over 100k chunks, which grows linearly with the store.
 
 ---
 
@@ -155,7 +156,7 @@ openmcp/
       __init__.py       # transcript capture runner (changed files only, time budget)
       claude_code.py    # Claude Code session JSONL parser
       vscode_copilot.py # VS Code Copilot Chat session parser
-    embed.py            # fastembed wrapper, lazy-loaded
+    embed.py            # fastembed wrapper, lazy-loaded; embeds pending rows
     ingest/
       jobs.py           # job table, resumable runner
       normalize.py      # common conversation/message schema
@@ -163,6 +164,8 @@ openmcp/
       claude.py         # Claude export parser
       detect.py         # auto-detect provider from zip contents
     audit.py
+  scripts/
+    benchmark.py        # performance budget check (Section 4.3)
   tests/
     fixtures/           # SYNTHETIC export samples only
     test_*.py
@@ -225,8 +228,11 @@ CREATE TABLE memories (
   superseded_by  INTEGER REFERENCES memories(id)   -- history kept on update
 );
 
--- Full-text: FTS5 over memories(subject, content) and chunks(text)
--- Vectors:   sqlite-vec vec0 tables, float[384], keyed by memories.id and chunks.id
+-- Full-text: FTS5 over memories(subject, content) and chunks(text); an fts5vocab table over the
+--            chunk index gives each term's document count (search skips very common words)
+-- Vectors:   sqlite-vec vec0 tables memories_vec / chunks_vec, float[384], cosine distance, keyed
+--            by memories.id and chunks.id; removed with their rows (and on supersede) by triggers.
+--            memories.embedded / chunks.embedded mark rows that have a vector (0 = pending)
 
 CREATE TABLE audit_log (
   id            INTEGER PRIMARY KEY,
@@ -304,7 +310,7 @@ save_memories(
 
 - Run every item through the secret filter (Section 8). Reject matches; never store them.
 - Exact duplicate (same normalized hash, active, same scope) → skip.
-- Near-duplicate (cosine ≥ 0.92, same kind) → **save anyway** but report it in `possible_duplicates`, so the calling model can follow up with `update_memory` or `forget`. No silent merging in v1.
+- Near-duplicate (cosine ≥ 0.92, same kind, in a scope the client can read, including earlier items in the same call) → **save anyway** but report it in `possible_duplicates` (existing content wrapped per Section 8), so the calling model can follow up with `update_memory` or `forget`. No silent merging in v1.
 - Description should tell the model to save when the user states a preference, makes a decision, or finishes meaningful work on a project, and to **never save secrets, credentials, or other people's private details**. One-off questions go to `record_exchange` instead.
 
 ### 7.2 `search_context`
@@ -317,7 +323,10 @@ search_context(
   limit?: int = 10            # max 25
 ) -> { results: [{ type: 'memory'|'chat', id, content, kind?, subject?, project?, conversation_id?, title?, role?, source, created_at, score }] }
 ```
-- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion, plus a mild recency boost. M1 fuses the two keyword lists (memories, chat chunks); M2 adds vector lists and the recency boost to the same fusion.
+- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion (k = 60), plus a mild recency boost. Up to four ranked lists: keyword and vector, for memories and for chat chunks. Without the embedding model (not downloaded yet) the vector lists are simply missing.
+- Vector search always returns the nearest items, related or not, so vector hits must have cosine similarity ≥ 0.55 and be within 0.08 of the best vector hit (calibrated for bge-small; Section 14).
+- Recency boost: at most 0.0005 added to a fused score (a top rank is worth ≈ 0.016), halving every 30 days, counted in whole hours so items written close together still tie.
+- Chat keyword search leaves out the most common query words once the rest already match 8,000 chunks between them: ranking costs ~1.6ms per thousand matches, and BM25 gives such words almost no weight.
 - Only searches scopes the client may read.
 - Chat results return the matching chunk plus `conversation_id`, conversation title, and source, not whole conversations; `recent_conversations(conversation_id=…)` reads the rest.
 - Chats have no kind or project, so filtering on either excludes them.
@@ -530,8 +539,8 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
 - **Done when:** you ask Copilot (VS Code) something without any tool call recording it, then ask Claude Desktop "what did I ask Copilot?" and about the topic by name, and it answers from the captured transcript. An automated test scripts the same flow with a real server process and a synthetic transcript.
 
 ### M2 — Semantic search
-- `embed.py` with lazy model loading (don't slow server startup).
-- `sqlite-vec` tables; embed on write.
+- `embed.py` with lazy model loading (don't slow server startup). Servers never download the model (too slow for a tool call): without it they use keyword search and leave new rows pending. `openmcp embed` downloads it (to `<data dir>/models`) and embeds everything pending; `setup` and `capture` run it too. `ping` reports whether semantic search is ready.
+- `sqlite-vec` tables; embed on write: memories before their write transaction (the vector is needed for near-duplicate checks), chunks from `record_exchange` and transcript capture right after it, within 200ms, newest first.
 - Hybrid search with reciprocal rank fusion and recency boost; near-duplicate detection in `save_memories`.
 - **Done when:** a paraphrased query finds a memory that keyword search alone misses (test it), and a benchmark script on a synthetic 10k-memory / 100k-chunk store meets the Section 4.3 budget.
 
@@ -559,6 +568,8 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
 - **Review UI**: small local web page to browse, edit, and approve memories.
 - **More importers**: Gemini (Google Takeout), others.
+- **Vector compression**, when stores grow well past 100k chunks (the exact scan is ~60ms there). sqlite-vec stores only float32, int8, and bit vectors, so TurboQuant or PolarQuant as published would need a custom scan outside SQLite; their core idea (a fixed random rotation, so one calibrated quantizer fits every coordinate) can be applied to sqlite-vec's int8 storage. Its built-in `vec_quantize_int8(v, 'unit')` wastes most of the range on bge vectors (coordinates ≈ ±0.05) and kept only 82% of the true top 10 in a test.
+- **A stronger embedding model**, if bge-small's misses matter in practice (Section 14).
 - **More capture sources**: Cursor and others that keep local transcripts (verify each format on a real install first); client hooks where they exist, for capture without waiting for the next read.
 - **Per-user evals**: auto-generated tests checking whether stored context actually improves answers.
 
@@ -574,7 +585,8 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 ## 14. Open questions
 
 - Should `get_profile` be called automatically at session start, or left to the model? (Depends on client support for resources versus tools.)
-- What's the right near-duplicate threshold? Tune it on real data in M2.
+- ~~What's the right near-duplicate threshold?~~ 0.92 with bge-small: rewordings score 0.97–0.995, different facts 0.73–0.84 ("allergic to peanuts" vs "shellfish": 0.84), but true paraphrases sit right on the line ("Allergic to peanuts." vs "Has a peanut allergy.": 0.920). Revisit on real data.
+- Search similarity cutoffs (0.55 floor, 0.08 window) come from a 20-question synthetic set: 18/20 paraphrases found, ~1 unrelated item per query. bge-small misses some paraphrases entirely: "how was I planning to deal with the fitness app throttling me" ranks the Strava 429 memory 11th (similarity 0.48). A test records this as an expected failure, so a better model shows up as a test to update.
 - Should imported chats ever be readable by default, or opt-in per scope?
 - ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

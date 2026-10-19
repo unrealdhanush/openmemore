@@ -10,6 +10,8 @@ dependencies = [
     "rich",
     "tomli-w",
     "pydantic>=2",
+    "fastembed>=0.9.0",
+    "sqlite-vec>=0.1.9",
 ]
 
 [project.scripts]
@@ -32,3 +34,4 @@ python-preference = "only-managed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["real_model: uses the real embedding model (downloaded once to ~/.cache/openmcp-test-models)"]

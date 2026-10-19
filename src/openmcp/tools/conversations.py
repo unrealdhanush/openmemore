@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from openmcp import db, repo
+from openmcp import db, embed, repo
 from openmcp.models import (
     MAX_CODE_CHARS,
     RECENT_MESSAGES_PER_CONVERSATION,
@@ -139,6 +139,9 @@ def record_exchange(
             _add_message(conn, conversation_id, "user", question, now),
             _add_message(conn, conversation_id, "assistant", answer, now),
         ]
+    # After the write, so the transaction stays short; newest first, so this exchange's
+    # chunks are embedded before any backlog.
+    embed.embed_pending(conn, embed.get_embedder(), budget_ms=embed.WRITE_BUDGET_MS)
     return RecordExchangeResult(conversation_id=conversation_id, message_ids=ids, redacted=reasons)
 
 

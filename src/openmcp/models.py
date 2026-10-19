@@ -32,6 +32,10 @@ MemoryId = Annotated[int, Field(ge=1)]
 
 Role = Literal["user", "assistant", "system", "tool"]
 
+VectorTable = Literal["memories", "chunks"]
+"""Tables whose rows get embeddings (SPEC.md M2); each has a `<table>_vec` companion."""
+VECTOR_TABLES: tuple[VectorTable, ...] = ("memories", "chunks")
+
 CaptureSource = Literal["claude-code", "vscode-copilot"]
 """Clients whose transcripts OpenMCP can read from disk (SPEC.md M1.5). Each name is
 also the client name it connects with, and the `provider` of what it captures."""
@@ -136,7 +140,7 @@ class Message(NewMessage):
 
 
 class ChunkMatch(BaseModel):
-    """A chunk found by full-text search, with the conversation it belongs to."""
+    """A chunk found by search, with the conversation it belongs to."""
 
     chunk_id: int
     message_id: int
@@ -147,7 +151,7 @@ class ChunkMatch(BaseModel):
     title: str | None
     provider: str
     rank: float
-    """bm25: lower is better."""
+    """Lower is better: bm25 for keyword matches, cosine distance for vector matches."""
 
 
 class CaptureFile(BaseModel):
@@ -241,6 +245,8 @@ class PingResult(BaseModel):
     read_scopes: list[str]
     write_scope: str
     schema_version: int
+    semantic_search: str
+    """'ready (<model>)', or why only keyword search is available."""
 
 
 class PossibleDuplicate(BaseModel):
