@@ -144,6 +144,7 @@ openmcp/
     server.py           # FastMCP server, tool + prompt registration
     instructions.py     # server instructions + the standing instruction for each client
     setup.py            # `openmcp setup <client>`: register the server, install the standing instruction
+    clients.py          # the client registry (M3.5): config locations, instruction targets, app names
     tools/
       memories.py       # save, update, forget
       conversations.py  # record_exchange, recent_conversations
@@ -162,7 +163,9 @@ openmcp/
       jobs.py           # job table, resumable runner (store, then embed newest first)
       chatgpt.py        # ChatGPT export parser
       claude.py         # Claude export parser
-      detect.py         # open a zip/json/folder, auto-detect the provider from its contents
+      detect.py         # open a zip/json/folder, recognize the format from its contents
+      registry.py       # the importer registry (M3.5): built-in importers plus register()
+      openmcp_format.py # OpenMCP's own conversation format: a way in for any provider via a converter
     audit.py
   scripts/
     benchmark.py        # performance budget check (Section 4.3)
@@ -457,8 +460,8 @@ read_scopes = ["work"]
 write_scope = "work"
 ```
 
-- The client name comes from `openmcp serve --client <name>`.
-- Unknown clients fall back to `[defaults]`.
+- The client name comes from `openmcp serve --client <name>` or, without `--client` (M3.5), from the name the application reports when it connects (MCP `clientInfo`): the `app` pins in config first, then the client registry, then a name made from the application's own (`Some Editor 2` → `some-editor-2`). `ping` says which (`identified_by`).
+- Clients without a `[clients.<name>]` table fall back to `[defaults]`.
 - Scopes are free-form strings; `personal` and `work` are just the starting set.
 - With these defaults, Cursor can't read what Claude Desktop writes (`personal`). That's the isolation working as designed. For the cross-assistant tests (M1, v1), use a client that reads `personal` (e.g. Gemini CLI, which falls back to `[defaults]`) or add `personal` to Cursor's `read_scopes`.
 
@@ -483,12 +486,20 @@ Captured conversations take the source client's `write_scope`.
 
   App names aren't authenticated, so this catches misconfiguration, not attacks.
 
-| Client | Registers the server | Standing instruction | Capture |
-|---|---|---|---|
-| `claude-desktop` | `claude_desktop_config.json` (top-level `mcpServers`) | printed, to paste into Settings → Profile | `record_exchange` |
-| `vscode-copilot` | `settings.json` `mcp.servers` (or `mcp.json` on VS Code 1.102+) | `github.copilot.chat.codeGeneration.instructions` | transcripts |
-| `claude-code` | `claude mcp add --scope user` | marked block in `~/.claude/CLAUDE.md` | transcripts |
-| others | printed snippet | printed | `record_exchange` |
+Setup comes from the client registry (`src/openmcp/clients.py`, listed by `openmcp clients`). Verified entries are configured automatically; entries not yet checked on a real install are printed, and `--try` lets setup write them (with `.bak` copies). Any client not in the registry gets one generic snippet, `openmcp serve` with no `--client`, plus the pointer instruction on the clipboard.
+
+| Client | Registers the server | Standing instruction | Capture | Verified |
+|---|---|---|---|---|
+| `claude-desktop` | `claude_desktop_config.json` (top-level `mcpServers`) | pointer, pasted into Settings → Profile | `record_exchange` | yes |
+| `vscode-copilot` | `settings.json` `mcp.servers` (or `mcp.json` on VS Code 1.102+) | `github.copilot.chat.codeGeneration.instructions` | transcripts | yes (1.99.3) |
+| `claude-code` | `claude mcp add --scope user` | marked block in `~/.claude/CLAUDE.md` | transcripts | yes |
+| `cursor` | `~/.cursor/mcp.json` | pointer, pasted into User Rules | `record_exchange` | not yet |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` | pointer, pasted into global rules | `record_exchange` | not yet |
+| `gemini-cli` | `~/.gemini/settings.json` | marked block in `~/.gemini/GEMINI.md` | `record_exchange` | not yet |
+| `cline` | Cline's `cline_mcp_settings.json` in VS Code's global storage | pointer, pasted into Cline's rules | `record_exchange` | not yet |
+| `lm-studio` | `~/.lmstudio/mcp.json` | pointer, pasted into the system prompt | `record_exchange` | not yet |
+| `codex-cli` | `~/.codex/config.toml` (`[mcp_servers.openmcp]`) | marked block in `~/.codex/AGENTS.md` | `record_exchange` | not yet |
+| anything else | generic snippet (printed) | pointer (clipboard) | `record_exchange` | n/a |
 
 Example Claude Desktop config (README should include one per supported client):
 
@@ -589,6 +600,7 @@ Work:
 - **One-click installs** where a client offers them (e.g. installable extension bundles, install links), each verified on a current version before relying on it.
 - Web-only assistants (ChatGPT, claude.ai, Gemini on the web) can't start a local server: they're reachable through exports (M3) or remote access (Section 12). Documented, not hidden.
 - **Done when:** a client with no registry entry and no `--client` (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; at least four registry clients, Cursor among them, are set up automatically and verified; importers and transcript readers are registries, with a third provider's importer added through the registry alone; existing setups keep working.
+- **Status (2026-10-18):** built: `--client` optional with naming from `clientInfo`; the client registry (9 entries: 3 verified, 6 printed until checked) with registry-driven `setup`, `--try`, `openmcp clients`, and the generic path; the importer registry with `register()` and the OpenMCP format as the third importer. Tested: an unknown client over stdio with no `--client` gets its configured scopes and records and recalls; an invented provider's importer added through `register()` alone imports end to end. Open: verifying Cursor and the other new entries on real installs (none are installed on the development machine); one-click installs; transcript readers are a registry in code (`SOURCES`) but `[capture] sources` still only accepts the built-in names.
 
 ### M4 — Scopes and ownership
 - Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.

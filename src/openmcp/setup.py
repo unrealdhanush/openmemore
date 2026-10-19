@@ -1,11 +1,12 @@
 """`openmcp setup <client>`: connect a client to OpenMCP and install its standing instruction.
 
-Each client gets a list of steps. Steps with `apply` change a file or run a command;
-steps with only `manual` are things the user has to do in the app, printed for them.
-File edits keep a `.bak` copy and refuse to touch a file they can't parse.
-
-Verified clients: Claude Desktop, VS Code Copilot Chat (1.99), Claude Code. Others get
-printed instructions only, until their config formats are checked on a real install.
+Steps come from the client registry (openmcp.clients): register the server, put the
+standing instruction where the client reads it, record the client's app name, turn on
+capture where it exists, restart. Steps with `apply` change a file or run a command;
+steps with only `manual` are things the user does by hand, printed for them. File edits
+keep a `.bak` copy and refuse to touch a file they can't parse. Entries not yet checked
+on a real install are printed unless the user asks to try them; clients with no entry
+get the generic snippet, which works in any MCP client.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Any
 import openmcp
 from openmcp import config
 from openmcp.capture import vscode_copilot
+from openmcp.clients import CLIENTS, ClientSpec, ServerConfig
 from openmcp.instructions import STANDING_PREFIX, pointer_instruction, standing_instruction
 from openmcp.models import CaptureSource
 from openmcp.paths import app_data_dir
@@ -32,11 +34,6 @@ SERVER_NAME = "openmcp"
 BLOCK_START = "<!-- openmcp:start -->"
 BLOCK_END = "<!-- openmcp:end -->"
 COPILOT_INSTRUCTIONS = "github.copilot.chat.codeGeneration.instructions"
-
-# How each application names itself over MCP (clientInfo.name), confirmed from the apps:
-# VS Code sends product.json's nameLong; Claude Code's identity is bundled in Claude.app;
-# Claude Desktop reported 'claude-ai' in the audit log (2026-10-18).
-APP_NAMES = {"claude-desktop": "claude-ai", "vscode-copilot": "Visual Studio Code", "claude-code": "claude-code"}
 VSCODE_DISCOVERY = "chat.mcp.discovery.enabled"
 
 
@@ -150,9 +147,11 @@ def installed_command(
     return None
 
 
-def server_entry(ctx: Context, client: str) -> dict[str, Any]:
-    """The {command, args, env} block most clients use for a stdio MCP server."""
-    entry: dict[str, Any] = {"command": ctx.command[0], "args": [*ctx.command[1:], "serve", "--client", client]}
+def server_entry(ctx: Context, client: str | None) -> dict[str, Any]:
+    """The {command, args, env} block most clients use for a stdio MCP server. Without a
+    client name, the server identifies the client from what it reports (SPEC.md M3.5)."""
+    args = [*ctx.command[1:], "serve", *(["--client", client] if client else [])]
+    entry: dict[str, Any] = {"command": ctx.command[0], "args": args}
     if ctx.base != ctx.user_home / ".openmcp":
         entry["env"] = {"OPENMCP_HOME": str(ctx.base)}
     return entry
@@ -181,6 +180,29 @@ def _edit_json(path: Path, change: Callable[[dict[str, Any]], None], hint: str, 
     return str(path)
 
 
+def _edit_toml(path: Path, change: Callable[[dict[str, Any]], None], hint: str) -> str:
+    """Like _edit_json, for TOML. A file with comments is left alone: rewriting drops them."""
+    import tomllib
+
+    import tomli_w
+
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+        if any(line.lstrip().startswith("#") for line in text.splitlines()):
+            raise SetupError(f"{path} has comments that rewriting would drop, so it wasn't changed. Add this by hand:\n{hint}")
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            raise SetupError(f"{path} isn't valid TOML, so it wasn't changed. Add this by hand:\n{hint}") from None
+        shutil.copy2(path, path.with_name(path.name + ".bak"))
+    else:
+        data = {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+    change(data)
+    path.write_text(tomli_w.dumps(data), encoding="utf-8")
+    return str(path)
+
+
 def _set_block(path: Path, text: str) -> str:
     """Put `text` between OpenMCP markers in a Markdown file, replacing an earlier block."""
     block = f"{BLOCK_START}\n{text}\n{BLOCK_END}"
@@ -198,9 +220,26 @@ def _set_block(path: Path, text: str) -> str:
     return str(path)
 
 
-def _pin_app(ctx: Context, client: str) -> Step:
-    app = APP_NAMES[client]
+def _nested(data: dict[str, Any], key: tuple[str, ...]) -> dict[str, Any]:
+    """data[key[0]][key[1]]..., creating tables on the way."""
+    for part in key:
+        data = data.setdefault(part, {})
+    return data
 
+
+def _snippet(server: ServerConfig, entry: dict[str, Any]) -> str:
+    if server.format == "toml":
+        import tomli_w
+
+        data: dict[str, Any] = {}
+        _nested(data, server.key)[SERVER_NAME] = entry
+        return tomli_w.dumps(data)
+    wrapped: dict[str, Any] = {}
+    _nested(wrapped, server.key)[SERVER_NAME] = entry
+    return json.dumps(wrapped, indent=2)
+
+
+def _pin_app(ctx: Context, client: str, app: str) -> Step:
     def apply() -> str:
         config.set_client_app(config.config_path(ctx.base), client, app)
         return str(config.config_path(ctx.base))
@@ -223,51 +262,73 @@ def _enable_capture(ctx: Context, source: CaptureSource) -> Step:
     )
 
 
-# --- clients -------------------------------------------------------------------------
+def _unverified(spec: ClientSpec, what: str, path: Path, text: str) -> Step:
+    return Step(
+        f"{what} (not checked on a real {spec.display} install yet, so not written)",
+        manual=f"Add this to {path}, or run `openmcp setup {spec.name} --try` to let setup write it (it keeps a "
+        f".bak copy). Either way, please report whether it worked, so the entry can be marked verified.\n\n{text}",
+    )
+
+
+# --- steps from the registry -----------------------------------------------------------
 
 
 def claude_desktop_config(ctx: Context) -> Path:
     # Linux has no official Claude Desktop; community builds use the same layout.
-    return app_data_dir(ctx.user_home, ctx.platform) / "Claude" / "claude_desktop_config.json"
+    server = CLIENTS["claude-desktop"].server
+    assert server is not None
+    return server.path(ctx.user_home, ctx.platform)
 
 
-def _claude_desktop(ctx: Context) -> list[Step]:
-    path = claude_desktop_config(ctx)
-    entry = server_entry(ctx, "claude-desktop")
+def _register(ctx: Context, spec: ClientSpec, try_unverified: bool) -> list[Step]:
+    """Add the server entry to the client's MCP config file."""
+    server = spec.server
+    assert server is not None
+    path = server.path(ctx.user_home, ctx.platform)
+    entry = {**server.extra, **server_entry(ctx, spec.name)}
+    snippet = _snippet(server, entry)
+    if spec.verified is None and not try_unverified:
+        return [_unverified(spec, f"Add the openmcp server to {path}", path, snippet)]
 
-    def add_server(data: dict[str, Any]) -> None:
-        # Top level: a block nested anywhere else (e.g. inside "preferences") is ignored.
-        data.setdefault("mcpServers", {})[SERVER_NAME] = entry
+    def change(data: dict[str, Any]) -> None:
+        # Exactly at the registry's key: a block nested anywhere else is ignored by the client.
+        _nested(data, server.key)[SERVER_NAME] = entry
 
-    return [
-        Step(
-            f"Add the openmcp server to {path}",
-            apply=lambda: _edit_json(
-                path, add_server, json.dumps({"mcpServers": {SERVER_NAME: entry}}, indent=2), indent=2
+    if server.format == "toml":
+        apply = lambda: _edit_toml(path, change, snippet)  # noqa: E731
+    else:
+        apply = lambda: _edit_json(path, change, snippet, indent=server.indent)  # noqa: E731
+    return [Step(f"Add the openmcp server to {path}", apply=apply)]
+
+
+def _instruction(ctx: Context, spec: ClientSpec, try_unverified: bool) -> list[Step]:
+    target = spec.instruction
+    text = standing_instruction(captured=spec.capture is not None) if target.full else pointer_instruction()
+    if target.kind == "paste":
+        return [
+            _copy_step(ctx, text, spec.display),
+            Step(
+                f"Add the standing instruction to {spec.display}",
+                manual=f"Paste it here: {target.where}, replacing any earlier OpenMCP instruction. It's short on "
+                "purpose: the details come from the openmcp server, so it won't need replacing when they change."
+                f"\n\n{text}",
             ),
-        ),
-        _pin_app(ctx, "claude-desktop"),
-        _copy_step(ctx, pointer_instruction(), "Claude Desktop"),
-        Step(
-            "Add the standing instruction to Claude Desktop",
-            manual="In Claude Desktop, open Settings → Profile and paste it into your personal preferences, "
-            "replacing any earlier OpenMCP instruction. Claude Desktop keeps these in your account, so setup "
-            "can't put it there. It's short on purpose: the details come from the openmcp server, so it "
-            "won't need replacing when they change.\n\n" + pointer_instruction(),
-        ),
-        Step(
-            "Restart Claude Desktop",
-            manual="Quit Claude Desktop completely (macOS: ⌘Q; Windows: right-click its tray icon → Quit) "
-            "and reopen it.",
-        ),
-    ]
+        ]
+    assert target.kind == "markdown" and target.path is not None
+    path = target.path(ctx.user_home, ctx.platform)
+    if spec.verified is None and not try_unverified:
+        return [_unverified(spec, f"Add the standing instruction to {path}", path, f"{BLOCK_START}\n{text}\n{BLOCK_END}")]
+    return [Step(f"Add the standing instruction to {path}", apply=lambda: _set_block(path, text))]
 
 
-def _vscode_copilot(ctx: Context) -> list[Step]:
+def _vscode_copilot(ctx: Context, spec: ClientSpec) -> list[Step]:
+    """VS Code: servers live in settings.json or, from 1.102, mcp.json; its discovery of
+    other apps' servers must be off (it ran Claude Desktop's entry as Copilot's); the
+    instruction is a list setting."""
     user_dir = vscode_copilot.user_dir(ctx.user_home, ctx.platform)
     settings = user_dir / "settings.json"
-    mcp_json = user_dir / "mcp.json"  # VS Code 1.102+ keeps MCP servers here instead of settings.json
-    entry = {"type": "stdio", **server_entry(ctx, "vscode-copilot")}
+    mcp_json = user_dir / "mcp.json"
+    entry = {"type": "stdio", **server_entry(ctx, spec.name)}
     instruction = standing_instruction(captured=True)
 
     def add_server_to_settings(data: dict[str, Any]) -> None:
@@ -316,20 +377,14 @@ def _vscode_copilot(ctx: Context) -> list[Step]:
                 settings, add_instruction, json.dumps({COPILOT_INSTRUCTIONS: [{"text": instruction}]}, indent=4)
             ),
         ),
-        _pin_app(ctx, "vscode-copilot"),
-        _enable_capture(ctx, "vscode-copilot"),
-        Step(
-            "Reload VS Code",
-            manual="Run 'Developer: Reload Window', then use Copilot Chat in Agent mode with the openmcp tools enabled.",
-        ),
     ]
 
 
-def _claude_code(ctx: Context) -> list[Step]:
-    entry = server_entry(ctx, "claude-code")
+def _claude_code(ctx: Context, spec: ClientSpec) -> list[Step]:
+    """Claude Code registers servers through its own CLI, not a file setup should edit."""
+    entry = server_entry(ctx, spec.name)
     env = [f"--env={k}={v}" for k, v in entry.get("env", {}).items()]
     add = ["claude", "mcp", "add", "--scope", "user", *env, SERVER_NAME, "--", entry["command"], *entry["args"]]
-    memory = ctx.user_home / ".claude" / "CLAUDE.md"
 
     def register() -> str:
         # The resolved path, not "claude": on Windows an npm install is claude.cmd, which
@@ -344,38 +399,46 @@ def _claude_code(ctx: Context) -> list[Step]:
             raise SetupError(f"claude mcp add failed: {done.stderr.strip() or done.stdout.strip()}")
         return " ".join(add)
 
-    return [
-        Step("Register the openmcp server with Claude Code (user scope)", apply=register),
-        Step(
-            f"Add the standing instruction to {memory}",
-            apply=lambda: _set_block(memory, standing_instruction(captured=True)),
-        ),
-        _pin_app(ctx, "claude-code"),
-        _enable_capture(ctx, "claude-code"),
-        Step("Start a new Claude Code session", manual="Running sessions don't pick up new MCP servers."),
-    ]
+    return [Step("Register the openmcp server with Claude Code (user scope)", apply=register)]
 
 
-def _manual(ctx: Context, client: str) -> list[Step]:
-    snippet = json.dumps({"mcpServers": {SERVER_NAME: server_entry(ctx, client)}}, indent=2)
+def _generic(ctx: Context, client: str) -> list[Step]:
+    """Tier 0: any MCP client, from one snippet that's the same for every client."""
+    snippet = json.dumps({"mcpServers": {SERVER_NAME: server_entry(ctx, None)}}, indent=2)
     return [
         Step(
             f"Add the openmcp server to {client}",
-            manual=f"openmcp setup doesn't configure {client} automatically yet. Most clients take an "
-            f"MCP server block like this (Cursor: ~/.cursor/mcp.json; Gemini CLI: ~/.gemini/settings.json):\n\n{snippet}",
+            manual=f"{client} isn't in OpenMCP's client registry (`openmcp clients` lists it), which is fine: any MCP "
+            "client works. Add this to its MCP server config; most clients use this shape. The server works "
+            "out which client it's talking to from the name the client reports when it connects.\n\n" + snippet,
         ),
         _copy_step(ctx, pointer_instruction(), client),
         Step(
             "Add the standing instruction",
-            manual="Paste it where the client reads your own instructions (Cursor: User Rules; "
-            "Gemini CLI: ~/.gemini/GEMINI.md):\n\n" + pointer_instruction(),
+            manual="Paste it wherever the client reads your own instructions or rules:\n\n" + pointer_instruction(),
         ),
     ]
 
 
-AUTOMATIC = {"claude-desktop": _claude_desktop, "vscode-copilot": _vscode_copilot, "claude-code": _claude_code}
+SPECIAL: dict[str, Callable[[Context, ClientSpec], list[Step]]] = {
+    "vscode-copilot": _vscode_copilot,
+    "claude-code": _claude_code,
+}
 
 
-def plan(client: str, ctx: Context) -> list[Step]:
-    build = AUTOMATIC.get(client)
-    return build(ctx) if build else _manual(ctx, client)
+def plan(client: str, ctx: Context, try_unverified: bool = False) -> list[Step]:
+    spec = CLIENTS.get(client)
+    if spec is None:
+        return _generic(ctx, client)
+    if spec.name in SPECIAL:
+        steps = SPECIAL[spec.name](ctx, spec)
+        if spec.instruction.kind != "json-list":
+            steps += _instruction(ctx, spec, try_unverified)
+    else:
+        steps = _register(ctx, spec, try_unverified) + _instruction(ctx, spec, try_unverified)
+    if spec.app:
+        steps.append(_pin_app(ctx, spec.name, spec.app))
+    if spec.capture:
+        steps.append(_enable_capture(ctx, spec.capture))
+    steps.append(Step(f"Restart {spec.display}", manual=spec.restart))
+    return steps
