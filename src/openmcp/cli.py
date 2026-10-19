@@ -72,13 +72,18 @@ def init() -> None:
 
 @app.command()
 def serve(
-    client: str = typer.Option(..., "--client", help="Name of the MCP client launching this server, e.g. claude-desktop."),
+    client: str | None = typer.Option(
+        None, "--client",
+        help="Client name, e.g. claude-desktop. Optional: by default the server names the client from what it "
+        "reports when it connects.",
+    ),
 ) -> None:
     """Run the MCP server over stdio for one client."""
     # stdout carries the MCP protocol: nothing else may be printed to it.
     from openmcp.server import build_server
 
-    client = _client_name(client, "--client")
+    if client is not None:
+        client = _client_name(client, "--client")
     base = config.home()
     initialize(base)
     build_server(client, base).run(transport="stdio")
@@ -96,9 +101,12 @@ def _client_name(value: str, option: str) -> str:
 @app.command()
 def setup(
     client: str = typer.Argument(
-        ..., help="claude-desktop, vscode-copilot, or claude-code (others get printed instructions)."
+        ..., help="A client from `openmcp clients`, or any other MCP client's name (it gets the generic snippet)."
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the steps without changing anything."),
+    try_unverified: bool = typer.Option(
+        False, "--try", help="Write files for a client whose entry isn't verified on a real install yet (keeps .bak copies)."
+    ),
     dev: bool = typer.Option(
         False, "--dev", help="Register this development checkout itself: the app then runs whatever branch is checked out."
     ),
@@ -125,7 +133,7 @@ def setup(
             f"{installed[0]} instead, so the app and your data don't follow your branches. "
             "(--dev registers the checkout.)"
         )
-        args = [*installed, "setup", client, *(["--dry-run"] if dry_run else [])]
+        args = [*installed, "setup", client, *(["--dry-run"] if dry_run else []), *(["--try"] if try_unverified else [])]
         raise typer.Exit(subprocess.run(args).returncode)
     base = config.home()
     initialize(base)
@@ -133,7 +141,7 @@ def setup(
         base=base, user_home=Path.home(), platform=sys.platform, command=client_setup.openmcp_command()
     )
     incomplete = False
-    for number, step in enumerate(client_setup.plan(client, ctx), start=1):
+    for number, step in enumerate(client_setup.plan(client, ctx, try_unverified), start=1):
         console.print(f"[bold]{number}. {step.description}[/bold]")
         if step.apply is not None:
             if dry_run:
@@ -156,6 +164,26 @@ def setup(
             _run_embed()
     if incomplete:
         raise typer.Exit(1)
+
+
+@app.command("clients")
+def clients_command() -> None:
+    """List the clients `openmcp setup` knows how to configure. Any other MCP client works too."""
+    from openmcp.clients import CLIENTS
+
+    table = Table(box=None, header_style="bold")
+    for column in ("client", "app", "setup", "capture", "verified on a real install"):
+        table.add_column(column, overflow="fold", no_wrap=column in ("client", "setup", "capture"))
+    for spec in CLIENTS.values():
+        table.add_row(
+            spec.name, Text(spec.display), "automatic" if spec.verified else "printed (--try writes)",
+            "transcripts" if spec.capture else "record_exchange", Text(spec.verified or "not yet"),
+        )
+    console.print(table)
+    console.print(
+        "\nAny other MCP client: `openmcp setup <its name>` prints a snippet that works in any client, and the "
+        "server identifies the client from the name it reports when it connects."
+    )
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -417,7 +445,11 @@ def capture_command(
 
 # --- import ---------------------------------------------------------------------------
 
-PROVIDER_NAMES = {"chatgpt": "ChatGPT", "claude": "Claude"}
+def _format_name(importer_name: str) -> str:
+    from openmcp.ingest.registry import importer_named
+
+    importer = importer_named(importer_name)
+    return importer.display if importer else importer_name
 
 
 @app.command("import")
@@ -425,7 +457,7 @@ def import_command(
     path: Path = typer.Argument(..., help="The export: the .zip you downloaded, its conversations.json, or an unpacked folder."),
     scope: str | None = typer.Option(None, "--scope", "-s", help="Scope to store it in (default: config's default write scope)."),
 ) -> None:
-    """Import a ChatGPT or Claude data export, newest conversations first.
+    """Import a ChatGPT or Claude data export (or the OpenMCP format), newest conversations first.
 
     Safe to interrupt: running the same command again resumes where it stopped, and
     importing a file again does nothing once it's done."""
@@ -466,7 +498,7 @@ def import_command(
             )
             raise typer.Exit(130) from None
 
-    name = PROVIDER_NAMES[report.provider]
+    name = _format_name(report.provider)
     if report.already_done:
         console.print(f"Already imported: this {name} export ({report.total} conversations) was imported before.")
         return
@@ -494,7 +526,7 @@ def status_command() -> None:
         for j in jobs:
             status = j.status if not j.error else f"{j.status}: {j.error}"
             table.add_row(
-                str(j.id), PROVIDER_NAMES[j.provider], Text(Path(j.file_path).name), Text(status),
+                str(j.id), _format_name(j.provider), Text(Path(j.file_path).name), Text(status),
                 f"{j.processed}/{j.total if j.total is not None else '?'}",
                 _when(j.started_at) if j.started_at else "", _when(j.finished_at) if j.finished_at else "",
             )

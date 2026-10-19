@@ -24,8 +24,8 @@ from pathlib import Path
 
 from openmcp import db, embed, repo
 from openmcp.ingest import store_conversation
-from openmcp.ingest.detect import PARSERS, Export, load
-from openmcp.models import ExportProvider, IngestJob
+from openmcp.ingest.detect import Export, load
+from openmcp.models import IngestJob
 
 BATCH = 50
 
@@ -33,7 +33,8 @@ BATCH = 50
 @dataclass
 class ImportReport:
     job_id: int
-    provider: ExportProvider
+    provider: str
+    """The importer's name, e.g. 'chatgpt'."""
     total: int
     already_done: bool = False
     resumed_from: int = 0
@@ -60,39 +61,43 @@ def import_export(
     after each batch of conversations commits, `embed_progress(done, total)` after each
     batch of chunks is embedded."""
     export = load(path)
-    parse = PARSERS[export.provider]
+    parse = export.importer
     order = sorted(
         range(len(export.conversations)),
-        key=lambda i: (-parse.updated(export.conversations[i]), parse.external_id(export.conversations[i]) or "", i),
+        key=lambda i: (-parse.updated(export.conversations[i]), parse.identity(export.conversations[i]) or ("", ""), i),
     )
     total = len(order)
 
     job = repo.job_by_hash(conn, export.file_hash)
     if job is not None and job.status == "done":
-        return ImportReport(job_id=job.id, provider=export.provider, total=total, already_done=True)
+        return ImportReport(job_id=job.id, provider=parse.name, total=total, already_done=True)
     now = datetime.now(UTC)
     with db.transaction(conn):
         if job is None:
             job_id = repo.insert_job(conn, IngestJob(
-                provider=export.provider, file_path=str(path), file_hash=export.file_hash, status="queued",
+                provider=parse.name, file_path=str(path), file_hash=export.file_hash, status="queued",
                 total=total, cursor="0",
             ))
             start = 0
         else:
             job_id, start = job.id, min(int(job.cursor or 0), total)
         repo.start_job(conn, job_id, file_path=str(path), total=total, now=now)
-    report = ImportReport(job_id=job_id, provider=export.provider, total=total, resumed_from=start)
+    report = ImportReport(job_id=job_id, provider=parse.name, total=total, resumed_from=start)
 
     try:
         for batch_start in range(start, total, BATCH):
             batch_end = min(batch_start + BATCH, total)
             with db.transaction(conn):
                 for i in order[batch_start:batch_end]:
+                    raw = export.conversations[i]
                     try:
-                        parsed = parse.conversation(export.conversations[i])
+                        parsed = parse.conversation(raw)
                     except Exception as e:  # noqa: BLE001 - one malformed conversation mustn't stop the import
                         report.errors.append(f"conversation {i}: {type(e).__name__}: {e}")
                         parsed = None
+                    if parsed is not None and parsed.updated_at is None and parse.updated(raw) > 0:
+                        # Listings order by last activity: use the importer's sort key if the parse had none.
+                        parsed = parsed.model_copy(update={"updated_at": datetime.fromtimestamp(parse.updated(raw), UTC)})
                     stored = store_conversation(conn, parsed, scope) if parsed else (None, 0)
                     if stored[0] is None:
                         report.skipped += 1
@@ -128,11 +133,18 @@ def _embed_newest_first(
     """Embed the export's chunks, newest conversations first, BATCH conversations at a
     time. (Plain embed_pending goes by row id, and here the newest conversations got the
     lowest ids.) Progress counts conversations, like the store phase."""
-    parse = PARSERS[export.provider]
-    external = [e for e in (parse.external_id(export.conversations[i]) for i in order) if e]
-    conversations: list[int] = []
-    for start in range(0, len(external), LOOKUP):
-        conversations += repo.conversation_ids(conn, export.provider, external[start:start + LOOKUP])
+    # One export can hold several providers' conversations (the OpenMCP format), so
+    # conversations are looked up by (provider, id), a provider at a time.
+    identities = [k for k in (export.importer.identity(export.conversations[i]) for i in order) if k]
+    by_provider: dict[str, list[str]] = {}
+    for provider, external_id in identities:
+        by_provider.setdefault(provider, []).append(external_id)
+    stored: dict[tuple[str, str], int] = {}
+    for provider, external_ids in by_provider.items():
+        for start in range(0, len(external_ids), LOOKUP):
+            found = repo.conversation_id_map(conn, provider, external_ids[start:start + LOOKUP])
+            stored.update({(provider, e): cid for e, cid in found.items()})
+    conversations = [stored[k] for k in identities if k in stored]
     done = 0
     for start in range(0, len(conversations), BATCH):
         chunks = repo.pending_chunks_in(conn, conversations[start:start + BATCH])

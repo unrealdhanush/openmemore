@@ -90,15 +90,16 @@ def test_claude_plain_text_messages_and_untitled_conversations():
 
 def test_exports_are_recognized_from_their_contents(tmp_path):
     zipped = write_zip(tmp_path / "export.zip", raw("chatgpt"), folder="some-export-2026/")
-    assert load(zipped).provider == "chatgpt"
-    assert load(FIXTURES / "claude_export" / "conversations.json").provider == "claude"
-    assert load(FIXTURES / "claude_export").provider == "claude"  # an unpacked folder
+    assert load(zipped).importer.name == "chatgpt"
+    assert load(FIXTURES / "claude_export" / "conversations.json").importer.name == "claude"
+    assert load(FIXTURES / "claude_export").importer.name == "claude"  # an unpacked folder
 
 
 @pytest.mark.parametrize("contents, message", [
-    ({"conversations.json": "[{\"something\": 1}]"}, "doesn't look like"),
+    ({"conversations.json": "[{\"something\": 1}]"}, "doesn't look like a format OpenMCP can import"),
     ({"conversations.json": "{not json"}, "isn't valid JSON"),
-    ({"conversations.json": "{\"a\": 1}"}, "should hold a list"),
+    ({"conversations.json": "{\"a\": 1}"}, "doesn't look like a format"),
+    ({"conversations.json": "42"}, "should hold a list"),
     ({"other.json": "[]"}, "no conversations.json"),
 ])
 def test_unreadable_exports_say_why(tmp_path, contents, message):
@@ -256,7 +257,7 @@ def test_import_command_refuses_what_it_cant_read(home, tmp_path):
     bad = tmp_path / "notes.json"
     bad.write_text("[1, 2, 3]")
     code, out = cli("import", str(bad))
-    assert code == 2 and "doesn't look like a ChatGPT or Claude export" in out
+    assert code == 2 and "doesn't look like a format OpenMCP can import (it reads: ChatGPT, Claude, OpenMCP format)" in out
     assert cli("import", str(tmp_path / "missing.zip"))[0] == 2
 
 
