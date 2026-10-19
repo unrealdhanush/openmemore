@@ -641,22 +641,82 @@ The proposal queue doesn't depend on what wrote a proposal, so a local-model or 
 - a near-duplicate pair can be merged into one memory with history;
 - the page refuses requests without the token or with a foreign `Host`;
 - tested, including scopes: a client can't consolidate or propose from conversations it can't read.
-- **Status (2026-10-19):** built and tested (`tests/test_consolidation.py`, `tests/test_review.py`). The page's script was run against real API responses with a stand-in DOM, and the server was probed with curl: no token, a foreign `Host`, and a change without the header are all refused. **Remaining:** a run with real clients.
+- **Status (2026-10-19):** built and tested (`tests/test_consolidation.py`, `tests/test_review.py`). The page's script was run against real API responses with a stand-in DOM, and the server was probed with curl: no token, a foreign `Host`, and a change without the header are all refused.
+  - **Verified with real clients (2026-10-19):**
+    - **First run:** Cursor read two chats, from Claude Desktop and from Cursor itself, and proposed two memories citing both. One was approved and one rejected on the page; both decisions were audited as `review`.
+    - **Gaps it found, now fixed:**
+      - a proposal couldn't name the memory it updates (the `replaces` field);
+      - the page's counts went stale while it was open.
+    - **Second run:** a chat grew in Claude Desktop. Consolidation returned only its new messages, and Cursor proposed a project update with `replaces` naming the older project memory. Approving it made the older memory history (`superseded_by`), with provenance in the new memory's metadata.
+    - **Not yet seen on real data:** merging near-duplicates, which is tested.
 
----
+### Milestone map (after M5)
 
-## 12. Later (do not build in v1)
+M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified with real clients. The order below is the build order agreed on 2026-10-19. Features come first (M6 and M7), then a period of real use (M8) and the public release (M9). Employer approval for M9 has the longest lead time, so it can start now, alongside M6.
 
-- **Scheduled consolidation**: M5 consolidates when the user asks a connected assistant to. Running it on a schedule needs a model OpenMCP can call itself: a local model (Ollama), or a hosted one with the user's key, opt-in, since chats would leave the machine. Either one writes to M5's proposal queue.
-- **Drift detection**: notice when recent behavior contradicts stored preferences, lower confidence, and ask instead of assuming.
-- **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
-- **A standard for conversation transcripts**, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMCP's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
+| | Milestone | Depends on |
+|---|---|---|
+| M6 | Background service | — |
+| M7 | Automatic consolidation | M6 |
+| M8 | Use it for real | M6, M7 |
+| M9 | Public release | approval (start now) |
+| M10 | Web and mobile clients | M9 |
+| M11 | Transcript standard | M9, and evidence from M6 and M8 |
+
+### M6: Background service
+- `openmcp daemon`, installed as a per-user service (launchd on macOS, systemd user units on Linux, a scheduled task or service on Windows). It shares the store with the `serve` processes, like any other connection (WAL).
+- **Live capture:** transcripts are captured as they change (file watching), not only when a client next reads. Client hooks are used where a client has them.
+- **An OpenTelemetry receiver** (OTLP/HTTP on 127.0.0.1) for clients that export conversation text. Claude Code 2.1 does (Section 14), so its chats arrive live with no transcript reader. Its events map onto the OpenMCP conversation format.
+- `openmcp setup` offers to install the service, and `openmcp status` reports whether it is running.
+- **Done when:** a Claude Code chat is captured live through OpenTelemetry, with no transcript reader and no client reading first, and the service survives a reboot on macOS, Linux and Windows (CI covers what it can).
+
+### M7: Automatic consolidation
+- **A model OpenMCP calls itself, opt-in:**
+  - a local model through Ollama, with nothing leaving the machine;
+  - or a hosted model with the user's own API key, clearly marked as sending chats to that provider.
+- **Scheduled by M6** (for example nightly). It writes to M5's proposal queue, so review is unchanged: nothing becomes a memory without approval.
+- **Drift detection:** the same model flags memories that recent conversations contradict, as update proposals using `replaces`, rather than overwriting.
+- **Done when:** proposals appear overnight without asking an assistant, they're as reviewable as M5's, and with the local model no network request leaves the machine (tested).
+
+### M8: Use it for real
+- **A week of daily use** across the user's apps, with consolidation running.
+- **`openmcp report`:** a usage report from the audit log:
+  - what was recalled, and by which client;
+  - searches that found nothing;
+  - which clients recorded, and which were captured;
+  - proposals approved and rejected.
+- **Fix what hurts,** including the slow-runner timeout in the stdio scope test.
+- **Done when:** a week of real use needs no manual database fixes, and the report gives an evidence-based list of what to build next.
+
+### M9: Public release
+- **Pre-flight (Section 13):** employer approval, a final name, a license.
+- **New repository:** publish only the clean `main`, because GitHub keeps old PR refs.
+- **A package on PyPI** (`uv tool install <name>`).
+- **A README** for people who've never seen the project.
+- **The OpenMCP format** published as JSON Schema.
+- **Done when:** someone else, on a clean machine, installs it and connects two apps in under five minutes from the README alone.
+
+### M10: Web and mobile clients
+- An opt-in tunnel, with MCP's authorization spec (OAuth), so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. It works only while the machine is awake.
+- Scopes apply as for any client, and a remote client gets nothing until the user grants it scopes.
+- **Done when:** claude.ai on a phone reads a memory saved from Cursor, and a security review of the tunnel and authorization finds nothing blocking.
+
+### M11: Transcript standard
+A standard for conversation transcripts, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMCP's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
   1. **An MCP extension**: a server declares it wants conversation turns, and a client that supports it sends each user and assistant turn to the servers the user approved. It replaces both `record_exchange` (model-dependent) and transcript readers (undocumented formats), and the client owns consent. Needs proposing through MCP's own process.
   2. **A published file schema** clients write to disk: simpler, but needs every vendor to adopt it without a protocol pulling them.
   3. **OpenTelemetry's GenAI semantic conventions**, a standard that already exists: some clients export telemetry, and OpenMCP could receive it like any backend (an OTLP receiver). Depends on what each client actually sends (see Section 14).
 
   Meanwhile transcript readers stay optional adapters into the schema, deleted as clients produce it natively.
-- **More importers and capture sources** beyond the M3.5 registries' first entries, each checked against a real export or install; client hooks where they exist, for capture without waiting for the next read.
+- **Done when:** the MCP extension is written up and proposed through MCP's process, with OpenMCP as the reference server and one open-source client implementing it.
+
+---
+
+## 12. Later (unscheduled)
+
+Built when there's a reason to, not on the milestone map:
+
+- **More importers and capture sources** beyond the M3.5 registries' first entries, each checked against a real export or install.
 - **Vector compression**, when stores grow well past 100k chunks (the exact scan is ~60ms there). sqlite-vec stores only float32, int8, and bit vectors, so TurboQuant or PolarQuant as published would need a custom scan outside SQLite; their core idea (a fixed random rotation, so one calibrated quantizer fits every coordinate) can be applied to sqlite-vec's int8 storage. Its built-in `vec_quantize_int8(v, 'unit')` wastes most of the range on bge vectors (coordinates ≈ ±0.05) and kept only 82% of the true top 10 in a test.
 - **A stronger embedding model**, if bge-small's misses matter in practice (Section 14).
 - **Per-user evals**: auto-generated tests checking whether stored context actually improves answers.
