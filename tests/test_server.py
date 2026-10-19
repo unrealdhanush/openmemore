@@ -15,7 +15,8 @@ from conftest import plain
 from openmcp import config, db
 from openmcp.cli import app, initialize
 from openmcp.config import DEFAULT_CONFIG, ClientScopes, Config, load_config, resolve_client
-from openmcp.server import build_server
+from conftest import connect, example_clients
+from mcp.types import Implementation
 
 runner = CliRunner()
 
@@ -23,7 +24,8 @@ runner = CliRunner()
 @pytest.mark.anyio
 async def test_ping_in_process(home):
     initialize(home)
-    async with Client(build_server("cursor", home)) as client:
+    example_clients(home)
+    async with connect(home, "cursor") as client:
         tools = await client.list_tools()
         assert "ping" in [t.name for t in tools.tools]
 
@@ -42,10 +44,10 @@ async def test_ping_over_stdio(home):
     """
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "openmcp.cli", "serve", "--client", "claude-desktop"],
+        args=["-m", "openmcp.cli", "serve"],
         env={"OPENMCP_HOME": str(home)},
     )
-    async with Client(params, read_timeout_seconds=30) as client:
+    async with Client(params, client_info=Implementation(name="claude-desktop", version="1"), read_timeout_seconds=30) as client:
         result = await client.call_tool("ping", {})
         assert not result.is_error
         assert result.structured_content["client"] == "claude-desktop"
@@ -56,7 +58,7 @@ async def test_ping_over_stdio(home):
 @pytest.mark.anyio
 async def test_every_tool_call_is_audited(home):
     initialize(home)
-    async with Client(build_server("cursor", home)) as client:
+    async with connect(home, "cursor") as client:
         await client.call_tool("ping", {})
         await client.call_tool("ping", {})
 
@@ -84,7 +86,7 @@ def test_startup_under_budget(home):
     for _ in range(3):
         start = time.perf_counter()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "openmcp.cli", "serve", "--client", "bench"],
+            [sys.executable, "-m", "openmcp.cli", "serve"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
             env={**os.environ, "OPENMCP_HOME": str(home)},
         )
@@ -99,18 +101,24 @@ def test_startup_under_budget(home):
     assert min(timings) * 1000 < budget_ms, f"startup timings: {[f'{t * 1000:.0f}ms' for t in timings]}"
 
 
-@pytest.mark.parametrize("name", ["", " ", "has space", "-leading-dash", "a/b", "x" * 65])
-def test_serve_rejects_bad_client_names(home, name):
-    result = runner.invoke(app, ["serve", "--client", name])
-    assert result.exit_code != 0
-    assert "--client" in plain(result.output)
-    assert not (home / "openmcp.db").exists()
+def test_serve_takes_no_client_name(home):
+    """The client is named from what it reports; there's no option to say who it is."""
+    result = runner.invoke(app, ["serve", "--client", "claude-desktop"])
+    assert result.exit_code != 0 and "No such option" in plain(result.output)
 
 
-def test_resolve_known_and_unknown_clients():
-    cfg = Config.model_validate(DEFAULT_CONFIG)
-    assert resolve_client(cfg, "cursor") == ClientScopes(read_scopes=("work",), write_scope="work")
+def test_resolve_configured_and_unconfigured_clients():
+    cfg = Config.model_validate({**DEFAULT_CONFIG, "clients": {"cursor-vscode": {"read_scopes": ["work"], "write_scope": "work"}}})
+    assert resolve_client(cfg, "cursor-vscode") == ClientScopes(read_scopes=("work",), write_scope="work")
     assert resolve_client(cfg, "gemini-cli") == ClientScopes(read_scopes=("personal",), write_scope="personal")
+
+
+def test_the_default_config_names_no_clients(tmp_path):
+    """Clients are named by what their apps report, so a shipped [clients.<name>] would only guess."""
+    path = tmp_path / "config.toml"
+    config.write_default_config(path)
+    assert config.load_config(path).clients == {}
+    assert "[clients.cursor-vscode]" in path.read_text()  # as a commented example
 
 
 def test_resolve_partial_client_entry_falls_back_per_key():
@@ -147,18 +155,23 @@ def test_enable_capture_keeps_the_rest_of_the_config(tmp_path):
     assert config.enable_capture(path, "claude-code") is False
     cfg = config.load_config(path)
     assert cfg.capture.sources == ("claude-code",)
-    assert config.resolve_client(cfg, "cursor").read_scopes == ("work",)
+    assert path.read_text().startswith("# OpenMCP configuration")  # the header survives rewrites
 
 
-def test_client_app_is_validated_and_kept(tmp_path):
+def test_app_pins_are_gone(tmp_path):
+    """Config from before naming by app: an `app` pin is now an error that names the key."""
     path = tmp_path / "config.toml"
-    config.write_default_config(path)
-    assert config.set_client_app(path, "vscode-copilot", "Visual Studio Code") is True
-    assert config.set_client_app(path, "vscode-copilot", "Visual Studio Code") is False
-    config.enable_capture(path, "vscode-copilot")  # other edits keep it
-    cfg = config.load_config(path)
-    assert cfg.clients["vscode-copilot"].app == "Visual Studio Code"
-    assert config.resolve_client(cfg, "vscode-copilot") == config.resolve_client(config.Config(), "vscode-copilot")
-    path.write_text('[clients.x]\napp = ""\n')
-    with pytest.raises(ValidationError):
+    path.write_text('[clients.cursor]\napp = "cursor-vscode"\n')
+    with pytest.raises(ValidationError, match="app"):
         config.load_config(path)
+
+
+
+def test_ignore_scopes_resolves_every_client_to_all_scopes(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('ignore_scopes = true\n[clients.x]\nread_scopes = ["work"]\nwrite_scope = "work"\n')
+    cfg = config.load_config(path)
+    assert resolve_client(cfg, "x") == ClientScopes(read_scopes=None, write_scope="work")
+    assert resolve_client(cfg, "anyone").read_scopes is None
+    config.write_default_config(tmp_path / "fresh.toml")
+    assert "ignore_scopes = false" in (tmp_path / "fresh.toml").read_text()  # off unless asked
