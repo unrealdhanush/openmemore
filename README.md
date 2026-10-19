@@ -92,7 +92,13 @@ Nothing runs in the background without your permission. `openmcp daemon install`
 
 The daemon reads transcripts from capture-enabled apps every few seconds and embeds what's new. Another assistant can then find a conversation moments after it happens, without waiting for the next lookup.
 
-It also receives Claude Code's conversations live through Claude Code's OpenTelemetry export, with no transcript file involved. `openmcp daemon telemetry` prints the settings to add to `~/.claude/settings.json`. The daemon listens on 127.0.0.1 only, and only accepts requests carrying the token from your config. It stores the conversation text and ids, never the account details the events also carry. Both sources can run at once: they update the same conversation.
+It's also an OpenTelemetry endpoint. Any app or library that records its conversations with OpenTelemetry's standard GenAI conventions can send them there; there's no app-specific code. That includes agents built with LangChain, LlamaIndex, or the OpenAI and Anthropic SDKs plus OpenTelemetry instrumentation. `openmcp daemon telemetry` prints the standard settings to give such an app (`OTEL_EXPORTER_OTLP_ENDPOINT` and a token header).
+- **Formats:** logs and traces, in JSON or protobuf.
+- **Which app:** it's filed under the app's `service.name`, which you can give scopes like any client.
+- **What's kept:** only the text of what you and the assistant said. System prompts, tool output and the telemetry's other attributes are dropped.
+- **Access:** the endpoint listens on 127.0.0.1 only, and only accepts requests carrying the token from your config.
+
+Most desktop assistants don't export their conversations this way. For them, transcript capture and `record_exchange` remain the way in.
 
 `openmcp daemon uninstall` stops it and removes the service.
 
@@ -138,7 +144,7 @@ An export contains every memory, with its earlier versions, and every conversati
 | `openmcp review` | Approve proposed memories; browse, edit and delete memories |
 | `openmcp import <file>` / `openmcp export` | Bring history in, take everything out |
 | `openmcp capture` | Catch up on transcripts from capture-enabled apps |
-| `openmcp daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints Claude Code's settings |
+| `openmcp daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints the OpenTelemetry settings |
 | `openmcp embed` | Download the model and embed whatever isn't embedded yet |
 | `openmcp status` | Import jobs, store counts, proposals waiting for review |
 | `openmcp audit [--stats]` | Every tool call: which client, which app, what, how long |

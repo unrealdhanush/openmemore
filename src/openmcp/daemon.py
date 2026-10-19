@@ -4,18 +4,21 @@ client to read.
 One process, normally run by the OS as a per-user service (openmcp.service):
 - every few seconds it captures changed transcripts of the enabled sources and embeds
   what's new, so another assistant finds a conversation moments after it happens;
-- it receives OpenTelemetry log exports (OTLP/HTTP with JSON) on 127.0.0.1, for clients
-  that export their conversations (openmcp.capture.otel).
+- it's an OTLP/HTTP endpoint on 127.0.0.1 (logs and traces, JSON or protobuf) for any
+  app or library that records conversations following OpenTelemetry's GenAI
+  conventions (openmcp.capture.otel). Metrics are accepted and dropped.
 
-The receiver accepts only requests to its own Host, with the token from config.toml
-in an x-openmcp-token header, and with Content-Type application/json: a web page can't
-send that to another origin without a CORS preflight, which this server never grants,
-so a site the user visits can't write into their conversations.
+Requests must name its own Host and carry the token from config.toml in an
+x-openmcp-token header, with Content-Type application/json or application/x-protobuf:
+a web page can't send either type to another origin without a CORS preflight, which
+this server never grants, so a site the user visits can't write into their conversations.
 """
 
 from __future__ import annotations
 
+import gzip
 import hmac
+import io
 import json
 import os
 import secrets
@@ -41,6 +44,7 @@ from openmcp import __version__, audit, config, db, embed, repo
 CLIENT = "daemon"
 """Audit-log client name for what the daemon captures."""
 TOKEN_HEADER = "x-openmcp-token"
+JSON, PROTOBUF = "application/json", "application/x-protobuf"
 STATE_FILE = "daemon.json"
 MAX_BODY = 16 * 1024 * 1024
 EMBED_BUDGET_MS = 2000
@@ -75,39 +79,58 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
     def health(request: Request) -> Response:
         return refuse(request) or JSONResponse({"ok": True, "version": __version__, "pid": os.getpid()})
 
-    async def logs(request: Request) -> Response:
+    async def export(request: Request, signal: str) -> Response:
         if refused := refuse(request):
             return refused
         if not hmac.compare_digest(request.headers.get(TOKEN_HEADER, ""), token):
             return PlainTextResponse(f"Missing or wrong {TOKEN_HEADER} header.", status_code=401)
-        if not request.headers.get("content-type", "").startswith("application/json"):
-            return PlainTextResponse(
-                "Only OTLP/HTTP with JSON is accepted: set OTEL_EXPORTER_OTLP_PROTOCOL=http/json.", status_code=415
-            )
+        kind = request.headers.get("content-type", "").split(";")[0].strip()
+        if kind not in (JSON, PROTOBUF):
+            return PlainTextResponse(f"OTLP/HTTP takes {JSON} or {PROTOBUF}.", status_code=415)
         body = await request.body()
+        if request.headers.get("content-encoding") == "gzip":
+            try:
+                body = gzip.GzipFile(fileobj=io.BytesIO(body)).read(MAX_BODY + 1)
+            except (OSError, EOFError):
+                return PlainTextResponse("Bad gzip body.", status_code=400)
         if len(body) > MAX_BODY:
             return PlainTextResponse("Request too large.", status_code=413)
-        try:
-            payload = json.loads(body)
-        except ValueError:
-            return PlainTextResponse("Expected JSON.", status_code=400)
-        from openmcp.capture import otel
+        ok = Response(b"", media_type=PROTOBUF) if kind == PROTOBUF else JSONResponse({"partialSuccess": {}})
+        if signal == "metrics":
+            return ok  # accepted so a shared OTLP endpoint doesn't make exporters complain; not used
+        from openmcp.capture import otel, otlp
 
+        try:
+            records = otlp.from_protobuf(signal, body) if kind == PROTOBUF else list(otlp.from_json(signal, json.loads(body)))
+        except ValueError:
+            return PlainTextResponse("Not an OTLP export request.", status_code=400)
         with closing(db.connect(path)) as conn:
             cfg = config.load_config(config.config_path(base))
-            report = otel.ingest(conn, cfg, payload)
-            if report.messages or report.skipped:
-                _audit(conn, "otel", f"{report.messages} messages", report.messages, report.skipped)
-        for reason in sorted(set(report.skipped)):
-            print(f"openmcp daemon: skipped {reason}", file=sys.stderr)
-        return JSONResponse({"partialSuccess": {}})
+            report = otel.ingest(conn, cfg, records)
+            if report.messages:
+                _audit(conn, "otel", f"{report.messages} messages from {report.operations} model calls", report.messages)
+        return ok
 
-    return Starlette(routes=[Route("/health", health), Route("/v1/logs", logs, methods=["POST"])])
+    async def logs(request: Request) -> Response:
+        return await export(request, "logs")
+
+    async def traces(request: Request) -> Response:
+        return await export(request, "traces")
+
+    async def metrics(request: Request) -> Response:
+        return await export(request, "metrics")
+
+    return Starlette(routes=[
+        Route("/health", health),
+        Route("/v1/logs", logs, methods=["POST"]),
+        Route("/v1/traces", traces, methods=["POST"]),
+        Route("/v1/metrics", metrics, methods=["POST"]),
+    ])
 
 
-def _audit(conn: sqlite3.Connection, tool: str, summary: str, count: int, notes: list[str] = ()) -> None:
+def _audit(conn: sqlite3.Connection, tool: str, summary: str, count: int) -> None:
     with audit.audited(conn, CLIENT, tool) as call:
-        call.summary = summary + (f"; skipped {len(notes)}" if notes else "")
+        call.summary = summary
         call.result_count = count
 
 
