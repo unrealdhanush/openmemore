@@ -159,8 +159,26 @@ def setup(
             _run_capture(CaptureRequest(sources=[client]))
         else:
             _run_embed()
+        _offer_daemon()
     if incomplete:
         raise typer.Exit(1)
+
+
+def _offer_daemon() -> None:
+    """After setup: if there's something to capture in the background and the daemon
+    isn't running, ask whether it may run (SPEC.md M6)."""
+    from openmcp import daemon, service
+
+    cfg = config.load_config(config.config_path(config.home()))
+    if not cfg.capture.sources or daemon.healthy(cfg.daemon.port):
+        return
+    try:
+        if service.installed(_service()):
+            return
+    except service.ServiceError:
+        return
+    console.print("\n[bold]Capture in the background?[/bold] Without it, chats are captured when an assistant next looks.")
+    _install_daemon(yes=False)
 
 
 @app.command("clients")
@@ -594,6 +612,204 @@ def status_command() -> None:
     proposals = counts["pending_proposals"]
     console.print(f"Proposals waiting for review: {proposals}" + (" (run `openmcp review`)" if proposals else ""))
     console.print(f"Conversations not yet consolidated: {counts['due_for_consolidation']}")
+    console.print(f"Daemon: {_daemon_line()}", markup=False, soft_wrap=True)
+
+
+# --- daemon --------------------------------------------------------------------------
+
+daemon_app = typer.Typer(
+    no_args_is_help=True,
+    help="Capture in the background: transcripts as they change, and clients' OpenTelemetry exports.",
+)
+app.add_typer(daemon_app, name="daemon")
+
+LOG_ROTATE_BYTES = 5 * 1024 * 1024
+
+
+def _handoff_from_checkout(args: list[str], dev: bool) -> None:
+    """From a development checkout, run `args` with the installed openmcp instead, so a
+    long-lived service doesn't run whatever branch is checked out (as `setup` does)."""
+    from openmcp import setup as client_setup
+
+    checkout = client_setup.development_checkout()
+    if checkout is None or dev:
+        return
+    installed = client_setup.installed_command(checkout)
+    if installed is None:
+        console.print(
+            f"[yellow]This is a development checkout[/yellow] ({checkout}), and no installed openmcp was found. "
+            "Install openmcp and run this again, or pass --dev to run the checkout as the service."
+        )
+        raise typer.Exit(2)
+    console.print(f"This is a development checkout; using the installed openmcp at {installed[0]}. (--dev uses the checkout.)")
+    raise typer.Exit(subprocess.run([*installed, *args]).returncode)
+
+
+def _service():
+    from openmcp import service
+    from openmcp import setup as client_setup
+
+    return service.describe(sys.platform, client_setup.openmcp_command(), config.home(), Path.home())
+
+
+@daemon_app.command("run")
+def daemon_run(
+    home: Path | None = typer.Option(None, "--home", help="Data directory (default: $OPENMCP_HOME or ~/.openmcp)."),
+    log_file: Path | None = typer.Option(None, "--log-file", help="Append output here instead of the terminal."),
+) -> None:
+    """Run the daemon in the foreground (the installed service runs this)."""
+    import os
+
+    from openmcp import daemon
+
+    if home is not None:
+        os.environ["OPENMCP_HOME"] = str(home)
+    base = config.home()
+    initialize(base)
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        if log_file.exists() and log_file.stat().st_size > LOG_ROTATE_BYTES:
+            log_file.replace(log_file.with_suffix(log_file.suffix + ".1"))
+        sys.stderr = sys.stdout = log_file.open("a", encoding="utf-8", buffering=1)
+    try:
+        daemon.run(base, sys.stderr)
+    except RuntimeError as e:
+        print(f"openmcp daemon: {e}", file=sys.stderr, flush=True)
+        raise typer.Exit(1) from None
+
+
+def _install_daemon(*, yes: bool, dry_run: bool = False) -> bool:
+    """Install and start the daemon service, after asking (SPEC.md M6). Returns whether
+    it's installed."""
+    from openmcp import consent, daemon, service
+
+    base = config.home()
+    initialize(base)
+    try:
+        svc = _service()
+    except service.ServiceError as e:
+        console.print(str(e))
+        return False
+    if dry_run:
+        console.print(f"Would install the openmcp daemon as a {svc.name}, after asking you.")
+        if svc.file is not None:
+            console.print(f"Service file: {svc.file}", markup=False, soft_wrap=True)
+        for cmd in svc.install:
+            console.print("  " + (subprocess.list2cmdline(cmd) if sys.platform == "win32" else " ".join(cmd)),
+                          markup=False, soft_wrap=True)
+        if svc.content:
+            console.print(svc.content, markup=False, soft_wrap=True)
+        console.print("[dim]dry run: nothing changed[/dim]")
+        return False
+    answer = "allowed" if yes else consent.ask()
+    if answer != "allowed":
+        console.print(
+            "Couldn't ask: there's no desktop session or terminal here. To allow it, run "
+            "`openmcp daemon install --yes`." if answer == "unavailable"
+            else "Not running in the background. `openmcp daemon install` asks again whenever you like."
+        )
+        return False
+    daemon.ensure_token(base)
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "daemon install") as call:
+        call.summary = "allowed with --yes" if yes else "allowed when asked"
+        try:
+            service.install(svc)
+        except service.ServiceError as e:
+            call.summary += ", failed"
+            console.print(f"Couldn't install the {svc.name}: {e}", markup=False, soft_wrap=True)
+            return False
+    port = config.load_config(config.config_path(base)).daemon.port
+    if answer := daemon.wait_until_healthy(port):
+        console.print(f"Running in the background (pid {answer['pid']}, 127.0.0.1:{port}); it starts when you log in.")
+    else:
+        console.print(f"Installed, but it isn't answering on port {port} yet. Its log: {base / service.LOG_FILE}",
+                      markup=False, soft_wrap=True)
+    if sys.platform == "darwin":
+        console.print("macOS lists it under System Settings → General → Login Items, where you can also switch it off.")
+    for note in svc.notes:
+        console.print(note)
+    return True
+
+
+@daemon_app.command("install")
+def daemon_install(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask: you allow it to run in the background."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be installed without changing anything."),
+    dev: bool = typer.Option(False, "--dev", help="Run this development checkout as the service."),
+) -> None:
+    """Run OpenMCP in the background, starting at login, once you allow it."""
+    _handoff_from_checkout(["daemon", "install", *(["--yes"] if yes else []), *(["--dry-run"] if dry_run else [])], dev)
+    if not _install_daemon(yes=yes, dry_run=dry_run) and not dry_run:
+        raise typer.Exit(1)
+
+
+@daemon_app.command("uninstall")
+def daemon_uninstall() -> None:
+    """Stop the daemon and remove its service."""
+    from openmcp import service
+
+    try:
+        existed = service.uninstall(_service())
+    except service.ServiceError as e:
+        console.print(str(e))
+        raise typer.Exit(1) from None
+    console.print("Stopped and removed the openmcp daemon." if existed else "The daemon service wasn't installed.")
+
+
+def _daemon_line() -> str:
+    from openmcp import daemon, service
+
+    base = config.home()
+    port = config.load_config(config.config_path(base)).daemon.port
+    if answer := daemon.healthy(port):
+        state = daemon.read_state(base) or {}
+        since = f", since {state['started_at']}" if state.get("started_at") else ""
+        return f"running (pid {answer['pid']}, port {port}{since})"
+    try:
+        installed = service.installed(_service())
+    except service.ServiceError:
+        installed = False
+    if installed:
+        return f"installed but not running; its log: {base / service.LOG_FILE}"
+    return "not installed (`openmcp daemon install` captures in the background)"
+
+
+@daemon_app.command("status")
+def daemon_status() -> None:
+    """Whether the daemon is installed and running."""
+    console.print(f"Daemon: {_daemon_line()}", markup=False, soft_wrap=True)
+
+
+@daemon_app.command("telemetry")
+def daemon_telemetry(
+    client: str = typer.Argument("claude-code", help="The client to send its conversations (only claude-code exports them)."),
+) -> None:
+    """Print the settings that make a client send its conversations to the daemon."""
+    from openmcp import daemon
+
+    if client != "claude-code":
+        console.print(f"{client} doesn't export conversation text through OpenTelemetry (SPEC.md Section 14).")
+        raise typer.Exit(2)
+    base = config.home()
+    initialize(base)
+    token = daemon.ensure_token(base)
+    cfg = config.load_config(config.config_path(base))
+    env = {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": f"{daemon.endpoint(cfg)}/v1/logs",
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS": f"{daemon.TOKEN_HEADER}={token}",
+        "OTEL_LOG_USER_PROMPTS": "1",
+        "OTEL_LOGS_EXPORT_INTERVAL": "2000",
+    }
+    console.print(
+        "Add these to the \"env\" object in ~/.claude/settings.json (create it if there isn't one), then restart "
+        "Claude Code. Its conversations then reach the daemon live; `openmcp daemon install` keeps the daemon running. "
+        "If you already send Claude Code's telemetry somewhere else, these settings replace that for its logs.\n",
+        markup=False,
+    )
+    console.print(json.dumps({"env": env}, indent=2), markup=False, soft_wrap=True)
 
 
 # --- review --------------------------------------------------------------------------

@@ -68,6 +68,22 @@ class CaptureConfig(BaseModel):
     """Only transcripts changed within this many days are read."""
 
 
+DEFAULT_DAEMON_PORT = 47318
+
+
+class DaemonConfig(BaseModel):
+    """[daemon]: the background service (SPEC.md M6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int = Field(default=DEFAULT_DAEMON_PORT, ge=1024, le=65535)
+    """Where it listens on 127.0.0.1, for OpenTelemetry exports and health checks."""
+    token: str | None = None
+    """Exporters must send it (x-openmcp-token header); created on first use."""
+    interval: float = Field(default=3.0, ge=0.5, le=3600)
+    """Seconds between checks for changed transcripts."""
+
+
 class Config(BaseModel):
     """config.toml. Unknown keys are rejected so typos (e.g. `read_scope`) don't pass silently."""
 
@@ -79,6 +95,7 @@ class Config(BaseModel):
     defaults: ClientScopes = ClientScopes(read_scopes=("personal",), write_scope="personal")
     clients: dict[str, ClientOverride] = Field(default_factory=dict)
     capture: CaptureConfig = CaptureConfig()
+    daemon: DaemonConfig = DaemonConfig()
 
 
 def home() -> Path:

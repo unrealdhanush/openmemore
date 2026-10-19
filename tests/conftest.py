@@ -170,3 +170,14 @@ def insert(conn, content: str, *, kind="fact", scope="personal", project=None, s
         kind=kind, content=content, subject=subject, project=project, scope=scope, source_client=source,
         content_hash=content_hash(content), created_at=when, updated_at=when,
     ))
+
+
+@pytest.fixture(autouse=True)
+def consent_answers(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Never show a real permission dialog or prompt: OpenMCP's own consent question
+    (openmcp.consent.ask) answers 'denied' unless a test appends another answer here."""
+    from openmcp import consent
+
+    answers: list[str] = []
+    monkeypatch.setattr(consent, "ask", lambda *a, **k: answers.pop(0) if answers else "denied")
+    return answers

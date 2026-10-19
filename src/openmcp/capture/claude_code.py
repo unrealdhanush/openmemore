@@ -57,8 +57,12 @@ def _prompt_text(line: dict[str, Any]) -> str | None:
         content = "\n\n".join(
             b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
         )
-    if not isinstance(content, str):
-        return None
+    return clean_prompt(content) if isinstance(content, str) else None
+
+
+def clean_prompt(content: str) -> str | None:
+    """A prompt without system reminders, or None if it's slash-command or tool
+    scaffolding rather than something the user wrote. Shared with OpenTelemetry capture."""
     text = _SYSTEM_REMINDER.sub("", content).strip()
     if not text or _SCAFFOLDING.match(text):
         return None
