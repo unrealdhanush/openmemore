@@ -108,15 +108,20 @@ CLIENTS: dict[str, ClientSpec] = {spec.name: spec for spec in [
         app="claude-code",
         instruction=InstructionTarget("markdown", "~/.claude/CLAUDE.md", path=home_path(".claude", "CLAUDE.md"), full=True),
         capture="claude-code",
-        verified="macOS, 2026-10-18: `claude mcp add`, transcript format",
+        verified="macOS, 2026-10-18: transcript format, on real sessions (`openmcp setup claude-code` itself "
+        "not yet run on a real install)",
         restart="Start a new Claude Code session: running ones don't pick up new MCP servers.",
     ),
     ClientSpec(
         name="cursor",
         display="Cursor",
-        app=None,
+        # Not its product name ('Cursor'): what its agent reported in the audit log.
+        app="cursor-vscode",
         server=ServerConfig(home_path(".cursor", "mcp.json")),
         instruction=InstructionTarget("paste", "Cursor Settings → Rules → User Rules"),
+        verified="Cursor 3.25.9 on macOS, 2026-10-18: ~/.cursor/mcp.json, clientInfo 'cursor-vscode', pointer "
+        "instruction followed (get_profile, record_exchange reusing the conversation, topic search, lookups "
+        "not recorded)",
     ),
     ClientSpec(
         name="windsurf",

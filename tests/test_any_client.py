@@ -149,15 +149,25 @@ def written(ctx):
 
 
 def test_unverified_clients_are_printed_unless_tried(ctx, clipboard):
-    steps = plan("cursor", ctx)
+    config_file = ctx.user_home / ".codeium" / "windsurf" / "mcp_config.json"
+    steps = plan("windsurf", ctx)
     assert run(steps) == [] and written(ctx) == []
     manual = "\n".join(s.manual for s in steps if s.manual)
-    assert "~/.cursor/mcp.json" not in manual and str(ctx.user_home / ".cursor" / "mcp.json") in manual
-    assert "--try" in manual and json_block(manual)["mcpServers"]["openmcp"]["args"] == ["serve", "--client", "cursor"]
+    assert str(config_file) in manual and "--try" in manual
+    assert json_block(manual)["mcpServers"]["openmcp"]["args"] == ["serve", "--client", "windsurf"]
 
-    run(plan("cursor", ctx, try_unverified=True))
+    run(plan("windsurf", ctx, try_unverified=True))
+    entry = json.loads(config_file.read_text())["mcpServers"]["openmcp"]
+    assert entry["args"] == ["serve", "--client", "windsurf"]
+
+
+def test_cursor_is_set_up_automatically(ctx, clipboard):
+    """Verified on Cursor 3.25.9: written without --try, and its app name pinned."""
+    run(plan("cursor", ctx))
     entry = json.loads((ctx.user_home / ".cursor" / "mcp.json").read_text())["mcpServers"]["openmcp"]
     assert entry["args"] == ["serve", "--client", "cursor"]
+    assert config.load_config(config.config_path(ctx.base)).clients["cursor"].app == "cursor-vscode"
+    assert client_for_app("cursor-vscode", {}) == "cursor"
 
 
 def test_trying_a_markdown_instruction_client(ctx):
