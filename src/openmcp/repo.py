@@ -28,6 +28,9 @@ from openmcp.models import (
     NewConversation,
     NewMemory,
     NewMessage,
+    NewProposal,
+    Proposal,
+    ProposalStatus,
     VectorTable,
 )
 
@@ -632,6 +635,167 @@ def store_vectors(conn: sqlite3.Connection, table: VectorTable, vectors: Sequenc
     return len(stored)
 
 
+# --- consolidation and proposals (SPEC.md M5) ----------------------------------------
+
+_DUE = (
+    "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.recall = 0 "
+    "AND m.id > COALESCE(c.consolidated_through, 0))"
+)
+
+
+def due_conversations(conn: sqlite3.Connection, scopes: Sequence[str] | None, limit: int) -> list[Conversation]:
+    """Conversations with messages not yet read for consolidation (recaps don't count),
+    most recently updated first."""
+    where, params = [_DUE], []
+    if scopes is not None:
+        clause, params = _in("c.scope", scopes)
+        where.append(clause)
+    rows = conn.execute(
+        f"SELECT c.* FROM conversations c WHERE {' AND '.join(where)} "
+        "ORDER BY c.updated_at IS NULL, c.updated_at DESC, c.id DESC LIMIT ?",
+        [*params, limit],
+    )
+    return [_conversation(r) for r in rows]
+
+
+def count_due_conversations(conn: sqlite3.Connection, scopes: Sequence[str] | None) -> int:
+    where, params = [_DUE], []
+    if scopes is not None:
+        clause, params = _in("c.scope", scopes)
+        where.append(clause)
+    return conn.execute(f"SELECT COUNT(*) FROM conversations c WHERE {' AND '.join(where)}", params).fetchone()[0]
+
+
+def unconsolidated_messages(conn: sqlite3.Connection, conversation_id: int, after: int | None) -> list[Message]:
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE conversation_id = ? AND recall = 0 AND id > ? ORDER BY id",
+        (conversation_id, after or 0),
+    )
+    return [Message.model_validate(dict(r)) for r in rows]
+
+
+def count_consolidated_messages(conn: sqlite3.Connection, conversation_id: int, through: int | None) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND recall = 0 AND id <= ?",
+        (conversation_id, through or 0),
+    ).fetchone()[0]
+
+
+def mark_consolidated(conn: sqlite3.Connection, conversation_id: int, through: int) -> bool:
+    """Read up to message `through`. Never moves backwards, and never past the
+    conversation's last message."""
+    return conn.execute(
+        "UPDATE conversations SET consolidated_through = MAX(COALESCE(consolidated_through, 0), "
+        "MIN(?, (SELECT COALESCE(MAX(id), 0) FROM messages WHERE conversation_id = ?))) WHERE id = ?",
+        (through, conversation_id, conversation_id),
+    ).rowcount > 0
+
+
+def insert_proposal(conn: sqlite3.Connection, p: NewProposal) -> int:
+    cur = conn.execute(
+        "INSERT INTO proposals (action, kind, content, subject, project, scope, reason, source_client, confidence, "
+        "content_hash, similar_memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            p.action, p.kind, p.content, p.subject, p.project, p.scope, p.reason, p.source_client, p.confidence,
+            p.content_hash, p.similar_memory_id, to_iso(p.created_at),
+        ),
+    )
+    proposal_id = cur.lastrowid
+    conn.executemany(
+        "INSERT OR IGNORE INTO proposal_conversations (proposal_id, conversation_id) VALUES (?, ?)",
+        [(proposal_id, c) for c in p.conversation_ids],
+    )
+    conn.executemany(
+        "INSERT OR IGNORE INTO proposal_memories (proposal_id, memory_id) VALUES (?, ?)",
+        [(proposal_id, m) for m in p.memory_ids],
+    )
+    return proposal_id
+
+
+def _proposals(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[Proposal]:
+    ids = [r["id"] for r in rows]
+    sources: dict[int, list[int]] = defaultdict(list)
+    merged: dict[int, list[int]] = defaultdict(list)
+    if ids:
+        marks = ", ".join("?" * len(ids))
+        for pid, cid in conn.execute(
+            f"SELECT proposal_id, conversation_id FROM proposal_conversations WHERE proposal_id IN ({marks}) "
+            "ORDER BY conversation_id", ids
+        ):
+            sources[pid].append(cid)
+        for pid, mid in conn.execute(
+            f"SELECT proposal_id, memory_id FROM proposal_memories WHERE proposal_id IN ({marks}) ORDER BY memory_id",
+            ids,
+        ):
+            merged[pid].append(mid)
+    return [
+        Proposal.model_validate({**dict(r), "conversation_ids": sources[r["id"]], "memory_ids": merged[r["id"]]})
+        for r in rows
+    ]
+
+
+def get_proposal(conn: sqlite3.Connection, proposal_id: int) -> Proposal | None:
+    rows = conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchall()
+    return _proposals(conn, rows)[0] if rows else None
+
+
+def list_proposals(
+    conn: sqlite3.Connection, *, status: ProposalStatus | None = "pending", limit: int = 1000
+) -> list[Proposal]:
+    """Oldest first, so a review goes in the order things were proposed."""
+    where, params = ("WHERE status = ?", [status]) if status else ("", [])
+    rows = conn.execute(f"SELECT * FROM proposals {where} ORDER BY id LIMIT ?", [*params, limit]).fetchall()
+    return _proposals(conn, rows)
+
+
+def proposed_or_rejected(conn: sqlite3.Connection, scope: str, content_hash: str) -> bool:
+    """Whether this statement is already waiting for review, or was rejected, in this scope."""
+    return conn.execute(
+        "SELECT 1 FROM proposals WHERE scope = ? AND content_hash = ? AND action = 'add' "
+        "AND status IN ('pending', 'rejected') LIMIT 1",
+        (scope, content_hash),
+    ).fetchone() is not None
+
+
+def merge_groups(conn: sqlite3.Connection) -> set[frozenset[int]]:
+    """The memory sets of merges waiting for review or rejected: not to be proposed again."""
+    groups: dict[int, set[int]] = defaultdict(set)
+    for pid, mid in conn.execute(
+        "SELECT pm.proposal_id, pm.memory_id FROM proposal_memories pm JOIN proposals p ON p.id = pm.proposal_id "
+        "WHERE p.status IN ('pending', 'rejected')"
+    ):
+        groups[pid].add(mid)
+    return {frozenset(g) for g in groups.values()}
+
+
+def decide_proposal(
+    conn: sqlite3.Connection, proposal_id: int, status: ProposalStatus, now: datetime, memory_id: int | None = None
+) -> bool:
+    return conn.execute(
+        "UPDATE proposals SET status = ?, decided_at = ?, memory_id = ? WHERE id = ? AND status = 'pending'",
+        (status, to_iso(now), memory_id, proposal_id),
+    ).rowcount > 0
+
+
+def count_pending_proposals(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM proposals WHERE status = 'pending'").fetchone()[0]
+
+
+def active_memory_vectors(conn: sqlite3.Connection) -> list[tuple[Memory, bytes]]:
+    """Every current memory that has been embedded, with its vector."""
+    rows = conn.execute(
+        "SELECT m.*, v.embedding AS vector FROM memories m JOIN memories_vec v ON v.rowid = m.id "
+        "WHERE m.superseded_by IS NULL ORDER BY m.id"
+    ).fetchall()
+    out = []
+    for r in rows:
+        data = dict(r)
+        vector = data.pop("vector")
+        data["metadata"] = json.loads(data["metadata"])
+        out.append((Memory.model_validate(data), vector))
+    return out
+
+
 # --- capture_files -------------------------------------------------------------------
 
 
@@ -715,4 +879,6 @@ def store_counts(conn: sqlite3.Connection) -> dict[str, object]:
         "conversations": by_provider,
         "messages": conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
         "pending_embeddings": count_pending_embeddings(conn),
+        "pending_proposals": count_pending_proposals(conn),
+        "due_for_consolidation": count_due_conversations(conn, None),
     }

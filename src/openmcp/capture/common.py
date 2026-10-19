@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-RECALL_TOOLS = ("recent_conversations", "search_context")
+RECALL_TOOLS = ("recent_conversations", "search_context", "consolidation_batch")
 """OpenMCP tools that look up earlier conversations. A captured turn that called one is
 a recall turn (SPEC.md 7.2), ranked below the conversations it recaps."""
 

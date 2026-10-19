@@ -124,6 +124,8 @@ class Conversation(NewConversation):
     """A row of `conversations`."""
 
     id: int
+    consolidated_through: int | None = None
+    """The last message read for consolidation (SPEC.md M5)."""
 
 
 class NewMessage(BaseModel):
@@ -457,3 +459,116 @@ class CaptureRequest(BaseModel):
 
     sources: list[CaptureSource] = Field(default_factory=list)
     days: int | None = Field(default=None, ge=1, le=3650)
+
+
+# --- Consolidation and review (SPEC.md M5) -------------------------------------------
+
+MAX_BATCH_CONVERSATIONS = 20
+BATCH_CHARS = 40_000
+"""Message text in one consolidation batch; the rest waits for the next."""
+CONVERSATION_BATCH_CHARS = 12_000
+"""Message text from one conversation in one batch; a longer one continues in the next."""
+MAX_PROPOSALS = 100
+MAX_PROPOSAL_SOURCES = 20
+MAX_REASON_CHARS = 500
+
+ProposalAction = Literal["add", "merge"]
+ProposalStatus = Literal["pending", "approved", "rejected"]
+
+
+class ProposalInput(MemoryInput):
+    """One item passed to `propose_memories`."""
+
+    conversation_ids: list[Annotated[int, Field(ge=1)]] = Field(
+        default_factory=list,
+        max_length=MAX_PROPOSAL_SOURCES,
+        description="The conversations this comes from (ids from consolidation_batch).",
+    )
+    reason: str | None = Field(
+        default=None, max_length=MAX_REASON_CHARS, description="Why this is worth remembering, in a few words."
+    )
+
+
+class DoneConversation(BaseModel):
+    """A conversation the model finished reading, as consolidation_batch returned it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: int = Field(ge=1)
+    through_message_id: int = Field(ge=1, description="Copy it from consolidation_batch.")
+
+
+class BatchMessage(BaseModel):
+    id: int
+    role: Role
+    content: str
+    """Wrapped per SPEC.md Section 8."""
+    created_at: datetime | None
+
+
+class BatchConversation(BaseModel):
+    id: int
+    title: str | None
+    source: str
+    updated_at: datetime | None
+    through_message_id: int
+    """The last message in this batch: pass it back in propose_memories' `done`."""
+    earlier_messages: int
+    """Messages already read in an earlier consolidation (not repeated here)."""
+    more_in_next_batch: bool
+    messages: list[BatchMessage]
+
+
+class ConsolidationBatch(ReadResult):
+    conversations: list[BatchConversation] = Field(default_factory=list)
+    remaining: int = 0
+    """Conversations still due after this batch is marked done."""
+    note: str
+
+
+class ProposedSimilar(BaseModel):
+    index: int
+    proposal_id: int
+    memory_id: int
+    memory_content: str
+    """Wrapped per SPEC.md Section 8."""
+
+
+class ProposeResult(BaseModel):
+    proposed: list[int] = Field(default_factory=list)
+    skipped_duplicates: int = 0
+    """Already a memory, or already proposed or rejected, in that scope."""
+    similar_to_memories: list[ProposedSimilar] = Field(default_factory=list)
+    rejected: list[Rejection] = Field(default_factory=list)
+    conversations_done: int = 0
+    note: str
+
+
+class NewProposal(BaseModel):
+    """A proposal ready to insert: validated, secret-filtered, hashed."""
+
+    action: ProposalAction
+    kind: Kind
+    content: MemoryText
+    subject: Label | None = None
+    project: Label | None = None
+    scope: Scope
+    reason: str | None = None
+    source_client: str
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    content_hash: str
+    similar_memory_id: int | None = None
+    created_at: AwareDatetime
+    conversation_ids: list[int] = Field(default_factory=list)
+    memory_ids: list[int] = Field(default_factory=list)
+    """For a merge: the memories it replaces."""
+
+
+class Proposal(NewProposal):
+    """A row of `proposals`, with its sources."""
+
+    id: int
+    status: ProposalStatus
+    decided_at: AwareDatetime | None = None
+    memory_id: int | None = None
+    """Once approved: the memory it became."""

@@ -6,7 +6,7 @@ One shared memory for all your AI assistants, kept on your own machine.
 
 Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMCP is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
 
-**Status:** pre-release (milestones M0 to M4 of [SPEC.md](SPEC.md)). The repository is private, and there's no published package yet.
+**Status:** pre-release (v1 is milestones M0 to M4 of [SPEC.md](SPEC.md); M5, consolidation and review, is in progress). The repository is private, and there's no published package yet.
 
 ## How it works
 
@@ -17,6 +17,7 @@ Ask Claude something today and ask Cursor about it tomorrow: it knows what you m
   - `record_exchange`: what you asked and what it answered, including code
   - `recent_conversations` and `search_context`: find earlier conversations, with any assistant, by meaning as well as by words
   - `update_memory` and `forget`
+  - `consolidation_batch` and `propose_memories`: turn conversations into proposed memories, for you to review
 - **Capture:** an assistant records an exchange by calling `record_exchange`, which a short instruction you paste in asks it to do. For VS Code Copilot and Claude Code, OpenMCP can instead read the conversations they already save on disk, so nothing depends on the model.
 - **Search:** keyword search (SQLite FTS5) combined with meaning-based search, using a small local embedding model (`BAAI/bge-small-en-v1.5`, about 70MB, downloaded once). Nothing leaves your machine.
 - **History:** import your ChatGPT and Claude data exports, or any provider's history converted to OpenMCP's own format. Export everything back out in that same format.
@@ -80,6 +81,24 @@ write_scope = "work"
 
 `openmcp setup vscode-copilot` and `openmcp setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmcp capture`; it reads chats changed in the last 30 days (`[capture] days`).
 
+## Consolidate and review
+
+Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. To turn chats into memories, ask any connected assistant to **"consolidate my chats"**, or use its OpenMCP `consolidate` prompt. It reads the conversations that haven't been consolidated yet, a batch at a time, and proposes memories, each citing the conversations it came from. The model that writes the proposals is your assistant's own; OpenMCP calls no model and needs no API key.
+
+Nothing is saved until you approve it:
+
+```sh
+openmcp review     # opens a local page in your browser
+```
+
+The review page lets you:
+- approve, edit or reject each proposal, and see the conversations it came from;
+- for a proposal similar to an existing memory, approve it as a replacement;
+- find near-duplicate memories and merge them into one, keeping history;
+- search, edit and delete memories, and see each one's history.
+
+A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmcp review` prints.
+
 ## Import and export
 
 ```sh
@@ -101,10 +120,11 @@ An export contains every memory, with its earlier versions, and every conversati
 | `openmcp clients` | Clients that have connected, and their scopes |
 | `openmcp memories list\|show\|rm` | Browse and delete memories |
 | `openmcp conversations list\|show\|rm` | Browse and delete conversations |
+| `openmcp review` | Approve proposed memories; browse, edit and delete memories |
 | `openmcp import <file>` / `openmcp export` | Bring history in, take everything out |
 | `openmcp capture` | Catch up on transcripts from capture-enabled apps |
 | `openmcp embed` | Download the model and embed whatever isn't embedded yet |
-| `openmcp status` | Import jobs and store counts |
+| `openmcp status` | Import jobs, store counts, proposals waiting for review |
 | `openmcp audit [--stats]` | Every tool call: which client, which app, what, how long |
 | `openmcp serve` | The MCP server; your clients run this themselves |
 

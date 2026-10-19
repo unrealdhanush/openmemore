@@ -600,14 +600,55 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 
 **Result (2026-10-19), passed.** Two exchanges in Claude Desktop planned a project: three ideas, then architecture diagrams for two of them. In Cursor, a new chat referred to the project by one of its details rather than its name. Without being told where to look, Cursor called `get_profile`, `recent_conversations` and `search_context`, then opened Claude's conversation in full. It answered with both ideas, the trade-off between them and the agreed next step, and recorded its own exchange for Claude to see. Both chats happened the same day rather than a day apart; the cross-client path is the same. One gap was found and fixed: `get_profile` had matched project names exactly, and the model's guess returned an empty profile (it now matches loosely, and lists the projects there are when nothing matches).
 
+
+### M5: Consolidation and review (after v1)
+Captured and imported chats hold most of what the assistants have learned, but only memories make up the profile. Consolidation turns chats into proposed memories and finds near-duplicates. A local review page lets the user approve, edit or reject each proposal before it becomes a memory, and browse and edit memories in general.
+
+**Where the model comes from:** the user's own assistants, through MCP. OpenMCP has no model of its own, no API key and no account, and that stays true: the client the user is talking to reads the chats and writes the proposals. Consequences:
+- Consolidation runs when the user asks for it, not on a schedule.
+- The proposals are only as good as that client's model.
+- Nothing becomes a memory without the user's approval.
+
+The proposal queue doesn't depend on what wrote a proposal, so a local-model or API-key generator can be added later without changing the review side (Section 12).
+
+**Data (migration 010):**
+- `proposals`: a proposed memory (`kind`, `content`, `subject`, `project`) with its `scope`, `reason`, `source_client`, `status` (`pending`, `approved`, `rejected`) and `content_hash`. Approving one records the memory it became.
+  - **Sources:** the conversations a proposal came from (`proposal_conversations`), and, for a merge, the memories it replaces (`proposal_memories`).
+  - **Deleting really deletes:** deleting a conversation deletes the proposals that came from it, unless they were already approved. Deleting a memory deletes the merge proposals that would replace it.
+  - **Rejected stays rejected:** a proposal the same as one already rejected in that scope isn't proposed again.
+- `conversations.consolidated_through`: the last message id read for consolidation. A conversation is due for consolidation while it has messages after that id, so a chat that grows comes back with only its new messages.
+
+**MCP surface:**
+- **`consolidation_batch(limit)`:** the conversations due for consolidation that this client can read, newest first, with their unread messages. Recap turns (`recall`) are left out, and each batch is capped in size; a long conversation continues in the next batch. Each conversation comes with `through_message_id`. Content is wrapped like every read (Section 8).
+- **`propose_memories(items, done)`:** each item is a memory plus the `conversation_ids` it came from. `done` lists `{conversation_id, through_message_id}` pairs copied from the batch, which marks those conversations consolidated up to that message, whether or not they gave any proposals.
+  - **Scope:** a proposal takes its source conversations' scope, which the caller must be able to read; sources in different scopes are an error. With no sources, it takes the caller's write scope.
+  - **Checks:** the secret filter applies. A proposal is skipped when it duplicates an active memory, or a pending or rejected proposal, in its scope. A near-duplicate of an active memory is kept, and noted with that memory's id, so the review page can offer "replace it".
+- **Prompt `consolidate`:** asks the model to work through `consolidation_batch` until it's empty, or for a set number of batches, and then tells the user to run `openmcp review`. Saying "consolidate my chats" works too, because the tool descriptions say when to use the tools.
+
+**Near-duplicates, without a model:** on `openmcp review`, and from a button on the page, active memories of the same kind and scope with similarity at or above the near-duplicate threshold (0.92, Section 7.1) are grouped. Each group becomes a `merge` proposal whose text is the newest memory's, which the user can edit. Approving it adds the merged memory and marks every memory in the group as superseded by it, so history and `forget` cover the whole group.
+
+**`openmcp review`:**
+- **Server:** a local web page on `127.0.0.1` at a random port, opened in the browser. The URL carries a random token made for that run, which the page exchanges for an `HttpOnly`, `SameSite=Strict` cookie. Requests with another `Host` header are refused (DNS rebinding). Requests that change something must carry an `X-OpenMCP` header, which a page on another site can't send without a CORS preflight that this server never grants. The page is plain HTML and JavaScript inside the package: no build step and no CDN, so it works offline. Stored text is always shown as text, never as HTML.
+- **Proposals:** each one shows its source conversations, and the similar memory or the memories it would merge. Actions: approve, edit and approve, approve as a replacement for the similar memory, reject, and approve or reject all.
+- **Memories:** search and filter (scope, kind, project), edit (a new version, as `update_memory`), delete (`forget`), and history.
+- **Actions** are taken as the owner, like the CLI, and logged in the audit log as client `review`. An approved memory keeps the proposing client as its source, and records the proposal and source conversations in its metadata.
+
+**Done when:**
+- a client's `consolidate` run over captured chats leaves proposals with their sources;
+- approving one makes a memory that other clients see in `get_profile`;
+- rejecting one keeps it from coming back;
+- a near-duplicate pair can be merged into one memory with history;
+- the page refuses requests without the token or with a foreign `Host`;
+- tested, including scopes: a client can't consolidate or propose from conversations it can't read.
+- **Status (2026-10-19):** built and tested (`tests/test_consolidation.py`, `tests/test_review.py`). The page's script was run against real API responses with a stand-in DOM, and the server was probed with curl: no token, a foreign `Host`, and a change without the header are all refused. **Remaining:** a run with real clients.
+
 ---
 
 ## 12. Later (do not build in v1)
 
-- **Consolidation ("dream mode")**: scheduled job that distills imported chats into memories and merges near-duplicates, with the user reviewing changes.
+- **Scheduled consolidation**: M5 consolidates when the user asks a connected assistant to. Running it on a schedule needs a model OpenMCP can call itself: a local model (Ollama), or a hosted one with the user's key, opt-in, since chats would leave the machine. Either one writes to M5's proposal queue.
 - **Drift detection**: notice when recent behavior contradicts stored preferences, lower confidence, and ask instead of assuming.
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
-- **Review UI**: small local web page to browse, edit, and approve memories.
 - **A standard for conversation transcripts**, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMCP's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
   1. **An MCP extension**: a server declares it wants conversation turns, and a client that supports it sends each user and assistant turn to the servers the user approved. It replaces both `record_exchange` (model-dependent) and transcript readers (undocumented formats), and the client owns consent. Needs proposing through MCP's own process.
   2. **A published file schema** clients write to disk: simpler, but needs every vendor to adopt it without a protocol pulling them.

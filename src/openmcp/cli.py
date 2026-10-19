@@ -591,6 +591,51 @@ def status_command() -> None:
     console.print(f"Conversations: {sum(conversations.values())} ({by_source}), {counts['messages']} messages")
     pending = counts["pending_embeddings"]
     console.print(f"Waiting for embeddings: {pending}" + (" (run `openmcp embed`)" if pending else ""))
+    proposals = counts["pending_proposals"]
+    console.print(f"Proposals waiting for review: {proposals}" + (" (run `openmcp review`)" if proposals else ""))
+    console.print(f"Conversations not yet consolidated: {counts['due_for_consolidation']}")
+
+
+# --- review --------------------------------------------------------------------------
+
+
+@app.command("review")
+def review_command(
+    no_browser: bool = typer.Option(False, "--no-browser", help="Print the link instead of opening a browser."),
+    port: int = typer.Option(0, "--port", min=0, max=65535, help="Port to listen on (default: any free one)."),
+) -> None:
+    """Review proposed memories, and browse, edit, and delete memories, in your browser."""
+    import threading
+    import time
+    import webbrowser
+
+    import uvicorn
+
+    from openmcp import proposals, review
+
+    base = config.home()
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "find duplicates") as call:
+        found = proposals.find_duplicates(conn)
+        call.result_count = found
+    port = port or review.free_port()
+    token = review.new_token()
+    url = f"http://127.0.0.1:{port}/?token={token}"
+    server = uvicorn.Server(uvicorn.Config(
+        review.build_app(base, token, port), host="127.0.0.1", port=port, log_level="warning",
+    ))
+
+    def when_listening() -> None:
+        while not server.started and not server.should_exit:
+            time.sleep(0.05)
+        if server.started:
+            if found:
+                console.print(f"Found {found} new groups of near-duplicate memories to merge.")
+            console.print(f"Review at {url}\nPress Ctrl+C to stop.", markup=False)
+            if not no_browser:
+                webbrowser.open(url)
+
+    threading.Thread(target=when_listening, daemon=True).start()
+    server.run()
 
 
 # --- embeddings ----------------------------------------------------------------------

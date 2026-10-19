@@ -80,8 +80,8 @@ def server_instructions(captured: bool) -> str:
             "- After every answer, call record_exchange with the user's question and a short summary of "
             "your answer, including any code you wrote, so another assistant can pick up where you left "
             "off. Reuse the conversation_id from your first record_exchange call for later turns of the "
-            "same chat. Skip greetings, thanks, and turns where you only looked up earlier conversations: "
-            "a recap of a conversation is not worth storing beside the conversation itself."
+            "same chat. Skip greetings, thanks, and turns where you only looked up or consolidated earlier "
+            "conversations: a recap of a conversation is not worth storing beside the conversation itself."
         )
     lines += [
         "- When the user makes a decision, also save it with save_memories (kind 'decision'), so it "
@@ -92,6 +92,7 @@ def server_instructions(captured: bool) -> str:
         "('cat names', not 'the pet question I asked Copilot'); to narrow by assistant, use "
         "recent_conversations with source.",
         "- Save other lasting preferences, facts, and project state with save_memories.",
+        "- When the user asks you to consolidate their chats, use consolidation_batch and propose_memories.",
         "Never record secrets, credentials, or other people's private details.",
     ]
     return "\n".join(lines)
