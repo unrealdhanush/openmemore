@@ -143,25 +143,31 @@ def test_conversations_rm(chats):
 # --- setup and capture ---------------------------------------------------------------
 
 
-def desktop_config_path(user_home):
-    from openmcp.setup import Context, claude_desktop_config
-    return claude_desktop_config(Context(base=user_home, user_home=user_home, platform=sys.platform, command=("x",)))
+def files_in_home():
+    return [p for p in Path(os.environ["HOME"]).rglob("*") if p.is_file()]
 
 
-def test_setup_dry_run_changes_nothing(home):
-    user_home = Path(os.environ["HOME"])
-    result = run("setup", "claude-desktop", "--dry-run")
-    assert result.exit_code == 0 and "dry run: not changed" in result.output
-    assert "Settings → Profile" in result.output
-    assert not desktop_config_path(user_home).exists()
-
-
-def test_setup_writes_the_client_config(home):
-    user_home = Path(os.environ["HOME"])
+def test_setup_prints_the_generic_snippet_and_writes_nothing(home):
     result = run("setup", "claude-desktop")
     assert result.exit_code == 0, result.output
-    entry = json.loads(desktop_config_path(user_home).read_text())["mcpServers"]["openmcp"]
-    assert entry["args"][-3:] == ["serve", "--client", "claude-desktop"]
+    assert '"mcpServers"' in result.output and "Settings → Developer → Edit Config" in result.output
+    assert "copied" in result.output  # the pointer, onto the (test) clipboard
+    assert files_in_home() == []
+
+
+def test_setup_dry_run_changes_nothing(home, tmp_path):
+    target = tmp_path / "client.json"
+    result = run("setup", "some-editor", "--config", str(target), "--dry-run")
+    assert result.exit_code == 0 and "dry run: not changed" in result.output
+    assert not target.exists()
+
+
+def test_setup_config_merges_into_the_named_file(home, tmp_path):
+    target = tmp_path / "client.json"
+    result = run("setup", "some-editor", "--config", str(target))
+    assert result.exit_code == 0, result.output
+    entry = json.loads(target.read_text())["mcpServers"]["openmcp"]
+    assert entry["args"][-1] == "serve"
     assert entry["env"] == {"OPENMCP_HOME": str(home)}  # tests use a non-default data directory
 
 
@@ -235,8 +241,9 @@ def test_setup_from_a_checkout_without_an_installed_copy_stops(home, checkout, m
     assert result.exit_code == 2 and "no installed openmcp was found" in " ".join(result.output.split())
 
 
-def test_setup_dev_registers_the_checkout(home, checkout, monkeypatch):
+def test_setup_dev_registers_the_checkout(home, checkout, monkeypatch, tmp_path):
     monkeypatch.setattr(checkout, "installed_command", lambda root: pytest.fail("shouldn't look"))
-    result = run("setup", "claude-desktop", "--dev")
+    target = tmp_path / "client.json"
+    result = run("setup", "some-editor", "--config", str(target), "--dev")
     assert result.exit_code == 0, result.output
-    assert json.loads(desktop_config_path(Path(os.environ["HOME"])).read_text())["mcpServers"]["openmcp"]
+    assert json.loads(target.read_text())["mcpServers"]["openmcp"]

@@ -283,7 +283,7 @@ def test_one_broken_transcript_doesnt_stop_the_others(conn, user_home, monkeypat
     def broken(path, offset):
         raise AttributeError("'str' object has no attribute 'get'")
 
-    monkeypatch.setitem(capture_module.SOURCES, "vscode-copilot", capture_module.Source(original.files, broken))
+    monkeypatch.setitem(capture_module.SOURCES, "vscode-copilot", capture_module.Source(original.files, broken, original.app))
     report = capture(conn, CFG, user_home=user_home, days=36500)
     assert report.conversations == 1  # Claude Code's session still stored
     assert len(report.errors) == 1 and "AttributeError" in report.errors[0]

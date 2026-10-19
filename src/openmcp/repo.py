@@ -74,6 +74,16 @@ def list_audit(conn: sqlite3.Connection, f: AuditFilter) -> list[AuditEntry]:
     return [AuditEntry.model_validate(dict(r)) for r in rows]
 
 
+def seen_clients(conn: sqlite3.Connection) -> list[tuple[str, str | None, int, datetime]]:
+    """Every (client, application) that has called a tool, with how many calls and the
+    last one, most recent first. The CLI's own entries are left out."""
+    rows = conn.execute(
+        "SELECT client, app, COUNT(*), MAX(ts) FROM audit_log WHERE client != 'cli' "
+        "GROUP BY client, app ORDER BY MAX(ts) DESC"
+    )
+    return [(c, a, n, datetime.fromisoformat(t.replace("Z", "+00:00"))) for c, a, n, t in rows]
+
+
 def apps_for(conn: sqlite3.Connection, client: str) -> list[str]:
     """Every application recorded calling as `client`, in order of first appearance."""
     rows = conn.execute(
