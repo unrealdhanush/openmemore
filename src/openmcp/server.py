@@ -67,7 +67,8 @@ CONSOLIDATE = (
     "Consolidate my conversations into my shared OpenMCP memory. Call consolidation_batch, read the "
     "conversations it returns, and call propose_memories with the lasting things they show about me: "
     "preferences, facts, decisions and why, and projects with their current state. Each statement must be "
-    "self-contained and cite the conversations it comes from. Skip one-off questions, small talk, secrets, "
+    "self-contained and cite the conversations it comes from; if it updates a memory already in my profile (call "
+    "get_profile first), set `replaces` to that memory's id. Skip one-off questions, small talk, secrets, "
     "and other people's private details. In `done`, list every conversation from the batch. Repeat until "
     "nothing is left, or for at most {batches} batches. Don't call record_exchange for this chat. Finally, "
     "say how many memories you proposed, and tell me to review them with `openmcp review`."
@@ -451,7 +452,9 @@ def build_server(base: Path) -> MCPServer:
         Proposals wait for the user to approve, edit, or reject them with `openmcp review`;
         none of them is saved as a memory until then. Each item must be one self-contained
         statement about the user that makes sense with no other context, citing the
-        conversation_ids it comes from. Never propose secrets, credentials, or other
+        conversation_ids it comes from. When an item updates an existing memory (a project
+        that moved on, a changed preference), set `replaces` to that memory's id rather than
+        proposing a second, conflicting one. Never propose secrets, credentials, or other
         people's private details; items that look like secrets are rejected. Statements that
         are already memories, or were already proposed or rejected, are skipped.
         """

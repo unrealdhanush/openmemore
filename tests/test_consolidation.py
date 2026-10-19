@@ -200,3 +200,36 @@ async def test_the_consolidate_prompt(scoped):
         text = (await client.get_prompt("consolidate", {"batches": "3"})).messages[0].content.text
     assert "consolidation_batch" in text and "propose_memories" in text and "at most 3 batches" in text
     assert "openmcp review" in text and "Don't call record_exchange" in text
+
+
+def test_a_proposal_can_name_the_memory_it_updates(conn):
+    old = insert(conn, "Choosing between two project ideas.", kind="project", project="Garden")
+    work = insert(conn, "Team uses Go.", kind="fact", scope="work")
+    [proposal_id] = propose_memories(conn, ME, [item("Picked idea 2.", kind="project", project="Garden", replaces=old)], []).proposed
+    p = repo.get_proposal(conn, proposal_id)
+    assert (p.replaces_memory_id, p.scope, p.similar_memory_id) == (old, "personal", None)
+
+    home = chat(conn, "h", [("user", "b")])
+    with pytest.raises(ToolError, match="different scopes"):
+        propose_memories(conn, ME, [item("Uses Go and Rust.", home, kind="fact", replaces=work)], [])
+    [into_work] = propose_memories(conn, ME, [item("Uses Go and Rust.", kind="fact", replaces=work)], []).proposed
+    assert repo.get_proposal(conn, into_work).scope == "work"  # the memory's scope, not the write scope
+
+
+def test_naming_a_memory_the_client_can_t_read_looks_like_naming_none(conn):
+    hidden = insert(conn, "Personal thing.", kind="fact")
+    at_work = caller("cursor-vscode", read=["work"], write="work")
+    with pytest.raises(ToolError) as refused:
+        propose_memories(conn, at_work, [item("x", kind="fact", replaces=hidden)], [])
+    with pytest.raises(ToolError) as missing:
+        propose_memories(conn, at_work, [item("x", kind="fact", replaces=9999)], [])
+    assert str(refused.value).replace(str(hidden), "N") == str(missing.value).replace("9999", "N")
+
+
+def test_naming_an_old_version_points_to_the_current_one(conn):
+    from openmcp.tools.memories import update_memory
+
+    old = insert(conn, "Likes tea.", kind="preference")
+    new = update_memory(conn, ME, old, "Likes green tea.").new_id
+    with pytest.raises(ToolError, match=f"already replaced by memory {new}"):
+        propose_memories(conn, ME, [item("Likes oolong.", replaces=old)], [])

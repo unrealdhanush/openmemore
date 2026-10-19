@@ -122,6 +122,8 @@ def build_app(base: Path, token: str, port: int) -> Starlette:
         view["merging"] = [_memory(m) for mid in p.memory_ids if (m := repo.get_memory(conn, mid))]
         similar = repo.get_memory(conn, p.similar_memory_id) if p.similar_memory_id else None
         view["similar"] = _memory(similar) if similar and similar.active else None
+        replaces = repo.get_memory(conn, p.replaces_memory_id) if p.replaces_memory_id else None
+        view["replaces"] = _memory(replaces) if replaces else None
         return view
 
     def index(request: Request) -> Response:

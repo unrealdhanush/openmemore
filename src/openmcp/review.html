@@ -194,6 +194,7 @@ function proposalCard(p, decided) {
   const card = el("div", { class: "card" });
   let editing = false;
   const replace = el("input", { type: "checkbox" });
+  const keepBoth = el("input", { type: "checkbox" });
 
   function render() {
     const meta = el("div", { class: "meta" },
@@ -217,6 +218,17 @@ function proposalCard(p, decided) {
       parts.push(el("div", { class: "sub" }, `These ${p.merging.length} memories become one:`,
         el("ul", {}, p.merging.map((m) => el("li", {}, m.content, " ",
           el("button", { class: "link", onclick: () => showHistory(m.id) }, `#${m.id}`))))));
+    }
+    if (p.replaces && !decided) {
+      const current = !p.replaces.superseded_by;
+      parts.push(el("div", { class: "sub" }, `Updates memory #${p.replaces.id}: `,
+        el("span", {}, p.replaces.content), " ",
+        el("button", { class: "link", onclick: () => showHistory(p.replaces.id) }, "history"),
+        current
+          ? el("label", { class: "check" }, keepBoth, "Keep the old one too, instead of replacing it")
+          : el("p", { class: "reason" }, `It was changed since (now memory #${p.replaces.superseded_by}): ` +
+              "approving will keep both, or reject this.")));
+      if (!current) keepBoth.checked = true;
     }
     if (p.similar && !decided) {
       parts.push(el("div", { class: "sub" }, "Similar to an existing memory: ",
@@ -246,7 +258,7 @@ function proposalCard(p, decided) {
   }
 
   async function approve() {
-    const edits = { replace_similar: replace.checked };
+    const edits = { replace_similar: replace.checked, keep_replaced: keepBoth.checked };
     if (editing) {
       edits.content = fields.content.value.trim();
       edits.kind = fields.kind.value;
@@ -395,6 +407,7 @@ async function show(name, keepFocus = false) {
   tab = name;
   for (const b of document.querySelectorAll("nav button")) b.setAttribute("aria-selected", b.dataset.tab === name);
   await attempt(async () => {
+    await refreshState();  // counts and notes can change behind the page: a client may have just proposed
     const build = { proposals: proposalsTab, memories: memoriesTab, decided: decidedTab }[name];
     const focused = keepFocus && document.activeElement?.type === "search";
     $("main").replaceChildren(...(await build()).flat().filter(Boolean));
@@ -407,7 +420,7 @@ async function show(name, keepFocus = false) {
 }
 
 for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => show(b.dataset.tab));
-attempt(async () => { await refreshState(); await show("proposals"); });
+show("proposals");
 </script>
 </body>
 </html>

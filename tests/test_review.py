@@ -230,3 +230,40 @@ def test_find_duplicates_from_the_page(page, home, fake_embedder):
     assert page.post("/api/duplicates", headers=CHANGE).json() == {"proposed": 1}
     [merge] = page.get("/api/proposals").json()
     assert [m["content"] for m in merge["merging"]] == ["Prefers dark mode.", "Likes a dark theme."]
+
+
+def test_approving_a_proposal_that_updates_a_memory_replaces_it(conn):
+    from conftest import insert
+
+    old = insert(conn, "Choosing between two ideas.", kind="project")
+    [p1, p2] = (propose_memories(conn, ME, [ProposalInput(kind="project", content=c, replaces=old)], []).proposed[0]
+                for c in ("Picked idea 2.", "Picked idea 1."))
+    new = approve(conn, p1)
+    assert repo.get_memory(conn, old).superseded_by == new
+    assert repo.get_memory(conn, new).metadata["replaced"] == [old]
+    with pytest.raises(ProposalError, match="changed since"):  # the other one named the same, now-replaced memory
+        approve(conn, p2)
+    kept = approve(conn, p2, Approval(keep_replaced=True))
+    assert {m.id for m in repo.list_memories(conn, scopes=None)} == {new, kept}
+
+
+def test_keeping_both(conn):
+    from conftest import insert
+
+    old = insert(conn, "Likes tea.", kind="preference")
+    [proposal_id] = propose_memories(conn, ME, [ProposalInput(kind="preference", content="Likes coffee.", replaces=old)], []).proposed
+    new = approve(conn, proposal_id, Approval(keep_replaced=True))
+    assert repo.get_memory(conn, old).active and "replaced" not in repo.get_memory(conn, new).metadata
+
+
+def test_the_page_shows_what_a_proposal_updates(page, home):
+    from conftest import insert
+
+    signed_in(page)
+    with closing(db.connect(home / "openmcp.db")) as conn:
+        old = insert(conn, "Choosing between two ideas.", kind="project")
+        propose_memories(conn, ME, [ProposalInput(kind="project", content="Picked idea 2.", replaces=old)], [])
+    [view] = page.get("/api/proposals").json()
+    assert (view["replaces"]["id"], view["replaces"]["content"]) == (old, "Choosing between two ideas.")
+    page.post(f"/api/proposals/{view['id']}/approve", json={"keep_replaced": False}, headers=CHANGE)
+    assert [m["content"] for m in page.get("/api/memories").json()] == ["Picked idea 2."]
