@@ -18,7 +18,9 @@
 
 A **local-first MCP server** that gives every AI assistant a user works with (Claude, Cursor, Gemini CLI, and later ChatGPT) **one shared, user-owned context store** on the user's own machine.
 
-Any connected model can **write** what it learns (preferences, projects, decisions) and **read** what other models learned. Start a project in Claude, continue it in another assistant tomorrow without re-explaining anything.
+Any connected model can **write** what it learns (preferences, projects, decisions), **record** each substantive exchange (what the user asked, what it answered), and **read** what other models stored. Ask Claude something today, ask a different assistant about it tomorrow, and it knows what you mean. Start a project in Claude, continue it in another assistant without re-explaining anything.
+
+Single-assistant memory of preferences is already solved inside each product. The point of OpenMCP is what no single assistant can do: carry context **across** assistants.
 
 Models do not "learn from each other." They read and write a shared store. No weights change.
 
@@ -32,7 +34,7 @@ Models do not "learn from each other." They read and write a shared store. No we
 2. **User-owned.** The user can list, edit, export, and delete everything.
 3. **Stored data is data, not instructions.** Everything returned to a model is wrapped and labeled as untrusted context (Section 8).
 4. **Transparent.** Every read and write is logged with the client that made it.
-5. **Legitimate access only.** No scraping, no session cookies. Context comes in through MCP writes and official data exports.
+5. **Legitimate access only.** No scraping, no session cookies. Context comes in through MCP writes, official data exports, and (opt-in, per client) the transcripts that clients already save on the user's own disk.
 
 ### Non-goals (v1)
 - No LLM-to-LLM calling. Multi-model "consult another model" servers already exist.
@@ -61,7 +63,7 @@ Models do not "learn from each other." They read and write a shared store. No we
 
 Key consequences:
 - Each MCP client launches its **own** `openmcp serve` process over stdio, so **several processes may write to the DB at once**. Use WAL mode plus `busy_timeout`, and keep transactions short.
-- **Ingestion never runs inside `serve`.** Bulk import is a CLI command with resumable jobs, so a large import can't stall a chat.
+- **Bulk ingestion never runs inside `serve`.** Import is a CLI command with resumable jobs, so a large import can't stall a chat. The one exception is transcript capture (M1.5): before each read, `serve` stores what changed in enabled clients' transcripts, incrementally and within a 250ms budget (anything left over waits for the next read). The first backfill runs from the CLI.
 
 ---
 
@@ -132,20 +134,27 @@ openmcp/
   SPEC.md
   src/openmcp/
     __init__.py
-    cli.py              # typer app: init, serve, import, status, memories, audit, export
+    cli.py              # typer app: init, serve, setup, capture, import, status, memories, conversations, audit, export
     config.py           # load/write config.toml, client scope resolution
     models.py           # Pydantic models: tool args/results, normalized import schema
     repo.py             # repository: the ONLY module that writes SQL
     db.py               # connection, pragmas, migrations
     migrations/         # 001_init.sql, ...
     server.py           # FastMCP server, tool + prompt registration
+    instructions.py     # server instructions + the standing instruction for each client
+    setup.py            # `openmcp setup <client>`: register the server, install the standing instruction
     tools/
       memories.py       # save, update, forget
+      conversations.py  # record_exchange, recent_conversations
       search.py         # hybrid search
       profile.py        # get_profile
     safety/
       secrets.py        # secret/PII filter on writes
       wrap.py           # untrusted-data wrapping on reads
+    capture/
+      __init__.py       # transcript capture runner (changed files only, time budget)
+      claude_code.py    # Claude Code session JSONL parser
+      vscode_copilot.py # VS Code Copilot Chat session parser
     embed.py            # fastembed wrapper, lazy-loaded
     ingest/
       jobs.py           # job table, resumable runner
@@ -166,10 +175,10 @@ openmcp/
 Logical schema. Implementation details (FTS5 external-content wiring, triggers, vec0 syntax) are up to the implementer.
 
 ```sql
--- Imported or client-written conversation history
+-- Conversation history: captured live by clients (record_exchange) or imported from exports
 CREATE TABLE conversations (
   id            INTEGER PRIMARY KEY,
-  provider      TEXT NOT NULL,          -- 'chatgpt' | 'claude' | 'gemini' | ...
+  provider      TEXT NOT NULL,          -- captured: the client name ('claude-desktop', ...); imported: 'chatgpt' | 'claude' | ...
   external_id   TEXT NOT NULL,          -- provider's conversation id
   title         TEXT,
   scope         TEXT NOT NULL DEFAULT 'personal',
@@ -185,11 +194,13 @@ CREATE TABLE messages (
   role             TEXT NOT NULL CHECK (role IN ('user','assistant','system','tool')),
   content          TEXT NOT NULL,
   created_at       TEXT,
-  content_hash     TEXT NOT NULL,
-  UNIQUE (conversation_id, content_hash)
+  content_hash     TEXT NOT NULL,        -- sha256(role, created_at, content): the same message is stored once
+  external_id      TEXT,                 -- the transcript's id for it (captured transcripts): re-reads update in place
+  UNIQUE (conversation_id, content_hash),
+  UNIQUE (conversation_id, external_id)  -- where external_id is set
 );
 
--- Messages split for embedding (long messages -> several chunks)
+-- Messages split for search and embedding (~1000 chars; long messages -> several chunks)
 CREATE TABLE chunks (
   id          INTEGER PRIMARY KEY,
   message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -241,6 +252,18 @@ CREATE TABLE ingest_jobs (
   finished_at  TEXT
 );
 
+-- Transcript files already captured (M1.5): unchanged files are skipped
+CREATE TABLE capture_files (
+  path             TEXT PRIMARY KEY,
+  source           TEXT NOT NULL,        -- 'claude-code' | 'vscode-copilot'
+  mtime_ns         INTEGER NOT NULL,
+  size             INTEGER NOT NULL,
+  resume_offset    INTEGER NOT NULL DEFAULT 0,   -- append-only transcripts: re-read from the last turn's start
+  conversation_id  INTEGER,
+  ignored          INTEGER NOT NULL DEFAULT 0,   -- set when the user deletes the conversation: never re-captured
+  captured_at      TEXT NOT NULL
+);
+
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 ```
 
@@ -280,9 +303,9 @@ save_memories(
 ```
 
 - Run every item through the secret filter (Section 8). Reject matches; never store them.
-- Exact duplicate (same normalized hash, active) → skip.
+- Exact duplicate (same normalized hash, active, same scope) → skip.
 - Near-duplicate (cosine ≥ 0.92, same kind) → **save anyway** but report it in `possible_duplicates`, so the calling model can follow up with `update_memory` or `forget`. No silent merging in v1.
-- Description should tell the model to save when the user states a preference, makes a decision, or finishes meaningful work on a project, and to **never save secrets, credentials, or other people's private details**.
+- Description should tell the model to save when the user states a preference, makes a decision, or finishes meaningful work on a project, and to **never save secrets, credentials, or other people's private details**. One-off questions go to `record_exchange` instead.
 
 ### 7.2 `search_context`
 ```
@@ -292,11 +315,13 @@ search_context(
   project?: str,
   include_chats?: bool = true,
   limit?: int = 10            # max 25
-) -> { results: [{ type: 'memory'|'chat', id, content, kind?, project?, source, created_at, score }] }
+) -> { results: [{ type: 'memory'|'chat', id, content, kind?, subject?, project?, conversation_id?, title?, role?, source, created_at, score }] }
 ```
-- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion, plus a mild recency boost.
+- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion, plus a mild recency boost. M1 fuses the two keyword lists (memories, chat chunks); M2 adds vector lists and the recency boost to the same fusion.
 - Only searches scopes the client may read.
-- Chat results return the matching chunk plus conversation title and provider, not whole conversations.
+- Chat results return the matching chunk plus `conversation_id`, conversation title, and source, not whole conversations; `recent_conversations(conversation_id=…)` reads the rest.
+- Chats have no kind or project, so filtering on either excludes them.
+- Within one conversation, later messages rank ahead of earlier ones (a conversation often discusses options before settling on one). When chats are in the results, a `note` says that a later message supersedes an earlier one it contradicts.
 
 ### 7.3 `get_profile`
 ```
@@ -327,12 +352,51 @@ This gives each assistant's existing memory a path into the store within minutes
 ### 7.7 MCP resource: `openmcp://profile`
 Same payload as `get_profile()`, exposed as a resource for clients that prefer resources.
 
+### 7.8 `record_exchange`
+Live capture: how a question asked in one assistant becomes visible to the others.
+
+```
+record_exchange(
+  question: str,              # what the user asked, verbatim if short, else condensed (max 8000)
+  answer_summary: str,        # short summary of the answer: conclusions, recommendations, next steps (max 4000)
+  conversation_id?: int,      # omit on the first call in a chat; then pass back the id it returned
+  title?: str,                # for a new conversation; defaults to the question's first line
+  code?: list[{ content: str, path?: str, language?: str }]   # code written in this answer, in full (max 10, 20000 chars each)
+) -> { conversation_id, message_ids: [int], redacted: [reason] }
+```
+- Stores a `user` message and an `assistant` message in `conversations`/`messages`, chunked and indexed for search. `provider` is the calling client; `scope` is its write scope; `metadata.capture = 'record_exchange'`.
+- A client may only append to conversations it started (same `provider`, writable scope).
+- Code blocks are appended to the assistant message as fenced Markdown, so another assistant can continue the work (summaries alone lost the code in the M1 manual test).
+- Secrets are **redacted** (replaced with `[REDACTED]`), not rejected, in the question, answer, code, and title; the reasons come back in `redacted` (Section 8).
+- The description and the server instructions tell the model to call it after every answer, skipping only greetings and thanks.
+- Capture depends on the model choosing to call the tool, which it doesn't do reliably without a standing instruction (Section 14). Clients whose transcripts are captured (M1.5) aren't offered this tool at all.
+
+### 7.9 `recent_conversations`
+```
+recent_conversations(
+  source?: str,               # assistant/provider name, partial, case-insensitive ('claude' matches 'claude-desktop')
+  conversation_id?: int,      # just this conversation, with up to 50 messages in full (code included)
+  limit?: int = 5             # max 20
+) -> { conversations: [{ id, title, source, started_at, updated_at, message_count, messages: [{ role, content, created_at }] }] }
+```
+- Newest first by last activity; listings carry the latest 6 messages of each conversation, each cut to the usual 2000 characters. A single conversation returns messages up to 25000 characters.
+- Results carry the same ordering `note` as `search_context`.
+- Answers questions with no topic words ("what did I ask Claude earlier?"), which keyword search can't.
+- Only scopes the client may read. Content is wrapped (Section 8).
+
+### 7.10 Server instructions and standing instructions
+The MCP `instructions` tell every connected model, in short: call `get_profile` at the start; call `record_exchange` after every answer (with any code); save decisions with `save_memories` (kind `decision`) so they outrank the options discussed before them; call `recent_conversations` or `search_context` when the user refers to an earlier conversation (including with another assistant) before saying it doesn't know; never record secrets. Clients whose transcripts are captured get the same text without `record_exchange`.
+
+Real clients don't act on server instructions alone: in the M1 manual test, Claude Desktop made no tool calls until the user added the same guidance as a personal preference. So `openmcp setup <client>` (Section 9) also installs it as a **standing instruction** wherever the client reads the user's own instructions.
+
 ---
 
 ## 8. Safety
 
 ### Writes: secret filter (`safety/secrets.py`)
 Reject items matching common patterns: API keys and tokens (`sk-…`, `ghp_…`, AWS keys, JWT-shaped strings, private-key headers), payment card numbers (Luhn-checked), US SSN pattern, and lines that look like `password: …`. Return the rejection reason; never echo the matched value back.
+
+Memories (`save_memories`, `update_memory`) are **rejected** on a match. Captured exchanges (`record_exchange`, including code and titles, and transcripts captured in M1.5) are **redacted** instead: each match is replaced with `[REDACTED]` (a private key's whole block, not just its header) and the rest is stored. Users paste keys into chats often, and rejecting the exchange would silently lose the record.
 
 ### Reads: untrusted-data wrapping (`safety/wrap.py`)
 Every piece of stored content returned to a model is wrapped, for example:
@@ -373,6 +437,26 @@ write_scope = "work"
 - The client name comes from `openmcp serve --client <name>`.
 - Unknown clients fall back to `[defaults]`.
 - Scopes are free-form strings; `personal` and `work` are just the starting set.
+- With these defaults, Cursor can't read what Claude Desktop writes (`personal`). That's the isolation working as designed. For the cross-assistant tests (M1, v1), use a client that reads `personal` (e.g. Gemini CLI, which falls back to `[defaults]`) or add `personal` to Cursor's `read_scopes`.
+
+`[capture]` (M1.5) lists the clients whose transcripts are captured; it starts empty:
+
+```toml
+[capture]
+sources = ["claude-code", "vscode-copilot"]
+days = 30            # only transcripts changed within this many days
+```
+
+Captured conversations take the source client's `write_scope`.
+
+`openmcp setup <client>` does the per-client work (`--dry-run` shows it first). Each file it edits gets a `.bak` copy, and files it can't parse (e.g. VS Code settings with comments) are left alone with the snippet printed instead.
+
+| Client | Registers the server | Standing instruction | Capture |
+|---|---|---|---|
+| `claude-desktop` | `claude_desktop_config.json` (top-level `mcpServers`) | printed, to paste into Settings → Profile | `record_exchange` |
+| `vscode-copilot` | `settings.json` `mcp.servers` (or `mcp.json` on VS Code 1.102+) | `github.copilot.chat.codeGeneration.instructions` | transcripts |
+| `claude-code` | `claude mcp add --scope user` | marked block in `~/.claude/CLAUDE.md` | transcripts |
+| others | printed snippet | printed | `record_exchange` |
 
 Example Claude Desktop config (README should include one per supported client):
 
@@ -428,11 +512,22 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 - **Done when:** MCP Inspector connects and `ping` works; startup is under 500ms; tests cover init and migrations.
 
 ### M1 — Memory store
-- `save_memories`, `update_memory`, `forget`, `get_profile`, `search_context` (**FTS5 only** for now).
-- Secret filter, read wrapping, audit log.
+- `save_memories`, `update_memory`, `forget`, `get_profile`, `search_context` (**FTS5 only** for now, over memories and captured chats).
+- Live capture: `record_exchange` and `recent_conversations`, chat chunks indexed with FTS5, server instructions (Section 7.10).
+- Secret filter (reject for memories, redact for exchanges), read wrapping, audit log.
+- Scope checks on every tool (read scopes for reads; write scope plus read for writes).
 - `import_my_memory` prompt and `openmcp://profile` resource.
-- CLI: `openmcp memories list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
-- **Done when:** in Claude Desktop, "save that I prefer Python and terse answers," then a new chat with "what do you know about my preferences?" retrieves it via the tools.
+- CLI: `openmcp memories list|show|rm`, `openmcp conversations list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
+- `openmcp setup <client>` with standing instructions (Sections 7.10, 9); `code` on `record_exchange`; later turns ranked first and the ordering note. (Added after the first manual test: models didn't call the tools unprompted, summaries lost code, and an assistant mixed an early suggestion with the later decision.)
+- **Done when:** you ask one assistant (e.g. Claude Desktop) a substantive question, then ask a **different** assistant (e.g. Gemini CLI, or Cursor with `personal` readable) about that previous question, both with and without naming its topic ("what did I ask Claude earlier?"), and it answers from the stored exchange without being told. An automated test scripts the same flow across two real server processes.
+
+### M1.5 — Transcript capture
+Capture that doesn't depend on the model calling a tool, for clients that save transcripts on the user's disk.
+- Parsers for Claude Code (session JSONL under `~/.claude/projects/`) and VS Code Copilot Chat (`chatSessions/*.json` under the VS Code user directory). User prompts and answer text only: tool calls, tool output, thinking, subagent turns, and command scaffolding are skipped. Both formats are undocumented, so parsers ignore what they don't recognize and are tested against synthetic fixtures modeled on real files.
+- `capture_files` tracking: unchanged files are skipped; append-only transcripts are re-read from the start of their last turn; messages upsert by the transcript's own ids, so a growing answer updates in place. Deleting a captured conversation stops its transcript from being captured again.
+- Opt-in per client through `[capture]`, which `openmcp setup` turns on. `serve` refreshes before `search_context` and `recent_conversations` within a 250ms budget; `openmcp capture` backfills.
+- Captured clients get instructions without `record_exchange` and aren't offered the tool.
+- **Done when:** you ask Copilot (VS Code) something without any tool call recording it, then ask Claude Desktop "what did I ask Copilot?" and about the topic by name, and it answers from the captured transcript. An automated test scripts the same flow with a real server process and a synthetic transcript.
 
 ### M2 — Semantic search
 - `embed.py` with lazy model loading (don't slow server startup).
@@ -443,17 +538,17 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 ### M3 — Import
 - Job table, ChatGPT and Claude adapters, auto-detect, newest-first batching, resume.
 - `openmcp import`, `openmcp status` with a `rich` progress bar.
-- `search_context` returns chat chunks.
+- Imported conversations are searchable and listable alongside captured ones (same tables, same tools).
 - **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates.
 
 ### M4 — Scopes and ownership
-- Enforce read and write scopes on every tool.
+- Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
 - `openmcp export` dumps all memories and conversations to JSON.
 - README: install, per-client config snippets, the safety model, honest limitations.
 - **Done when:** a `cursor` client scoped to `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 
 ### v1 success test
-Start a project in Claude Desktop and save context. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**.
+Start a project in Claude Desktop and work on it over a few exchanges. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**, including picking up the questions you asked and the answers you got.
 
 ---
 
@@ -464,6 +559,7 @@ Start a project in Claude Desktop and save context. The next day, open a differe
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
 - **Review UI**: small local web page to browse, edit, and approve memories.
 - **More importers**: Gemini (Google Takeout), others.
+- **More capture sources**: Cursor and others that keep local transcripts (verify each format on a real install first); client hooks where they exist, for capture without waiting for the next read.
 - **Per-user evals**: auto-generated tests checking whether stored context actually improves answers.
 
 ---
@@ -480,3 +576,5 @@ Start a project in Claude Desktop and save context. The next day, open a differe
 - Should `get_profile` be called automatically at session start, or left to the model? (Depends on client support for resources versus tools.)
 - What's the right near-duplicate threshold? Tune it on real data in M2.
 - Should imported chats ever be readable by default, or opt-in per scope?
+- ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
+- Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

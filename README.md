@@ -5,7 +5,8 @@
 A local-first MCP server that gives every AI assistant you use one shared, user-owned
 context store on your own machine. See [SPEC.md](SPEC.md) for the full design.
 
-**Status:** early development (milestone M0: skeleton). Not ready for use.
+**Status:** early development (milestones M1 and M1.5: memory store, keyword search, and capturing
+conversations across assistants). Not ready for use.
 
 ## Development
 
@@ -17,5 +18,7 @@ Python builds disable.
 uv sync
 uv run openmcp init                       # creates ~/.openmcp (override with OPENMCP_HOME)
 uv run openmcp serve --client my-client   # MCP server over stdio
+uv run openmcp setup claude-desktop       # connect a client (also vscode-copilot, claude-code); --dry-run first
+uv run openmcp capture                    # catch up on transcripts of clients with capture on
 uv run pytest
 ```

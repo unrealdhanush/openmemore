@@ -150,3 +150,14 @@ def test_statement_splitter_handles_triggers():
     stmts = list(db._statements(sql))
     assert len(stmts) == 2
     assert stmts[1].strip().endswith("END;")
+
+
+def test_deleting_a_captured_conversation_marks_its_transcript_ignored(tmp_path):
+    conn = db.open_db(tmp_path / "t.db")
+    conn.execute("INSERT INTO conversations (id, provider, external_id) VALUES (7, 'claude-code', 's')")
+    conn.execute(
+        "INSERT INTO capture_files (path, source, mtime_ns, size, conversation_id, captured_at) "
+        "VALUES ('/t/s.jsonl', 'claude-code', 1, 1, 7, '2026-10-17T00:00:00.000Z')"
+    )
+    conn.execute("DELETE FROM conversations WHERE id = 7")
+    assert conn.execute("SELECT ignored FROM capture_files").fetchone()[0] == 1
