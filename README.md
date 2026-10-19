@@ -219,6 +219,7 @@ An export contains every memory, with its earlier versions, and every conversati
 uv sync
 uv run pytest                        # real-model tests download ~70MB once to ~/.cache/openmcp-test-models
 uv run python scripts/benchmark.py   # performance budget: 10k memories, 100k chunks (SPEC.md 4.3)
+uv run python -m bench locomo           # retrieval quality on LongMemEval / LoCoMo (SPEC.md M7.6; results in bench/RESULTS.md)
 ```
 
 Running `openmcp setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that. See [SPEC.md](SPEC.md) for the design, milestones and open questions.

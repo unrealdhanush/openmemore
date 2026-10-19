@@ -774,6 +774,11 @@ The datasets are downloaded to `~/.cache/openmcp-bench` on first use and never c
 - **The runner:** `uv run python -m bench …`. It's a development tool, not shipped in the package. Embeddings are cached by text between runs.
   - **Reports:** JSON in `bench/results/`, which holds ids and numbers only, no dataset text. `bench/RESULTS.md` keeps the history.
 - **Done when:** a baseline for LongMemEval-S and LoCoMo is recorded with the commit it measured, and the harness is tested on a synthetic dataset in CI.
+- **Status (2026-10-19): done.** Baselines are in `bench/RESULTS.md`, before M7.7, at evidence in the top 5 results:
+  - LongMemEval-S (100-question sample): 0.900 session recall, 0.971 any-hit, 0.614 turn recall.
+  - LoCoMo (all 1,986 questions): 0.833, 0.888 and 0.560. The weakest categories are open-domain (0.51) and multi-hop (0.52).
+  - The harness is tested in `tests/test_bench.py`.
+  - **Limit:** the benchmarks store conversations, not memories, so they measure chat retrieval. Memory behaviour (M7.7 parts 1–5) is covered by tests.
 
 ### M7.7: Truth over time
 Ported from LongMemory's design (Apache-2.0), reimplemented rather than translated, and measured with M7.6 as each part lands:
@@ -787,6 +792,12 @@ Ported from LongMemory's design (Apache-2.0), reimplemented rather than translat
 
 What OpenMCP doesn't take: automatic supersession from regular-expression claim extraction. In LongMemory every topic-less preference shares one topic, so a new preference silently supersedes an unrelated one. What replaces what stays a reviewed decision. Out of scope too: project, skill, wiki and code-graph memory, team access control, and connectors.
 - **Done when:** every part is tested, history questions ("what did I prefer before?") are answered while current answers stay current, and M7.6's numbers for knowledge-update and temporal questions don't regress (and improve where the change targets them).
+- **Status (2026-10-19): built and tested,** parts 1–7 (migrations 016–020).
+  - **Measured after M7.7** (evidence recall at 5):
+    - LongMemEval-S: 0.907 overall (was 0.900); knowledge-update 0.958 (0.917); temporal unchanged at 0.864.
+    - LoCoMo: 0.839 overall (0.833); NDCG 0.746 (0.734); temporal 0.835 (0.844). That dip is about 3 of 321 questions, within noise, but it isn't an improvement.
+  - **Activation:** the gains come from removing age weighting from conversation messages (the sweep is in `bench/RESULTS.md`). Memories keep a small tie-breaker by use and confirmation, which the benchmarks can't measure.
+  - **Not yet tried on real clients.**
 
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.
