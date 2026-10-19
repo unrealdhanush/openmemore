@@ -169,13 +169,14 @@ def list_memories(
     *,
     scopes: Sequence[str] | None,
     kinds: Sequence[Kind] = (),
-    project: str | None = None,
+    project: str | Sequence[str] | None = None,
     include_general: bool = False,
     updated_since: datetime | None = None,
     include_superseded: bool = False,
     limit: int = 50,
 ) -> list[Memory]:
-    """Newest first. With `include_general`, a project filter also admits untagged memories."""
+    """Newest first. `project` is one project label or several. With `include_general`, a
+    project filter also admits untagged memories."""
     where: list[str] = []
     params: list[object] = []
     if scopes is not None:
@@ -187,8 +188,9 @@ def list_memories(
         where.append(clause)
         params += p
     if project is not None:
-        where.append("(project = ? OR project IS NULL)" if include_general else "project = ?")
-        params.append(project)
+        clause, p = _in("project", [project] if isinstance(project, str) else project)
+        where.append(f"({clause} OR project IS NULL)" if include_general else clause)
+        params += p
     if updated_since is not None:
         where.append("updated_at >= ?")
         params.append(to_iso(updated_since))
@@ -200,6 +202,19 @@ def list_memories(
     order = "(project IS NULL), " if project is not None and include_general else ""
     sql += f" ORDER BY {order}updated_at DESC, id DESC LIMIT ?"
     return [_memory(r) for r in conn.execute(sql, [*params, limit])]
+
+
+def project_labels(conn: sqlite3.Connection, scopes: Sequence[str] | None) -> list[str]:
+    """Project labels of current memories in these scopes, most recently used first."""
+    where, params = ["superseded_by IS NULL", "project IS NOT NULL"], []
+    if scopes is not None:
+        clause, params = _in("scope", scopes)
+        where.append(clause)
+    rows = conn.execute(
+        f"SELECT project FROM memories WHERE {' AND '.join(where)} GROUP BY project ORDER BY MAX(updated_at) DESC",
+        params,
+    )
+    return [r[0] for r in rows]
 
 
 def knn_memories(
