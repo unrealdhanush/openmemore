@@ -25,7 +25,9 @@ from pathlib import Path
 from openmcp import db, embed, repo
 from openmcp.ingest import store_conversation
 from openmcp.ingest.detect import Export, load
-from openmcp.models import IngestJob
+from openmcp.models import IngestJob, NewMemory
+from openmcp.safety.secrets import find_secret
+from openmcp.tools.memories import content_hash
 
 BATCH = 50
 
@@ -46,6 +48,10 @@ class ImportReport:
     errors: list[str] = field(default_factory=list)
     embedded: int = 0
     """Chunks embedded in this run."""
+    memories: int = 0
+    """Memories added (OpenMCP exports)."""
+    memories_present: int = 0
+    """Memories skipped because the same one was already stored in that scope."""
 
 
 def import_export(
@@ -53,13 +59,15 @@ def import_export(
     path: Path,
     *,
     scope: str,
+    keep_scopes: bool = True,
     embedder: embed.Embedder | None = None,
     progress: Callable[[int, int], None] | None = None,
     embed_progress: Callable[[int, int], None] | None = None,
 ) -> ImportReport:
-    """Import (or resume importing) an export file. `progress(done, total)` is called
-    after each batch of conversations commits, `embed_progress(done, total)` after each
-    batch of chunks is embedded."""
+    """Import (or resume importing) an export file. Items keep the scope the export gives
+    them (OpenMCP exports do) unless `keep_scopes` is off; others go to `scope`.
+    `progress(done, total)` is called after each batch of conversations commits,
+    `embed_progress(done, total)` after each batch of chunks is embedded."""
     export = load(path)
     parse = export.importer
     order = sorted(
@@ -98,7 +106,8 @@ def import_export(
                     if parsed is not None and parsed.updated_at is None and parse.updated(raw) > 0:
                         # Listings order by last activity: use the importer's sort key if the parse had none.
                         parsed = parsed.model_copy(update={"updated_at": datetime.fromtimestamp(parse.updated(raw), UTC)})
-                    stored = store_conversation(conn, parsed, scope) if parsed else (None, 0)
+                    target = parsed.scope if parsed and keep_scopes and parsed.scope else scope
+                    stored = store_conversation(conn, parsed, target) if parsed else (None, 0)
                     if stored[0] is None:
                         report.skipped += 1
                     elif stored[1]:
@@ -112,11 +121,38 @@ def import_export(
             reason = "interrupted" if isinstance(e, KeyboardInterrupt) else f"{type(e).__name__}: {e}"
             repo.finish_job(conn, job_id, "failed", datetime.now(UTC), reason)
         raise
+    _import_memories(conn, export, scope, keep_scopes, report)
     with db.transaction(conn):
         repo.finish_job(conn, job_id, "done", datetime.now(UTC))
     if embedder is not None:
+        embed.embed_pending(conn, embedder, tables=("memories",))
         report.embedded = _embed_newest_first(conn, embedder, export, order, embed_progress)
     return report
+
+
+def _import_memories(conn: sqlite3.Connection, export: Export, scope: str, keep_scopes: bool, report: ImportReport) -> None:
+    """Current memories from an OpenMCP export. The same statement already stored in that
+    scope is skipped (so importing twice adds nothing), and the secret filter applies as
+    it does to save_memories."""
+    report.errors += export.memory_errors
+    if not export.memories:
+        return
+    with db.transaction(conn):
+        for m in export.memories:
+            if reason := next((find_secret(t) for t in (m.content, m.subject, m.project) if t and find_secret(t)), None):
+                report.errors.append(f"memory not imported: {reason}")
+                continue
+            target = m.scope if keep_scopes and m.scope else scope
+            digest = content_hash(m.content)
+            if repo.find_active_duplicate(conn, target, digest):
+                report.memories_present += 1
+                continue
+            repo.insert_memory(conn, NewMemory(
+                kind=m.kind, content=m.content, subject=m.subject, project=m.project, scope=target,
+                source_client=m.source_client, confidence=m.confidence, content_hash=digest, metadata=m.metadata,
+                created_at=m.created_at, updated_at=m.updated_at,
+            ))
+            report.memories += 1
 
 
 LOOKUP = 500

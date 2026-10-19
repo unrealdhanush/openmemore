@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Protocol
 
 from openmcp import config, db, repo
-from openmcp.models import VECTOR_TABLES
+from openmcp.models import VECTOR_TABLES, VectorTable
 
 MODEL = "BAAI/bge-small-en-v1.5"
 DIM = 384
@@ -113,12 +113,13 @@ def embed_pending(
     *,
     budget_ms: float | None = None,
     progress: Callable[[int], None] | None = None,
+    tables: Sequence[VectorTable] = VECTOR_TABLES,
 ) -> EmbedReport:
     """Embed memories and chunks that don't have vectors yet, newest first, in short
     transactions. With `budget_ms`, stop starting new batches once that much time has passed."""
     start = time.perf_counter()
     report = EmbedReport()
-    for table in VECTOR_TABLES:
+    for table in tables:
         while embedder is not None:
             if budget_ms is not None and (time.perf_counter() - start) * 1000 > budget_ms:
                 break

@@ -175,3 +175,9 @@ def test_ignore_scopes_resolves_every_client_to_all_scopes(tmp_path):
     assert resolve_client(cfg, "anyone").read_scopes is None
     config.write_default_config(tmp_path / "fresh.toml")
     assert "ignore_scopes = false" in (tmp_path / "fresh.toml").read_text()  # off unless asked
+
+
+def test_saving_a_config_without_clients_writes_no_empty_table(tmp_path):
+    path = tmp_path / "config.toml"
+    config.save_config(path, Config())
+    assert "[clients]" not in path.read_text() and config.load_config(path).clients == {}
