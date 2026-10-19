@@ -60,11 +60,11 @@ def test_excludes_superseded_and_unreadable_memories(conn):
 
 
 def test_a_project_is_matched_ignoring_case_and_by_part_of_its_name(conn):
-    renovation = insert(conn, "Renovating the kitchen.", kind="project", project="Kitchen Renovation 2026")
+    kitchen = insert(conn, "Renovating the kitchen.", kind="project", project="Kitchen Renovation 2026")
     other = insert(conn, "Garden plan.", kind="project", project="Garden")
-    for asked in ("Kitchen Renovation 2026", "renovation", "my Kitchen Renovation 2026 entry"):
+    for asked in ("kitchen renovation 2026", "renovation", "my Kitchen Renovation 2026 budget"):
         profile = get_profile(conn, caller(), project=asked)
-        assert ids(profile.active_projects) == [renovation], asked
+        assert ids(profile.active_projects) == [kitchen], asked
         assert profile.known_projects is None
     assert get_profile(conn, caller(), project="Kitchen Renovation 2026").project_note is None
     assert "Showing project 'Kitchen Renovation 2026' for 'renovation'" in get_profile(conn, caller(), project="renovation").project_note
@@ -72,13 +72,13 @@ def test_a_project_is_matched_ignoring_case_and_by_part_of_its_name(conn):
 
 
 def test_a_project_matching_nothing_gives_the_whole_profile_and_the_projects_there_are(conn):
-    """A model guessed 'cabinets' for a project stored as 'Kitchen Renovation 2026' and got
-    an empty profile (live test, 2026-10-19)."""
-    renovation = insert(conn, "Renovating the kitchen.", kind="project", project="Kitchen Renovation 2026")
+    """A model guessed a name ('cabinets') that matches no stored project and got an empty
+    profile (live test, 2026-10-19)."""
+    kitchen = insert(conn, "Renovating the kitchen.", kind="project", project="Kitchen Renovation 2026")
     pref = insert(conn, "Prefers terse answers.", kind="preference")
     insert(conn, "Work thing.", kind="project", project="Billing", scope="work")
     profile = get_profile(conn, caller("cursor-vscode", read=["personal"], write="personal"), project="cabinets")
-    assert (ids(profile.active_projects), ids(profile.preferences)) == ([renovation], [pref])
+    assert (ids(profile.active_projects), ids(profile.preferences)) == ([kitchen], [pref])
     assert profile.known_projects == ["Kitchen Renovation 2026"]  # not the work project it can't read
     assert "No memories are tagged with project 'cabinets'" in profile.project_note
 
