@@ -5,6 +5,8 @@ service definitions run the daemon at login on each OS."""
 import json
 import os
 import plistlib
+import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -119,9 +121,10 @@ def test_macos_launchd_agent(tmp_path):
 
 
 def test_linux_systemd_unit(tmp_path):
-    svc = service.describe("linux", ("/home/me/.local/bin/openmcp",), Path("/home/me/my data"), tmp_path)
+    data = Path("/home/me/my data")  # built on this OS: backslashes when the tests run on Windows
+    svc = service.describe("linux", ("/home/me/.local/bin/openmcp",), data, tmp_path)
     assert svc.file == tmp_path / ".config" / "systemd" / "user" / "openmcp.service"
-    assert "ExecStart=/home/me/.local/bin/openmcp daemon run --home '/home/me/my data'" in svc.content
+    assert "ExecStart=" + shlex.join(["/home/me/.local/bin/openmcp", "daemon", "run", "--home", str(data)]) in svc.content
     assert "WantedBy=default.target" in svc.content
     assert svc.install[-1] == ["systemctl", "--user", "enable", "--now", "openmcp.service"]
     assert any("enable-linger" in n for n in svc.notes)
@@ -216,9 +219,13 @@ def test_the_daemon_process_receives_and_captures(home, isolated_user):
     env = {**os.environ, "HOME": str(isolated_user), "USERPROFILE": str(isolated_user)}
     proc = subprocess.Popen([sys.executable, "-m", "openmcp", "daemon", "run", "--home", str(home),
                              "--log-file", str(log)], env=env)
+    pid = None
     try:
-        assert daemon.wait_until_healthy(port, 30), log.read_text() if log.exists() else "no log"
-        assert daemon.read_state(home)["pid"] == proc.pid
+        answer = daemon.wait_until_healthy(port, 30)
+        assert answer, log.read_text() if log.exists() else "no log"
+        # Not proc.pid: on Windows the venv's python.exe is a launcher that starts the real one.
+        pid = answer["pid"]
+        assert daemon.read_state(home)["pid"] == pid
 
         import urllib.request
 
@@ -240,3 +247,8 @@ def test_the_daemon_process_receives_and_captures(home, isolated_user):
     finally:
         proc.terminate()
         proc.wait(timeout=15)
+        if pid is not None and pid != proc.pid:
+            try:
+                os.kill(pid, signal.SIGTERM)  # the launcher's child, which terminate() doesn't reach
+            except OSError:
+                pass
