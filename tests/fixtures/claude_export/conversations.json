@@ -1,0 +1,96 @@
+[
+ {
+  "uuid": "claude-trip",
+  "name": "Lisbon trip",
+  "created_at": "2026-09-01T10:00:00.000000Z",
+  "updated_at": "2026-09-01T10:05:00.000000Z",
+  "account": {
+   "uuid": "acct-1"
+  },
+  "chat_messages": [
+   {
+    "uuid": "m1",
+    "sender": "human",
+    "created_at": "2026-09-01T10:00:00.000000Z",
+    "updated_at": "2026-09-01T10:00:00.000000Z",
+    "attachments": [],
+    "files": [],
+    "text": "",
+    "content": [
+     {
+      "type": "text",
+      "text": "Plan three days in Lisbon in March."
+     }
+    ]
+   },
+   {
+    "uuid": "m2",
+    "sender": "assistant",
+    "created_at": "2026-09-01T10:00:30.000000Z",
+    "updated_at": "2026-09-01T10:00:30.000000Z",
+    "attachments": [],
+    "files": [],
+    "text": "",
+    "content": [
+     {
+      "type": "text",
+      "text": "Day 1: Alfama and the castle."
+     },
+     {
+      "type": "tool_use",
+      "name": "web_search",
+      "input": {
+       "query": "Lisbon March weather"
+      }
+     },
+     {
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "text",
+        "text": "15C, some rain"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "text": "Day 2: Bel\u00e9m. Day 3: Sintra."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "uuid": "claude-untitled",
+  "name": "",
+  "created_at": "2026-09-02T09:00:00Z",
+  "updated_at": "2026-09-02T09:01:00Z",
+  "chat_messages": [
+   {
+    "uuid": "p1",
+    "sender": "human",
+    "created_at": "2026-09-02T09:00:00Z",
+    "updated_at": "2026-09-02T09:00:00Z",
+    "attachments": [],
+    "files": [],
+    "text": "What's a good name for a sourdough starter?"
+   },
+   {
+    "uuid": "p2",
+    "sender": "assistant",
+    "created_at": "2026-09-02T09:00:20Z",
+    "updated_at": "2026-09-02T09:00:20Z",
+    "attachments": [],
+    "files": [],
+    "text": "Clint Yeastwood."
+   }
+  ]
+ },
+ {
+  "uuid": "claude-empty",
+  "name": "Nothing",
+  "created_at": "2026-09-03T09:00:00Z",
+  "updated_at": "2026-09-03T09:00:00Z",
+  "chat_messages": []
+ }
+]

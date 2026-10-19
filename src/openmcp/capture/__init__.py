@@ -5,7 +5,7 @@ Each enabled source lists its transcript files and parses one file at a time. Fi
 are tracked in `capture_files`: unchanged ones are skipped and growing ones re-read
 from where their last turn starts, so a refresh before each read is cheap. Messages
 are upserted by the transcript's own ids, and secrets are redacted as in
-record_exchange.
+record_exchange (openmcp.ingest.store_conversation, shared with imports).
 """
 
 from __future__ import annotations
@@ -20,9 +20,8 @@ from pathlib import Path
 from openmcp import db, repo
 from openmcp.capture import claude_code, vscode_copilot
 from openmcp.config import Config, resolve_client
-from openmcp.models import CaptureFile, CaptureSource, NewConversation, NewMessage, ParsedConversation
-from openmcp.safety.secrets import redact
-from openmcp.tools.conversations import chunk_text, default_title, message_hash
+from openmcp.ingest import store_conversation
+from openmcp.models import CaptureFile, CaptureSource, ParsedConversation
 
 
 @dataclass(frozen=True)
@@ -49,42 +48,6 @@ class CaptureReport:
     deferred: int = 0
     """Changed files left for next time because the time budget ran out."""
     errors: list[str] = field(default_factory=list)
-
-
-def _store(conn: sqlite3.Connection, parsed: ParsedConversation, scope: str) -> tuple[int, int]:
-    """Upsert one parsed conversation. Returns (conversation id, messages added or changed)."""
-    title = default_title(redact(parsed.title)[0]) if parsed.title else None
-    conversation_id = repo.upsert_conversation(
-        conn,
-        NewConversation(
-            provider=parsed.provider,
-            external_id=parsed.external_id,
-            title=title,
-            scope=scope,
-            metadata=parsed.metadata,
-            created_at=parsed.created_at,
-            updated_at=parsed.updated_at,
-        ),
-    )
-    changed = 0
-    for m in parsed.messages:
-        content, _ = redact(m.content)
-        message_id, did_change = repo.upsert_message(
-            conn,
-            NewMessage(
-                conversation_id=conversation_id,
-                role=m.role,
-                content=content,
-                created_at=m.created_at,
-                content_hash=message_hash(m.role, content, m.created_at),
-                external_id=m.external_id,
-                recall=m.recall,
-            ),
-        )
-        if did_change:
-            repo.replace_chunks(conn, message_id, chunk_text(content))
-            changed += 1
-    return conversation_id, changed
 
 
 def capture(
@@ -131,7 +94,7 @@ def capture(
             parsed, resume = None, offset
         with db.transaction(conn):
             if parsed is not None:
-                conversation_id, changed = _store(conn, parsed, resolve_client(cfg, name).write_scope)
+                conversation_id, changed = store_conversation(conn, parsed, resolve_client(cfg, name).write_scope)
                 if changed:
                     report.conversations += 1
                     report.messages += changed
