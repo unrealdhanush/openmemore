@@ -175,6 +175,7 @@ def run(dataset: str, haystacks: Iterable[Haystack], ks: Sequence[int] = (5, 10)
         answer: Callable[[Question, Retrieved], dict[str, Any]] | None = None,
         progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
     """Store each history in a fresh database, ask its questions, and score them."""
+    measured = commit()  # now, not at the end: the code is what was loaded when the run started
     haystacks = list(haystacks)
     k_max = max(ks)
     per_question: list[dict[str, Any]] = []
@@ -207,7 +208,7 @@ def run(dataset: str, haystacks: Iterable[Haystack], ks: Sequence[int] = (5, 10)
             if progress:
                 progress(n, len(haystacks))
     return {
-        "dataset": dataset, "commit": commit(), "openmcp": __version__, "embedder": embedder_name,
+        "dataset": dataset, "commit": measured, "openmcp": __version__, "embedder": embedder_name,
         "ks": list(ks), "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "haystacks": len(haystacks), "questions": len(per_question),
         "summary": summarize(per_question),

@@ -17,7 +17,7 @@ Embedder: BAAI/bge-small-en-v1.5. 10 histories, 1986 questions. Ingest 4.593 s p
 | single-hop | 841 | 0.916 | 0.916 | 0.805 | 0.641 | 0.970 | 0.970 | 0.825 | 0.726 |
 | temporal | 321 | 0.844 | 0.863 | 0.732 | 0.639 | 0.895 | 0.910 | 0.752 | 0.709 |
 
-## 2026-10-19 longmemeval-s (limit 100) at bf5d2be
+## 2026-10-19 longmemeval-s (limit 100) at 36471d3+uncommitted (originally logged as bf5d2be: the harness took the commit when the run ended; fixed)
 
 Embedder: BAAI/bge-small-en-v1.5. 100 histories, 100 questions. Ingest 22.621 s per history; query p50 8.1 ms, p95 14.1 ms.
 
