@@ -814,16 +814,18 @@ def get_capture_file(conn: sqlite3.Connection, path: str) -> CaptureFile | None:
 def save_capture_file(conn: sqlite3.Connection, f: CaptureFile) -> None:
     conn.execute(
         """
-        INSERT INTO capture_files (path, source, mtime_ns, size, resume_offset, conversation_id, ignored, captured_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO capture_files (path, source, mtime_ns, size, resume_offset, conversation_id, ignored, folder,
+                                   filtered, captured_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (path) DO UPDATE SET
           source = excluded.source, mtime_ns = excluded.mtime_ns, size = excluded.size,
           resume_offset = excluded.resume_offset, conversation_id = excluded.conversation_id,
-          ignored = excluded.ignored, captured_at = excluded.captured_at
+          ignored = excluded.ignored, folder = excluded.folder, filtered = excluded.filtered,
+          captured_at = excluded.captured_at
         """,
         (
-            f.path, f.source, f.mtime_ns, f.size, f.resume_offset, f.conversation_id, int(f.ignored),
-            to_iso(f.captured_at),
+            f.path, f.source, f.mtime_ns, f.size, f.resume_offset, f.conversation_id, int(f.ignored), f.folder,
+            int(f.filtered), to_iso(f.captured_at),
         ),
     )
 

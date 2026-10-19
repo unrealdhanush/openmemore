@@ -73,7 +73,8 @@ def test_claude_code_keeps_prompts_and_answer_text_only(tmp_path):
         ("assistant", "Capped at 5 attempts; that token needs rotating."),
     ]
     assert (parsed.provider, parsed.external_id, parsed.title) == ("claude-code", "sess-0001", "Poller retry strategy")
-    assert parsed.metadata == {"capture": "transcript", "cwd": "/home/test/poller", "git_branch": "main"}
+    assert parsed.metadata == {"capture": "transcript", "cwd": "/home/test/poller", "git_branch": "main",
+                               "folder": "/home/test/poller"}
     assert parsed.messages[1].created_at == datetime(2026, 10, 1, 10, 0, 3, tzinfo=UTC)
 
 
@@ -112,7 +113,8 @@ def test_vscode_session_parses_prompts_and_markdown(tmp_path):
     ]
     assert [m.external_id for m in parsed.messages[:2]] == ["request_1", "response_1"]
     assert (parsed.external_id, parsed.title) == ("vs-0001", "How do I parse the Retry-After header?")
-    assert parsed.metadata == {"capture": "transcript", "workspace": "file:///home/test/poller"}
+    assert parsed.metadata == {"capture": "transcript", "workspace": "file:///home/test/poller",
+                               "folder": str(Path("/home/test/poller")) if os.name == "nt" else "/home/test/poller"}
     assert parsed.created_at == datetime.fromtimestamp(1790000000, tz=UTC)
 
 
@@ -287,3 +289,101 @@ def test_one_broken_transcript_doesnt_stop_the_others(conn, user_home, monkeypat
     report = capture(conn, CFG, user_home=user_home, days=36500)
     assert report.conversations == 1  # Claude Code's session still stored
     assert len(report.errors) == 1 and "AttributeError" in report.errors[0]
+
+
+# --- capturing by folder ([capture] include_folders / exclude_folders) ----------------------
+
+
+def session_in(user_home: Path, folder: str, name: str, prompt: str) -> Path:
+    """A one-prompt Claude Code session started in `folder`."""
+    path = user_home / ".claude" / "projects" / name / f"{name}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"type": "user", "sessionId": name, "uuid": f"{name}-1", "cwd": folder,
+                                "timestamp": "2026-10-19T10:00:00Z",
+                                "message": {"role": "user", "content": prompt}}) + "\n")
+    return path
+
+
+def folders(include=(), exclude=()):
+    return Config(capture=CaptureConfig(sources=("claude-code", "vscode-copilot"),
+                                        include_folders=include, exclude_folders=exclude))
+
+
+def titles(conn):
+    return sorted(c.title for c in repo.list_conversations(conn, scopes=None))
+
+
+def test_excluded_folders_and_their_subfolders_aren_t_captured(conn, user_home):
+    session_in(user_home, "/work/client", "a", "Client secret plans.")
+    session_in(user_home, "/work/client/api", "b", "Client API work.")
+    session_in(user_home, "/work/client-tools", "c", "My own tools.")  # a sibling, not inside
+    report = capture(conn, folders(exclude=("/work/client/",)), user_home=user_home, days=36500)
+    assert titles(conn) == ["My own tools."] and report.filtered == 2
+
+
+def test_include_folders_limit_capture_and_exclusions_win(conn, user_home):
+    session_in(user_home, "/home/me/projects/garden", "a", "Garden app.")
+    session_in(user_home, "/home/me/projects/garden/private", "b", "Private notes.")
+    session_in(user_home, "/home/me/elsewhere", "c", "Elsewhere.")
+    add_vscode_session(user_home)  # /home/test/poller
+    cfg = folders(include=("/home/me/projects",), exclude=("/home/me/projects/garden/private",))
+    capture(conn, cfg, user_home=user_home, days=36500)
+    assert titles(conn) == ["Garden app."]
+
+
+def test_without_a_folder_a_chat_is_captured_unless_folders_are_included(conn, user_home):
+    path = session_in(user_home, "/x", "a", "Where am I?")
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    del lines[0]["cwd"]
+    path.write_text(json.dumps(lines[0]) + "\n")
+    capture(conn, folders(include=("/home",)), user_home=user_home, days=36500)
+    assert titles(conn) == []
+    capture(conn, folders(), user_home=user_home, days=36500)
+    assert titles(conn) == ["Where am I?"]
+
+
+def test_a_skipped_transcript_isn_t_read_again_until_its_folder_is_captured(conn, user_home, monkeypatch):
+    from openmcp.capture import SOURCES, Source
+
+    path = session_in(user_home, "/work/client", "a", "First.")
+    excluded = folders(exclude=("/work/client",))
+    capture(conn, excluded, user_home=user_home, days=36500)
+    reads = []
+    real = SOURCES["claude-code"]
+    monkeypatch.setitem(SOURCES, "claude-code",
+                        Source(real.files, lambda p, o: reads.append(o) or real.parse(p, o), real.app))
+    append_lines(path, {"type": "user", "sessionId": "a", "uuid": "a-2", "cwd": "/work/client",
+                        "timestamp": "2026-10-19T10:05:00Z", "message": {"role": "user", "content": "Second."}})
+    report = capture(conn, excluded, user_home=user_home, days=36500)
+    assert reads == [] and report.filtered == 1  # known to be excluded: not read
+    capture(conn, folders(), user_home=user_home, days=36500)  # the folder is captured again
+    assert reads == [0]  # read from the top, so nothing is missed
+    [c] = repo.list_conversations(conn, scopes=None)
+    assert [content for _, content in contents(conn, c.id)] == ["First.", "Second."]
+
+
+def test_excluding_a_folder_later_stops_capturing_it_and_keeps_what_was_stored(conn, user_home):
+    path = session_in(user_home, "/work/client", "a", "First.")
+    capture(conn, folders(), user_home=user_home, days=36500)
+    append_lines(path, {"type": "user", "sessionId": "a", "uuid": "a-2", "cwd": "/work/client",
+                        "timestamp": "2026-10-19T10:05:00Z", "message": {"role": "user", "content": "Second."}})
+    capture(conn, folders(exclude=("/work/client",)), user_home=user_home, days=36500)
+    [c] = repo.list_conversations(conn, scopes=None)
+    assert [content for _, content in contents(conn, c.id)] == ["First."]
+
+
+def test_folders_take_home_shortcuts_and_vscode_workspaces(conn, user_home, monkeypatch):
+    monkeypatch.setenv("HOME", "/home/test")
+    monkeypatch.setenv("USERPROFILE", "/home/test")
+    add_vscode_session(user_home)  # workspace file:///home/test/poller
+    capture(conn, folders(exclude=("~/poller",)), user_home=user_home, days=36500)
+    assert titles(conn) == []
+
+
+def test_setup_mentions_folders_quietly_when_it_turns_on_capture(tmp_path):
+    from openmcp.setup import Context, plan
+
+    ctx = Context(base=tmp_path, user_home=tmp_path, platform="darwin", command=("openmcp",))
+    notes = [s.note for s in plan("vscode-copilot", ctx) if s.note]
+    assert notes == ["Only some projects? List folders under include_folders or exclude_folders in [capture]."]
+    assert not any(s.note for s in plan("cursor", ctx))

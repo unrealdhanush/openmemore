@@ -33,6 +33,13 @@ CONFIG_HEADER = """\
 #   [clients.cursor-vscode]
 #   read_scopes = ["work", "personal"]
 #   write_scope = "work"
+#
+# Transcript capture can be limited to some project folders, for apps whose transcripts
+# say which folder a chat was in (Claude Code, VS Code). Exclusions win:
+#
+#   [capture]
+#   include_folders = ["~/projects"]
+#   exclude_folders = ["~/projects/client-work"]
 
 """
 
@@ -66,6 +73,10 @@ class CaptureConfig(BaseModel):
     sources: tuple[CaptureSource, ...] = ()
     days: int = Field(default=30, ge=1, le=3650)
     """Only transcripts changed within this many days are read."""
+    include_folders: tuple[str, ...] = ()
+    """If set, only conversations from these project folders (or inside them) are captured."""
+    exclude_folders: tuple[str, ...] = ()
+    """Conversations from these project folders (or inside them) are never captured."""
 
 
 DEFAULT_DAEMON_PORT = 47318

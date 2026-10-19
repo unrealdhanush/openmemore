@@ -12,10 +12,13 @@ Checked against VS Code 1.99. The format is undocumented: unknown parts are igno
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 from typing import Any
 
 from openmcp.capture.common import RECALL_TOOLS, is_recall_tool
@@ -104,6 +107,15 @@ def _workspace(path: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def folder_path(uri: str) -> str | None:
+    """A local folder from VS Code's workspace URI ('file:///Users/me/app' -> '/Users/me/app').
+    Remote ones (vscode-remote://...) have no local path."""
+    parsed = urlparse(uri)
+    if parsed.scheme != "file":
+        return None
+    return url2pathname(parsed.path) if os.name == "nt" else unquote(parsed.path)
+
+
 def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
     """Read a whole chat session (`offset` is ignored: VS Code rewrites the file each time)."""
     data = json.loads(path.read_bytes())
@@ -135,6 +147,8 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
     metadata: dict[str, Any] = {"capture": "transcript"}
     if workspace := _workspace(path):
         metadata["workspace"] = workspace
+        if folder := folder_path(workspace):
+            metadata["folder"] = folder
     title = data.get("customTitle")
     return (
         ParsedConversation(
