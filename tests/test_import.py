@@ -257,7 +257,7 @@ def test_import_command_refuses_what_it_cant_read(home, tmp_path):
     bad = tmp_path / "notes.json"
     bad.write_text("[1, 2, 3]")
     code, out = cli("import", str(bad))
-    assert code == 2 and "doesn't look like a format OpenMCP can import (it reads: ChatGPT, Claude, OpenMCP format)" in out
+    assert code == 2 and "doesn't look like a format OpenMCP can import (it reads: ChatGPT, Claude, OpenMCP export)" in out
     assert cli("import", str(tmp_path / "missing.zip"))[0] == 2
 
 
