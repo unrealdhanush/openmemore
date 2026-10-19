@@ -34,3 +34,18 @@ Embedder: BAAI/bge-small-en-v1.5. 100 histories, 100 questions. Ingest 22.621 s 
 | single-session-user-abstention | 6 | – | – | – | – | – | – | – | – |
 | temporal-reasoning | 11 | 0.864 | 1.000 | 0.890 | 0.621 | 0.939 | 1.000 | 0.930 | 0.742 |
 | temporal-reasoning-abstention | 6 | – | – | – | – | – | – | – | – |
+
+## 2026-10-19 activation sweep (M7.7 part 7) at 0baa405
+
+Age-only activation (benchmark runs present nothing), decay 0.5, weight varied; one row per weight. Session recall@5 and NDCG@5 overall, temporal questions' recall@5, LongMemEval knowledge-update recall@5:
+
+| weight | LME recall@5 | LME ndcg@5 | LME temporal@5 | LME knowledge-update@5 | LoCoMo recall@5 | LoCoMo ndcg@5 | LoCoMo temporal@5 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 0.907 | 0.885 | 0.864 | 0.958 | 0.839 | 0.746 | 0.835 |
+| 0.0005 | 0.895 | 0.882 | 0.864 | 0.917 | 0.836 | 0.736 | 0.844 |
+| 0.002 | 0.892 | 0.876 | 0.864 | 0.917 | 0.828 | 0.728 | 0.833 |
+| 0.005 | 0.906 | 0.881 | 0.864 | 0.917 | 0.813 | 0.711 | 0.816 |
+| 0.01 | 0.892 | 0.865 | 0.818 | 0.833 | 0.790 | 0.693 | 0.808 |
+| 0.02 | 0.870 | 0.849 | 0.773 | 0.833 | 0.768 | 0.674 | 0.788 |
+
+Any age weighting lowered evidence recall, more so the stronger it was: questions often ask about older conversations. Shipped: no age weighting for conversation messages; memories keep 0.0005 as a tie-breaker by use and confirmation (not measured here).
