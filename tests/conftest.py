@@ -79,6 +79,16 @@ def no_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 REAL_DEVELOPMENT_CHECKOUT = client_setup.development_checkout
+REAL_COPY_TO_CLIPBOARD = client_setup.copy_to_clipboard
+
+
+@pytest.fixture(autouse=True)
+def clipboard(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Never touch the real clipboard: `openmcp setup` copies the standing instruction.
+    Copies are recorded here, and report success."""
+    copied: list[str] = []
+    monkeypatch.setattr(client_setup, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    return copied
 
 
 @pytest.fixture(autouse=True)

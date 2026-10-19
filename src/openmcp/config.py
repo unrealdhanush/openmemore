@@ -95,6 +95,7 @@ def load_config(path: Path) -> Config:
 
 
 def save_config(path: Path, config: Config) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)), encoding="utf-8")
 
 

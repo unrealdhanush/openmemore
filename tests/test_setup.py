@@ -10,7 +10,7 @@ import pytest
 from openmcp import config
 from openmcp.capture import vscode_copilot
 from openmcp.cli import initialize
-from openmcp.instructions import STANDING_PREFIX, server_instructions, standing_instruction
+from openmcp.instructions import STANDING_PREFIX, pointer_instruction, server_instructions, standing_instruction
 from openmcp.setup import (
     COPILOT_INSTRUCTIONS,
     VSCODE_DISCOVERY,
@@ -78,8 +78,9 @@ def test_claude_desktop_adds_a_top_level_server_and_keeps_other_settings(ctx):
     assert data["mcpServers"]["other"] == {"command": "x"}
     assert data["mcpServers"]["openmcp"] == {"command": COMMAND[0], "args": ["serve", "--client", "claude-desktop"]}
     assert json.loads(path.with_name(path.name + ".bak").read_text())["mcpServers"] == {"other": {"command": "x"}}
+    assert config.load_config(config.config_path(ctx.base)).clients["claude-desktop"].app == "claude-ai"
     manual = "\n".join(s.manual for s in steps if s.manual)
-    assert "Settings → Profile" in manual and standing_instruction(captured=False) in manual
+    assert "Settings → Profile" in manual and pointer_instruction() in manual
 
 
 def test_claude_desktop_creates_the_config_if_missing(ctx):
@@ -171,11 +172,13 @@ def test_claude_code_instruction_block_is_replaced_not_duplicated(ctx):
 # --- other clients -------------------------------------------------------------------
 
 
-def test_unverified_clients_get_printed_instructions_only(ctx):
+def test_unverified_clients_get_printed_instructions_only(ctx, clipboard):
     steps = plan("cursor", ctx)
-    assert all(s.apply is None for s in steps)
-    manual = "\n".join(s.manual for s in steps)
-    assert '"--client"' in manual and '"cursor"' in manual and standing_instruction(captured=False) in manual
+    assert run(steps) == []
+    assert [p for p in ctx.user_home.rglob("*") if ".openmcp" not in p.parts] == []  # only the clipboard
+    assert clipboard == [pointer_instruction()]
+    manual = "\n".join(s.manual for s in steps if s.manual)
+    assert '"--client"' in manual and '"cursor"' in manual and pointer_instruction() in manual
 
 
 # --- operating systems ---------------------------------------------------------------
@@ -267,3 +270,53 @@ def test_installed_copy_prefers_uv_tools_and_skips_the_checkout(tmp_path):
     assert installed_command(checkout, path=path, which=lambda _: "uv", run=uv_dir) == (str(tool.resolve()),)
     assert installed_command(checkout, path=path, which=lambda _: None) == (str(on_path.resolve()),)
     assert installed_command(checkout, path=str(dev.parent), which=lambda _: None) is None
+
+
+# --- the pasted instruction ----------------------------------------------------------
+
+
+def test_the_pointer_names_the_key_calls_and_defers_to_the_server():
+    text = pointer_instruction()
+    assert text.startswith(STANDING_PREFIX) and "server's instructions" in text
+    # The manual test: Claude Desktop reused conversation ids and searched by topic from the
+    # server instructions alone, but didn't save a decision until the pointer named save_memories.
+    for tool in ("get_profile", "record_exchange", "save_memories", "recent_conversations", "search_context"):
+        assert tool in text
+    assert len(text) < 450
+    assert text.isascii()  # survives every clipboard tool, including Windows' clip
+    # Everything the full instruction asks for is in the server instructions it points to.
+    server = server_instructions(captured=False)
+    for detail in ("code", "conversation_id", "kind 'decision'", "topic itself", "secrets"):
+        assert detail in server, detail
+
+
+def test_claude_desktop_setup_copies_the_pointer(ctx, clipboard):
+    steps = plan("claude-desktop", ctx)
+    assert run(steps) == []
+    assert clipboard == [pointer_instruction()]
+
+
+def test_no_clipboard_tool_doesnt_fail_setup(ctx):
+    no_clipboard = Context(base=ctx.base, user_home=ctx.user_home, platform="darwin", command=COMMAND,
+                           copy=lambda text: False)
+    copy_step = next(s for s in plan("claude-desktop", no_clipboard) if s.description.startswith("Copy"))
+    assert copy_step.apply() == "no clipboard tool found: copy it from below"
+
+
+@pytest.mark.parametrize("platform, available, expected", [
+    ("darwin", {"pbcopy"}, ["pbcopy"]),
+    ("win32", {"clip"}, ["clip"]),
+    ("linux", {"xclip", "xsel"}, ["xclip", "-selection", "clipboard"]),  # wl-copy missing: next one
+    ("linux", set(), None),
+])
+def test_copy_to_clipboard_uses_the_platform_tool(platform, available, expected):
+    from conftest import REAL_COPY_TO_CLIPBOARD as real_copy  # the module attribute is patched for safety
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs["input"]))
+        return subprocess.CompletedProcess(args, 0)
+
+    ok = real_copy("hello", platform=platform, which=lambda name: name if name in available else None, run=run)
+    assert ok is (expected is not None)
+    assert calls == ([(expected, b"hello")] if expected else [])
