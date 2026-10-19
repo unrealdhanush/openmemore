@@ -110,6 +110,15 @@ Most desktop assistants don't export their conversations this way. For them, tra
 
 `openmcp daemon uninstall` stops it and removes the service.
 
+## Memory over time
+
+Memories keep two timelines: when something was true in your life, and when OpenMCP learned it. That idea comes from [LongMemory](https://github.com/CaviraOSS/LongMemory)'s design.
+- **Corrections:** a correction doesn't overwrite. The old memory becomes history, true until the change, and current answers only use what's true now.
+- **Questions about the past:** "what did I use before?" or "what did I prefer last year?" are answered with `search_context(mode="history")` or `as_of="2025-03"`. Every result says whether it's current, superseded, ended or contradicted.
+- **Conflicts:** when two memories disagree and it isn't clear which is right, you settle it on the review page. Until then, neither is treated as current.
+- **Confirmation:** something stated again by another assistant, or found again in a new conversation, gains confidence instead of being duplicated.
+- **Ranking:** results favor what's recent and what you actually use (ACT-R-style activation). `explain=true` shows why each result was chosen, and `budget_tokens` keeps results within a size.
+
 ## Consolidate and review
 
 Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. To turn chats into memories, ask any connected assistant to **"consolidate my chats"**, or use its OpenMCP `consolidate` prompt. It reads the conversations that haven't been consolidated yet, a batch at a time, and proposes memories, each citing the conversations it came from. The model that writes the proposals is your assistant's own; OpenMCP calls no model and needs no API key.

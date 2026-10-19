@@ -34,12 +34,14 @@ It uses the same store and rules as your assistants: `~/.openmcp` (or `OPENMCP_H
 
 | Call | Returns |
 |---|---|
-| `memory.search(query, *, limit=10, kinds=(), project=None, chats=True)` | a list of `Hit`: related memories and conversation messages, matched by meaning and by words |
-| `memory.context(query, *, limit=5, kinds=(), profile=False)` | a block of text ready for a prompt: the stored-data notice, then each related item wrapped. Empty when nothing is related |
-| `memory.profile(project=None)` | preferences, facts, active projects and recent decisions, the same as the `get_profile` tool |
+| `memory.search(query, *, limit=10, kinds=(), project=None, chats=True, mode="current", as_of=None, budget_tokens=None)` | a list of `Hit`: related memories and conversation messages, matched by meaning and by words. `mode="history"` adds earlier versions and things no longer true; `as_of="2024-03"` gives what was true then |
+| `memory.context(query, *, limit=5, kinds=(), profile=False, budget_tokens=None)` | a block of text ready for a prompt: the stored-data notice, then each related item wrapped, within about `budget_tokens` tokens (the profile gets up to a third). Empty when nothing is related |
+| `memory.profile(project=None, *, budget_tokens=None)` | preferences, facts, active projects and recent decisions, the same as the `get_profile` tool |
 | `memory.recent(limit=5, source=None)` | the latest conversations, the same as the `recent_conversations` tool |
 
-A `Hit` has these fields: `type` (`"memory"` or `"chat"`), `id`, `text`, `wrapped`, `source`, `score`, `kind`, `subject`, `project`, `conversation_id`, `title` and `created_at`.
+A `Hit` has these fields: `type` (`"memory"` or `"chat"`), `id`, `text`, `wrapped`, `source`, `score`, `kind`, `subject`, `project`, `conversation_id`, `title`, `created_at`, `status`, `replaced_by`, `valid_from` and `valid_to`.
+- **`status`:** for a memory, `current`, `superseded` (`replaced_by` says by what), `ended` (no longer true) or `contradicted` (disagrees with another memory; unresolved). For a message, `chat` or `recap`.
+- **`valid_from` / `valid_to`:** when a memory was true. `valid_to` is `None` while it still is.
 - **`text`** is the stored text, for your program's logic.
 - **`wrapped`** is the same text labelled as stored data. Use it in a prompt: the label tells the model to treat it as information, not instructions.
 
@@ -49,9 +51,9 @@ A `Hit` has these fields: `type` (`"memory"` or `"chat"`), `id`, `text`, `wrappe
 
 | Call | Does |
 |---|---|
-| `memory.save(content, *, kind="note", subject=None, project=None)` | saves a memory in this client's write scope. Returns its id, or `None` if the same statement is already stored |
+| `memory.save(content, *, kind="note", subject=None, project=None, valid_from=None, valid_to=None)` | saves a memory in this client's write scope. `valid_from` / `valid_to` say when it became and stopped being true (`"2024"`, `"2024-03"`, a date), if not now. Returns its id, or `None` if the same statement is already stored (which counts as a confirmation if this client didn't just save it) |
 | `memory.record(question, answer, *, conversation=None, title=None)` | stores an exchange, with secrets replaced by `[REDACTED]`. Returns the conversation id |
-| `memory.update(id, content)` | corrects a memory. The old version is kept as history. Returns the new id |
+| `memory.update(id, content, *, valid_from=None)` | corrects a memory. The old version is kept as history, true until the change (`valid_from`, default now). Returns the new id |
 | `memory.forget(id)` | deletes a memory and its history. Returns how many versions were deleted |
 
 `kind` is one of `fact`, `preference`, `project`, `decision` or `note`.
