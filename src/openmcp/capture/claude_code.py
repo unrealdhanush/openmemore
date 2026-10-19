@@ -7,6 +7,7 @@ Each line is an event. The ones that matter here:
   form that turn's answer (tool calls and thinking are skipped).
 - `ai-title` / `custom-title` / `summary` carry the session's title.
 - `isSidechain` lines belong to subagents and are skipped.
+- A turn whose assistant lines call OpenMCP's recall tools (tool_use blocks) is a recall turn.
 
 The format is undocumented and changes between versions: unknown lines are ignored.
 """
@@ -21,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from openmcp.capture.common import is_recall_tool
 from openmcp.models import ParsedConversation, ParsedMessage
 
 PROVIDER = "claude-code"
@@ -63,6 +65,14 @@ def _prompt_text(line: dict[str, Any]) -> str | None:
     return text
 
 
+def _calls_recall_tool(line: dict[str, Any]) -> bool:
+    content = (line.get("message") or {}).get("content")
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("name"), str) and is_recall_tool(b["name"])
+        for b in content
+    )
+
+
 def _assistant_text(line: dict[str, Any]) -> str:
     content = (line.get("message") or {}).get("content")
     if isinstance(content, str):
@@ -92,10 +102,14 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
     resume = offset
 
     prompt_id: str | None = None
+    prompt: ParsedMessage | None = None
     answer_parts: list[str] = []
     answer_ts: datetime | None = None
+    recall = False
 
     def finish_turn() -> None:
+        if prompt is not None:
+            prompt.recall = recall
         if prompt_id is not None and answer_parts:
             messages.append(
                 ParsedMessage(
@@ -103,6 +117,7 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
                     role="assistant",
                     content="\n\n".join(answer_parts),
                     created_at=answer_ts,
+                    recall=recall,
                 )
             )
 
@@ -147,9 +162,11 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
                 if text is None or not isinstance(line.get("uuid"), str):
                     continue
                 finish_turn()
-                prompt_id, answer_parts, answer_ts, resume = line["uuid"], [], None, start
-                messages.append(ParsedMessage(external_id=prompt_id, role="user", content=text, created_at=when))
+                prompt_id, answer_parts, answer_ts, recall, resume = line["uuid"], [], None, False, start
+                prompt = ParsedMessage(external_id=prompt_id, role="user", content=text, created_at=when)
+                messages.append(prompt)
             elif prompt_id is not None:
+                recall = recall or _calls_recall_tool(line)
                 text = _assistant_text(line)
                 if text:
                     answer_parts.append(text)

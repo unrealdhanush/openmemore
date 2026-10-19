@@ -363,9 +363,12 @@ def insert_message(conn: sqlite3.Connection, m: NewMessage) -> tuple[int, bool]:
     """Insert unless the conversation already has a message with this content_hash.
     Returns (message id, whether it was inserted)."""
     row = conn.execute(
-        "INSERT INTO messages (conversation_id, role, content, created_at, content_hash, external_id) "
-        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (conversation_id, content_hash) DO NOTHING RETURNING id",
-        (m.conversation_id, m.role, m.content, _iso_or_none(m.created_at), m.content_hash, m.external_id),
+        "INSERT INTO messages (conversation_id, role, content, created_at, content_hash, external_id, recall) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (conversation_id, content_hash) DO NOTHING RETURNING id",
+        (
+            m.conversation_id, m.role, m.content, _iso_or_none(m.created_at), m.content_hash, m.external_id,
+            int(m.recall),
+        ),
     ).fetchone()
     if row:
         return row[0], True
@@ -381,11 +384,13 @@ def upsert_message(conn: sqlite3.Connection, m: NewMessage) -> tuple[int, bool]:
     if m.external_id is None:
         raise ValueError("upsert_message needs an external_id")
     row = conn.execute(
-        "SELECT id, content FROM messages WHERE conversation_id = ? AND external_id = ?",
+        "SELECT id, content, recall FROM messages WHERE conversation_id = ? AND external_id = ?",
         (m.conversation_id, m.external_id),
     ).fetchone()
     if row is None:
         return insert_message(conn, m)
+    if bool(row["recall"]) != m.recall:  # a turn still being written may call a recall tool later
+        conn.execute("UPDATE messages SET recall = ? WHERE id = ?", (int(m.recall), row["id"]))
     if row["content"] == m.content:
         return row["id"], False
     # OR IGNORE: if the new content duplicates another message in the conversation, keep the old text.
@@ -483,8 +488,8 @@ def search_chunks(
         WITH best AS (
           SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?
         )
-        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
-               conv.title, conv.provider, best.rank
+        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               conv.id AS conversation_id, conv.title, conv.provider, best.rank
         FROM best
         JOIN chunks c ON c.id = best.rowid
         JOIN messages msg ON msg.id = c.message_id
@@ -510,8 +515,8 @@ def knn_chunks(conn: sqlite3.Connection, query: bytes, *, k: int, scopes: Sequen
     rows = conn.execute(
         f"""
         WITH knn AS (SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?)
-        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.created_at, conv.id AS conversation_id,
-               conv.title, conv.provider, knn.distance AS rank
+        SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               conv.id AS conversation_id, conv.title, conv.provider, knn.distance AS rank
         FROM knn
         JOIN chunks c ON c.id = knn.rowid
         JOIN messages msg ON msg.id = c.message_id

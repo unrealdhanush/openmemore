@@ -131,6 +131,8 @@ class NewMessage(BaseModel):
     external_id: str | None = None
     """The source's id for this message (captured transcripts), so re-reading a growing
     transcript updates the message instead of adding another copy."""
+    recall: bool = False
+    """Part of a turn that only looked up earlier conversations (SPEC.md 7.2)."""
 
 
 class Message(NewMessage):
@@ -146,6 +148,7 @@ class ChunkMatch(BaseModel):
     message_id: int
     text: str
     role: Role
+    recall: bool = False
     created_at: datetime | None
     conversation_id: int
     title: str | None
@@ -176,6 +179,8 @@ class ParsedMessage(BaseModel):
     role: Role
     content: str = Field(min_length=1)
     created_at: AwareDatetime | None = None
+    recall: bool = False
+    """The turn called OpenMCP's recall tools (recent_conversations, search_context)."""
 
 
 class ParsedConversation(BaseModel):
@@ -300,6 +305,8 @@ class SearchHit(BaseModel):
     """Client that wrote it (memories, captured chats) or provider it was imported from."""
     created_at: datetime | None
     score: float
+    recall: bool = False
+    """A recap of earlier conversations, ranked below them: prefer the original it points to."""
 
 
 class SearchResult(ReadResult):
