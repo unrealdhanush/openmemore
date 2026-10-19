@@ -1,5 +1,9 @@
-"""search_context. M1: keyword search (FTS5, BM25) over memories and conversation
-chunks, merged with reciprocal rank fusion (M2 adds vector rankings to the merge)."""
+"""search_context: hybrid search over memories and conversation chunks (SPEC.md 7.2).
+
+Up to four ranked lists (keyword (FTS5, BM25) and vector (sqlite-vec, cosine) for
+memories and for chunks) are merged with reciprocal rank fusion, plus a mild recency
+boost. Without the embedding model, the vector lists are simply missing.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,10 @@ import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from openmcp import repo
+from openmcp import embed, repo
 from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, SearchHit, SearchResult
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
@@ -31,15 +37,56 @@ STOPWORDS = frozenset(
 RRF_K = 60
 """Reciprocal rank fusion constant: a result at rank r in a list scores 1 / (RRF_K + r)."""
 
+# Vector search always returns the nearest items, related or not, so vector hits must
+# clear a similarity floor and be close to the best one. Calibrated for bge-small on a
+# synthetic set (20 paraphrased questions, 8 unrelated ones): 18/20 paraphrases found,
+# ~1 unrelated item per query, 2 hits across the 8 unrelated queries. SPEC.md Section 14.
+SIMILARITY_FLOOR = 0.55
+SIMILARITY_WINDOW = 0.08
+VECTOR_CANDIDATES_PER_RESULT = 4
+"""Nearest neighbors fetched per requested result, before scope and kind filters."""
 
-def fts_query(text: str) -> str | None:
-    """Free text -> an FTS5 query that ORs the meaningful words, each quoted so FTS5
-    syntax in user text (AND, NEAR, *, quotes, colons) is treated literally."""
+RECENCY_WEIGHT = 0.0005
+"""At most this much is added to a fused score (a top rank is worth 1/61 ≈ 0.016), so
+recency breaks near-ties without overriding relevance."""
+RECENCY_HALF_LIFE_DAYS = 30
+
+
+MAX_CHUNK_KEYWORD_MATCHES = 8000
+"""Ranking costs ~1.6ms per thousand matching chunks, so a common word in a large
+history ('code' in 40k chunks) would blow the search budget (SPEC.md 4.3) while
+adding almost nothing: BM25 gives such words little weight anyway."""
+
+
+def query_words(text: str) -> list[str]:
+    """The meaningful words of a query, in order, without repeats."""
     words = _WORD.findall(text.casefold())
-    terms = [w for w in words if w not in STOPWORDS] or words
-    if not terms:
+    return list(dict.fromkeys([w for w in words if w not in STOPWORDS] or words))
+
+
+def fts_query(text: str | Sequence[str]) -> str | None:
+    """Free text (or its words) -> an FTS5 query that ORs the meaningful words, each quoted
+    so FTS5 syntax in user text (AND, NEAR, *, quotes, colons) is treated literally."""
+    words = query_words(text) if isinstance(text, str) else list(text)
+    if not words:
         return None
-    return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
+    return " OR ".join(f'"{w}"' for w in words)
+
+
+def chunk_keyword_query(conn: sqlite3.Connection, words: list[str]) -> str | None:
+    """fts_query for chunks, leaving out the most common words once the rest already
+    match MAX_CHUNK_KEYWORD_MATCHES chunks between them. None if every word is too common."""
+    stems = repo.stems(conn, words)
+    counts = repo.chunk_term_counts(conn, [s for s in stems if s])
+    by_rarity = sorted(zip(words, stems), key=lambda ws: counts.get(ws[1], 0) if ws[1] else 0)
+    kept, total = [], 0
+    for word, stem in by_rarity:
+        matches = counts.get(stem, 0) if stem else 0
+        if total + matches > MAX_CHUNK_KEYWORD_MATCHES:
+            break
+        kept.append(word)
+        total += matches
+    return fts_query(kept)
 
 
 def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
@@ -85,6 +132,39 @@ def _chat_hit(c: ChunkMatch, score: float) -> SearchHit:
     )
 
 
+def similar_enough(
+    memories: list[tuple[Memory, float]], chunks: list[ChunkMatch]
+) -> tuple[list[tuple[Memory, float]], list[ChunkMatch]]:
+    """Drop vector hits that are too far from the query, judged against the best hit in
+    either list (distances are cosine distances)."""
+    sims = [embed.similarity(d) for _, d in memories] + [embed.similarity(c.rank) for c in chunks]
+    if not sims:
+        return [], []
+    cutoff = max(SIMILARITY_FLOOR, max(sims) - SIMILARITY_WINDOW)
+    return (
+        [(m, d) for m, d in memories if embed.similarity(d) >= cutoff],
+        [c for c in chunks if embed.similarity(c.rank) >= cutoff],
+    )
+
+
+def recency_boost(when: datetime | None, now: datetime) -> float:
+    """Halves every RECENCY_HALF_LIFE_DAYS. Age counts in whole hours, so items written
+    close together tie and the usual tie-breaks (memories first) still apply."""
+    if when is None:
+        return 0.0
+    age_days = max(0, int((now - when).total_seconds() // 3600)) / 24
+    return RECENCY_WEIGHT * 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+
+
+@dataclass
+class _Fused:
+    score: float
+    kind_order: int
+    """0 for memories (distilled, durable), 1 for chats: memories win ties."""
+    best_rank: int
+    item: Memory | ChunkMatch
+
+
 def search_context(
     conn: sqlite3.Connection,
     caller: Caller,
@@ -94,26 +174,49 @@ def search_context(
     include_chats: bool = True,
     limit: int = 10,
 ) -> SearchResult:
-    match = fts_query(query)
-    if match is None:
-        return SearchResult()
     read = caller.scopes.read_scopes
-
-    # Each ranked list contributes 1 / (RRF_K + rank). Ties keep list order: memories
-    # (distilled, durable) before chats, then by rank within each list.
-    scored: list[tuple[float, int, int, SearchHit]] = []
-    memories = repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit)
-    for rank, (m, _) in enumerate(memories, start=1):
-        score = 1 / (RRF_K + rank)
-        scored.append((score, 0, rank, _memory_hit(m, score)))
+    words = query_words(query)
+    match = fts_query(words)
     # Chats have no kind or project, so filtering on either excludes them.
-    if include_chats and not kinds and project is None:
-        chunks = later_turns_first(repo.search_chunks(conn, match, scopes=read, limit=limit))
-        for rank, c in enumerate(chunks, start=1):
-            score = 1 / (RRF_K + rank)
-            scored.append((score, 1, rank, _chat_hit(c, score)))
+    include_chats = include_chats and not kinds and project is None
+    embedder = embed.get_embedder()
+    vector = embedder.query(query) if embedder is not None else None
 
-    scored.sort(key=lambda s: (-s[0], s[1], s[2]))
-    hits = [hit for *_, hit in scored[:limit]]
+    memory_lists: list[list[Memory]] = []
+    chunk_lists: list[list[ChunkMatch]] = []
+    if match is not None:
+        memory_lists.append(
+            [m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit)]
+        )
+        if include_chats and (chunk_match := chunk_keyword_query(conn, words)):
+            chunk_lists.append(later_turns_first(repo.search_chunks(conn, chunk_match, scopes=read, limit=limit)))
+    if vector is not None:
+        k = limit * VECTOR_CANDIDATES_PER_RESULT
+        near_memories, near_chunks = similar_enough(
+            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project),
+            repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else [],
+        )
+        memory_lists.append([m for m, _ in near_memories[:limit]])
+        if include_chats:
+            chunk_lists.append(later_turns_first(near_chunks[:limit]))
+
+    # Each list contributes 1 / (RRF_K + rank) to every item in it.
+    fused: dict[tuple[str, int], _Fused] = {}
+    for kind_order, lists in ((0, memory_lists), (1, chunk_lists)):
+        for ranked in lists:
+            for rank, item in enumerate(ranked, start=1):
+                key = ("memory", item.id) if isinstance(item, Memory) else ("chat", item.chunk_id)
+                entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
+                entry.score += 1 / (RRF_K + rank)
+                entry.best_rank = min(entry.best_rank, rank)
+    now = datetime.now(UTC)
+    for entry in fused.values():
+        item = entry.item
+        entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+
+    ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
+    hits = [
+        _memory_hit(e.item, e.score) if isinstance(e.item, Memory) else _chat_hit(e.item, e.score) for e in ranked
+    ]
     has_chats = any(h.type == "chat" for h in hits)
     return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)

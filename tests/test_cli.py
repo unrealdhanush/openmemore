@@ -184,3 +184,25 @@ def test_capture_command(home):
     assert result.exit_code == 2 and "--source" in result.output
     result = run("capture", "--source", "vscode-copilot", "--days", "7")
     assert result.exit_code == 0 and "read 0 transcript files" in result.output
+
+
+# --- embed ---------------------------------------------------------------------------
+
+
+def test_embed_command(store, fake_embedder):
+    conn, _ = store  # three memories inserted without vectors
+    result = run("embed")
+    assert result.exit_code == 0, result.output
+    assert "embedded 2 memories" in result.output  # the superseded version isn't embedded
+    assert conn.execute("SELECT COUNT(*) FROM memories_vec").fetchone()[0] == 2
+
+
+def test_embed_without_a_model_says_so(store):
+    result = run("embed")
+    assert result.exit_code == 1
+    assert "Semantic search unavailable" in result.output and "Keyword search still works" in result.output
+
+
+def test_capture_still_succeeds_without_a_model(home):
+    result = run("capture", "--source", "vscode-copilot")
+    assert result.exit_code == 0 and "Semantic search unavailable" in result.output
