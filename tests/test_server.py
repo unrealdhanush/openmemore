@@ -148,3 +148,17 @@ def test_enable_capture_keeps_the_rest_of_the_config(tmp_path):
     cfg = config.load_config(path)
     assert cfg.capture.sources == ("claude-code",)
     assert config.resolve_client(cfg, "cursor").read_scopes == ("work",)
+
+
+def test_client_app_is_validated_and_kept(tmp_path):
+    path = tmp_path / "config.toml"
+    config.write_default_config(path)
+    assert config.set_client_app(path, "vscode-copilot", "Visual Studio Code") is True
+    assert config.set_client_app(path, "vscode-copilot", "Visual Studio Code") is False
+    config.enable_capture(path, "vscode-copilot")  # other edits keep it
+    cfg = config.load_config(path)
+    assert cfg.clients["vscode-copilot"].app == "Visual Studio Code"
+    assert config.resolve_client(cfg, "vscode-copilot") == config.resolve_client(config.Config(), "vscode-copilot")
+    path.write_text('[clients.x]\napp = ""\n')
+    with pytest.raises(ValidationError):
+        config.load_config(path)

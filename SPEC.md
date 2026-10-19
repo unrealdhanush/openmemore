@@ -241,7 +241,8 @@ CREATE TABLE audit_log (
   tool          TEXT NOT NULL,
   summary       TEXT,                  -- short, never the full payload
   result_count  INTEGER,
-  duration_ms   REAL NOT NULL          -- for the performance budget (Section 4.3)
+  duration_ms   REAL NOT NULL,         -- for the performance budget (Section 4.3)
+  app           TEXT                   -- the application on the other end (MCP clientInfo.name), when it says
 );
 
 CREATE TABLE ingest_jobs (
@@ -326,10 +327,8 @@ search_context(
 - Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion (k = 60), plus a mild recency boost. Up to four ranked lists: keyword and vector, for memories and for chat chunks. Without the embedding model (not downloaded yet) the vector lists are simply missing.
 - Vector search always returns the nearest items, related or not, so vector hits must have cosine similarity ≥ 0.55 and be within 0.08 of the best vector hit (calibrated for bge-small; Section 14).
 - Recency boost: at most 0.0005 added to a fused score (a top rank is worth ≈ 0.016), halving every 30 days, counted in whole hours so items written close together still tie.
-- **Recall turns** ("what did I ask Copilot?") are stored but marked (`messages.recall`) and ranked below the conversations they recap: their score is multiplied by 0.25, they don't set the bar for the vector similarity window, and they keep their own positions when later turns are moved ahead. Unmarked, each recap matched the next such question better than the original and pushed it further down (found in the M2 manual test). A turn is a recall when:
-  - `record_exchange` follows, within 10 minutes and in the same server process, a `search_context` or `recent_conversations` call that returned something, and carries no `code` (`get_profile` doesn't count);
-  - a captured transcript turn called `recent_conversations` or `search_context` (Claude Code `tool_use` names, VS Code `toolCallRounds`).
-- The instructions also tell models not to record pure lookups, and to search for the topic itself ("cat names", not "the pet question I asked Copilot"), narrowing by assistant with `recent_conversations`.
+- **Recall turns** ("what did I ask Copilot?") are stored but marked (`messages.recall`) and ranked below the conversations they recap: their score is multiplied by 0.25, they don't set the bar for the vector similarity window, and they keep their own positions when later turns are moved ahead. Unmarked, each recap matched the next such question better than the original and pushed it further down (found in the M2 manual test). A captured transcript turn is a recall when it called `recent_conversations` or `search_context` (Claude Code `tool_use` names, VS Code `toolCallRounds`): the transcript shows what the turn did.
+- `record_exchange` calls aren't marked. A timing rule (marking an exchange recorded soon after a lookup) failed in the follow-up manual test: Claude Desktop runs two server processes and spreads calls across them, and when it did fire, it marked new content (the assistant's own opinion, given right after reading another chat) as a recap. Instead, the instructions tell models not to record pure lookups (Claude Desktop then recorded neither of two lookups), and to search for the topic itself ("cat names", not "the pet question I asked Copilot"), narrowing by assistant with `recent_conversations`.
 - Chat keyword search leaves out the most common query words once the rest already match 8,000 chunks between them: ranking costs ~1.6ms per thousand matches, and BM25 gives such words almost no weight.
 - Only searches scopes the client may read.
 - Chat results return the matching chunk plus `conversation_id`, conversation title, and source, not whole conversations; `recent_conversations(conversation_id=…)` reads the rest.
@@ -379,7 +378,7 @@ record_exchange(
 ```
 - Stores a `user` message and an `assistant` message in `conversations`/`messages`, chunked and indexed for search. `provider` is the calling client; `scope` is its write scope; `metadata.capture = 'record_exchange'`.
 - A client may only append to conversations it started (same `provider`, writable scope).
-- Not called for turns that only looked up earlier conversations; the server marks the ones that are recorded anyway as recall (Section 7.2).
+- Not called for turns that only looked up earlier conversations (Section 7.2).
 - Code blocks are appended to the assistant message as fenced Markdown, so another assistant can continue the work (summaries alone lost the code in the M1 manual test).
 - Secrets are **redacted** (replaced with `[REDACTED]`), not rejected, in the question, answer, code, and title; the reasons come back in `redacted` (Section 8).
 - The description and the server instructions tell the model to call it after every answer, skipping only greetings and thanks.
@@ -464,6 +463,15 @@ days = 30            # only transcripts changed within this many days
 Captured conversations take the source client's `write_scope`.
 
 `openmcp setup <client>` does the per-client work (`--dry-run` shows it first). Each file it edits gets a `.bak` copy, and files it can't parse (e.g. VS Code settings with comments) are left alone with the snippet printed instead.
+
+- **Run from a development checkout** (an editable install, e.g. `uv run openmcp setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmcp` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
+- **VS Code** can also start MCP servers configured for other apps (`chat.mcp.discovery.enabled`). It started Claude Desktop's openmcp entry, so Copilot ran as `claude-desktop` with that client's scopes and tools. `setup vscode-copilot` turns that off (only Claude Desktop's, where the setting is per application).
+- **Client identity check.** The client name comes from `--client` in whatever config launched the server, so it can be wrong. Every audit row records the application on the other end (MCP `clientInfo.name`). Which application a name is for comes from config, `app` under `[clients.<name>]`, never from which app connected first (that made the outcome depend on startup order). `setup` writes it where the name is confirmed: `Visual Studio Code` for `vscode-copilot` (VS Code sends its `product.json` `nameLong`), `claude-code` for `claude-code`; Claude Desktop's isn't confirmed, so it isn't pinned. A warning (in `ping`, the audit summary, and stderr) goes to an application that:
+  - uses a name pinned to a different application;
+  - is pinned to a different client name (VS Code as `claude-desktop`);
+  - shares an unpinned name with other unexplained applications: all of them are flagged as ambiguous, with the `app` line to add.
+
+  App names aren't authenticated, so this catches misconfiguration, not attacks.
 
 | Client | Registers the server | Standing instruction | Capture |
 |---|---|---|---|
@@ -594,5 +602,5 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - Search similarity cutoffs (0.55 floor, 0.08 window) come from a 20-question synthetic set: 18/20 paraphrases found, ~1 unrelated item per query. bge-small misses some paraphrases entirely: "how was I planning to deal with the fitness app throttling me" ranks the Strava 429 memory 11th (similarity 0.48). A test records this as an expected failure, so a better model shows up as a test to update.
 - Should imported chats ever be readable by default, or opt-in per scope?
 - ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
-- Recall detection is heuristic. A Claude Desktop server serves all its chats, so a lookup in one chat followed by a recorded answer in another within 10 minutes marks that answer as a recall too (ranked lower, not hidden). The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
+- Recaps recorded through `record_exchange` despite the instructions aren't marked (Section 7.2). Telling a recap from new content by what it says (does the answer mostly restate what the lookup returned?) may work where timing didn't. The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

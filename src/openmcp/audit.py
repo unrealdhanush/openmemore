@@ -48,7 +48,7 @@ def stats(durations: dict[str, list[float]]) -> list[ToolStats]:
 
 
 @contextmanager
-def audited(conn: sqlite3.Connection, client: str, tool: str) -> Iterator[AuditCall]:
+def audited(conn: sqlite3.Connection, client: str, tool: str, app: str | None = None) -> Iterator[AuditCall]:
     """Time a tool call and log it, whether it succeeds or raises."""
     call = AuditCall()
     ts = datetime.now(UTC)
@@ -67,5 +67,6 @@ def audited(conn: sqlite3.Connection, client: str, tool: str) -> Iterator[AuditC
             summary=summary,
             result_count=call.result_count,
             duration_ms=(time.perf_counter() - start) * 1000,
+            app=app[:SUMMARY_MAX] if app else None,
         )
         repo.insert_audit(conn, entry)
