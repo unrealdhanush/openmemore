@@ -78,6 +78,7 @@ def _store(conn: sqlite3.Connection, parsed: ParsedConversation, scope: str) -> 
                 created_at=m.created_at,
                 content_hash=message_hash(m.role, content, m.created_at),
                 external_id=m.external_id,
+                recall=m.recall,
             ),
         )
         if did_change:

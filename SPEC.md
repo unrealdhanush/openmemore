@@ -326,6 +326,10 @@ search_context(
 - Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion (k = 60), plus a mild recency boost. Up to four ranked lists: keyword and vector, for memories and for chat chunks. Without the embedding model (not downloaded yet) the vector lists are simply missing.
 - Vector search always returns the nearest items, related or not, so vector hits must have cosine similarity ≥ 0.55 and be within 0.08 of the best vector hit (calibrated for bge-small; Section 14).
 - Recency boost: at most 0.0005 added to a fused score (a top rank is worth ≈ 0.016), halving every 30 days, counted in whole hours so items written close together still tie.
+- **Recall turns** ("what did I ask Copilot?") are stored but marked (`messages.recall`) and ranked below the conversations they recap: their score is multiplied by 0.25, they don't set the bar for the vector similarity window, and they keep their own positions when later turns are moved ahead. Unmarked, each recap matched the next such question better than the original and pushed it further down (found in the M2 manual test). A turn is a recall when:
+  - `record_exchange` follows, within 10 minutes and in the same server process, a `search_context` or `recent_conversations` call that returned something, and carries no `code` (`get_profile` doesn't count);
+  - a captured transcript turn called `recent_conversations` or `search_context` (Claude Code `tool_use` names, VS Code `toolCallRounds`).
+- The instructions also tell models not to record pure lookups, and to search for the topic itself ("cat names", not "the pet question I asked Copilot"), narrowing by assistant with `recent_conversations`.
 - Chat keyword search leaves out the most common query words once the rest already match 8,000 chunks between them: ranking costs ~1.6ms per thousand matches, and BM25 gives such words almost no weight.
 - Only searches scopes the client may read.
 - Chat results return the matching chunk plus `conversation_id`, conversation title, and source, not whole conversations; `recent_conversations(conversation_id=…)` reads the rest.
@@ -375,6 +379,7 @@ record_exchange(
 ```
 - Stores a `user` message and an `assistant` message in `conversations`/`messages`, chunked and indexed for search. `provider` is the calling client; `scope` is its write scope; `metadata.capture = 'record_exchange'`.
 - A client may only append to conversations it started (same `provider`, writable scope).
+- Not called for turns that only looked up earlier conversations; the server marks the ones that are recorded anyway as recall (Section 7.2).
 - Code blocks are appended to the assistant message as fenced Markdown, so another assistant can continue the work (summaries alone lost the code in the M1 manual test).
 - Secrets are **redacted** (replaced with `[REDACTED]`), not rejected, in the question, answer, code, and title; the reasons come back in `redacted` (Section 8).
 - The description and the server instructions tell the model to call it after every answer, skipping only greetings and thanks.
@@ -589,4 +594,5 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - Search similarity cutoffs (0.55 floor, 0.08 window) come from a 20-question synthetic set: 18/20 paraphrases found, ~1 unrelated item per query. bge-small misses some paraphrases entirely: "how was I planning to deal with the fitness app throttling me" ranks the Strava 429 memory 11th (similarity 0.48). A test records this as an expected failure, so a better model shows up as a test to update.
 - Should imported chats ever be readable by default, or opt-in per scope?
 - ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
+- Recall detection is heuristic. A Claude Desktop server serves all its chats, so a lookup in one chat followed by a recorded answer in another within 10 minutes marks that answer as a recall too (ranked lower, not hidden). The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

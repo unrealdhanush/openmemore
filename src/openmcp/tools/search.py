@@ -46,6 +46,12 @@ SIMILARITY_WINDOW = 0.08
 VECTOR_CANDIDATES_PER_RESULT = 4
 """Nearest neighbors fetched per requested result, before scope and kind filters."""
 
+RECALL_WEIGHT = 0.25
+"""Multiplies the score of chat chunks from recall turns ("what did I ask Copilot?"): a
+recap matches the next such question better than the conversation it recaps, and each
+recall would otherwise push the original further down. 0.25 puts a recap below anything
+found on its own merits (a hit in both lists scores ≈ 0.033) without hiding it."""
+
 RECENCY_WEIGHT = 0.0005
 """At most this much is added to a fused score (a top rank is worth 1/61 ≈ 0.016), so
 recency breaks near-ties without overriding relevance."""
@@ -92,10 +98,13 @@ def chunk_keyword_query(conn: sqlite3.Connection, words: list[str]) -> str | Non
 def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
     """Within each conversation, put later messages ahead of earlier ones, keeping the
     positions that conversation holds in the ranking. A conversation often discusses
-    options before settling on one, and the settled answer comes later."""
+    options before settling on one, and the settled answer comes later. Recall chunks
+    keep their own positions: a recap later in a chat isn't the settled answer, and
+    swapping it into a better slot would hand its weak slot to the real match."""
     positions: dict[int, list[int]] = defaultdict(list)
     for i, c in enumerate(chunks):
-        positions[c.conversation_id].append(i)
+        if not c.recall:
+            positions[c.conversation_id].append(i)
     out = list(chunks)
     for slots in positions.values():
         newest_first = sorted((chunks[i] for i in slots), key=lambda c: (c.message_id, c.chunk_id), reverse=True)
@@ -129,6 +138,7 @@ def _chat_hit(c: ChunkMatch, score: float) -> SearchHit:
         source=c.provider,
         created_at=c.created_at,
         score=score,
+        recall=c.recall,
     )
 
 
@@ -136,8 +146,11 @@ def similar_enough(
     memories: list[tuple[Memory, float]], chunks: list[ChunkMatch]
 ) -> tuple[list[tuple[Memory, float]], list[ChunkMatch]]:
     """Drop vector hits that are too far from the query, judged against the best hit in
-    either list (distances are cosine distances)."""
-    sims = [embed.similarity(d) for _, d in memories] + [embed.similarity(c.rank) for c in chunks]
+    either list (distances are cosine distances). Recall chunks don't set the bar: a recap
+    of "the pet question I asked Copilot" matches that query far better than the original
+    chat does, and would push the original out before ranking could put it first."""
+    sims = [embed.similarity(d) for _, d in memories] + [embed.similarity(c.rank) for c in chunks if not c.recall]
+    sims = sims or [embed.similarity(c.rank) for c in chunks]
     if not sims:
         return [], []
     cutoff = max(SIMILARITY_FLOOR, max(sims) - SIMILARITY_WINDOW)
@@ -213,6 +226,8 @@ def search_context(
     for entry in fused.values():
         item = entry.item
         entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+        if isinstance(item, ChunkMatch) and item.recall:
+            entry.score *= RECALL_WEIGHT
 
     ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
     hits = [

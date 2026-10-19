@@ -57,7 +57,19 @@
         "id": "github.copilot.editsAgent"
       },
       "result": {
-        "metadata": {}
+        "metadata": {
+          "toolCallRounds": [
+            {
+              "toolCalls": [
+                {
+                  "name": "grep_search",
+                  "arguments": "{}",
+                  "id": "c0"
+                }
+              ]
+            }
+          ]
+        }
       },
       "variableData": {
         "variables": []
@@ -81,10 +93,10 @@
           "isComplete": true,
           "isConfirmed": true,
           "invocationMessage": {
-            "value": "Running recent_conversations"
+            "value": "Running `recent_conversations`"
           },
           "pastTenseMessage": {
-            "value": "Ran recent_conversations"
+            "value": "Ran `recent_conversations` "
           },
           "toolSpecificData": {
             "kind": "input",
@@ -102,7 +114,22 @@
           }
         }
       ],
-      "isCanceled": false
+      "isCanceled": false,
+      "result": {
+        "metadata": {
+          "toolCallRounds": [
+            {
+              "toolCalls": [
+                {
+                  "name": "590_recent_conversations",
+                  "arguments": "{}",
+                  "id": "c1"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "requestId": "request_3",
