@@ -659,6 +659,8 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 | M6 | Background service | — |
 | M7 | Automatic consolidation | M6 |
 | M7.5 | OpenMCP as a library | — (experimental until M9's rename) |
+| M7.6 | Evaluation | — |
+| M7.7 | Truth over time | M7.6 (to measure each change) |
 | M8 | Use it for real | M6, M7 |
 | M8.5 | Documentation | everything before it; pages can be written as features land |
 | M9 | Public release | approval (start now) |
@@ -753,6 +755,38 @@ memory.profile(); memory.recent(); memory.record(question, answer); memory.updat
   - sync and async both work;
   - a store failure doesn't break the function (tested).
 - **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmcp` loading nothing else. Documented in [docs/library.md](docs/library.md).
+
+### M7.6: Evaluation
+Measured retrieval quality, so changes to recall are judged by numbers rather than by feel, on public long-term memory benchmarks:
+- **LongMemEval** (MIT; `longmemeval_s_cleaned`: 500 questions, about 50 sessions of history each, with the sessions and turns holding each answer marked).
+- **LoCoMo** (10 long conversations, 1,986 questions, with evidence turns marked).
+
+The datasets are downloaded to `~/.cache/openmcp-bench` on first use and never committed, since LoCoMo's terms are non-commercial.
+
+- **Retrieval metrics, no model needed:** each question's history is stored in a fresh store, the way capture stores conversations, then searched with `search_context`, with "now" set to the question's date. Metrics at k = 5 and 10:
+  - session recall (share of the answer's sessions found);
+  - any-hit (at least one found);
+  - NDCG;
+  - turn recall, where turns are marked.
+
+  Results are broken down by question type, alongside ingest time and query latency. Abstention questions, which have no evidence, are left out.
+- **Optional judged answers:** a model answers from the retrieved context, and a second call judges it against the reference answer. Both go through any Open Responses or Chat Completions endpoint (M7's client). Retrieval numbers stay the headline.
+- **The runner:** `uv run python -m bench …`. It's a development tool, not shipped in the package. Embeddings are cached by text between runs.
+  - **Reports:** JSON in `bench/results/`, which holds ids and numbers only, no dataset text. `bench/RESULTS.md` keeps the history.
+- **Done when:** a baseline for LongMemEval-S and LoCoMo is recorded with the commit it measured, and the harness is tested on a synthetic dataset in CI.
+
+### M7.7: Truth over time
+Ported from LongMemory's design (Apache-2.0), reimplemented rather than translated, and measured with M7.6 as each part lands:
+1. **Two timelines:** memories get `valid_from` / `valid_to` (when it was true) beside recorded time and supersession time (when OpenMCP learned it, and when that changed). A correction closes the old memory's validity. Existing history fills them in.
+2. **Relations:** one table of `supersedes`, `contradicts`, `supports` and `derived_from` links, applied in one transaction, replacing the ad hoc `superseded_by` and metadata fields.
+3. **Recall modes and labels:** `search_context(mode="current" | "history")`. Results are labelled current, superseded (pointing to its correction), contradicted, or recap. Current answers never include a superseded or unresolved-contradicted memory.
+4. **Contradictions in review:** a model or the user can flag that two memories disagree. Unresolved ones are labelled and kept out of current answers until resolved on the review page.
+5. **Support raises confidence:** a re-confirmed memory gains confidence (evidence added in log-odds) instead of being skipped as a duplicate, and ranking uses confidence.
+6. **Explanations and budgets:** `explain` returns why each result was chosen (each signal's contribution), and `budget_tokens` fills the context up to a token limit.
+7. **Activation:** recency and frequency of use (ACT-R style) replace the fixed recency half-life, tuned with M7.6.
+
+What OpenMCP doesn't take: automatic supersession from regular-expression claim extraction. In LongMemory every topic-less preference shares one topic, so a new preference silently supersedes an unrelated one. What replaces what stays a reviewed decision. Out of scope too: project, skill, wiki and code-graph memory, team access control, and connectors.
+- **Done when:** every part is tested, history questions ("what did I prefer before?") are answered while current answers stay current, and M7.6's numbers for knowledge-update and temporal questions don't regress (and improve where the change targets them).
 
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.

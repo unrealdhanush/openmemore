@@ -14,3 +14,6 @@ build/
 # Editor local history (e.g. VS Code Local History extension)
 .history/
 .model-cache/
+
+# Benchmark run reports (summaries go in bench/RESULTS.md)
+bench/results/*.json

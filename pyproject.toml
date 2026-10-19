@@ -38,4 +38,5 @@ python-preference = "only-managed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # the bench/ harness (SPEC.md M7.6) is tested but not shipped
 markers = ["real_model: uses the real embedding model (downloaded once to ~/.cache/openmcp-test-models)"]

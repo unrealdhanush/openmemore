@@ -186,7 +186,10 @@ def search_context(
     project: str | None = None,
     include_chats: bool = True,
     limit: int = 10,
+    now: datetime | None = None,
 ) -> SearchResult:
+    """`now` is the moment recency is measured from (default: the current time);
+    evaluation passes a question's date."""
     read = caller.scopes.read_scopes
     words = query_words(query)
     match = fts_query(words)
@@ -222,7 +225,7 @@ def search_context(
                 entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
                 entry.score += 1 / (RRF_K + rank)
                 entry.best_rank = min(entry.best_rank, rank)
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     for entry in fused.values():
         item = entry.item
         entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
