@@ -112,8 +112,11 @@ def load_config(path: Path) -> Config:
 
 
 def save_config(path: Path, config: Config) -> None:
+    data = config.model_dump(mode="json", exclude_none=True)
+    if not data.get("clients"):
+        data.pop("clients", None)  # an empty [clients] table reads as if something were missing
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CONFIG_HEADER + tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)), encoding="utf-8")
+    path.write_text(CONFIG_HEADER + tomli_w.dumps(data), encoding="utf-8")
 
 
 def enable_capture(path: Path, source: CaptureSource) -> bool:

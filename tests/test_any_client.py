@@ -143,7 +143,7 @@ READER = caller("reader", read=["personal"], write="personal")
 
 
 def openmcp_doc(*conversations, version=1):
-    return {"format": "openmcp.conversations", "version": version, "conversations": list(conversations)}
+    return {"format": "openmcp.export", "version": version, "conversations": list(conversations)}
 
 
 def conv(provider, id_, *pairs, updated="2026-10-01T10:00:00Z"):
@@ -212,3 +212,21 @@ def test_a_new_provider_needs_only_a_registry_entry(conn, tmp_path, monkeypatch)
 def test_importer_registry_entries_are_distinct():
     names = [i.name for i in registry.importers()]
     assert len(names) == len(set(names)) and {"chatgpt", "claude", "openmcp"} <= set(names)
+
+
+@pytest.mark.anyio
+async def test_clients_command_hides_earlier_names_unless_asked(home):
+    from typer.testing import CliRunner
+    from openmcp.cli import app
+    from openmcp import db as openmcp_db
+    initialize(home)
+    async with Client(build_server(home), client_info=SOME_EDITOR) as c:
+        await c.call_tool("ping", {})
+    conn = openmcp_db.connect(home / "openmcp.db")  # rows as earlier versions wrote them
+    conn.execute("INSERT INTO audit_log (ts, client, tool, duration_ms, app) VALUES ('2026-10-01T00:00:00.000Z', 'old-name', 'ping', 1, 'Some Editor 2')")
+    conn.execute("INSERT INTO audit_log (ts, client, tool, duration_ms) VALUES ('2026-10-01T00:00:00.000Z', 'older', 'ping', 1)")
+    out = plain(CliRunner().invoke(app, ["clients"], env={"COLUMNS": "200"}).output)
+    assert "some-editor-2" in out and "old-name" not in out and "2 earlier names" in out
+    assert "under [clients.<name>] in config.toml" in " ".join(out.split())
+    out = plain(CliRunner().invoke(app, ["clients", "--all"], env={"COLUMNS": "200"}).output)
+    assert "old-name" in out and "older" in out

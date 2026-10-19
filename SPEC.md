@@ -165,8 +165,9 @@ openmcp/
       claude.py         # Claude export parser
       detect.py         # open a zip/json/folder, recognize the format from its contents
       registry.py       # the importer registry (M3.5): built-in importers plus register()
-      openmcp_format.py # OpenMCP's own conversation format: a way in for any provider via a converter
+      openmcp_format.py # OpenMCP's own format (openmcp.export): what export writes, and a way in for any provider
     audit.py
+    export.py           # `openmcp export`: everything, in OpenMCP's own format
   scripts/
     benchmark.py        # performance budget check (Section 4.3)
   tests/
@@ -588,6 +589,11 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
 - `openmcp export` dumps all memories and conversations to JSON.
 - README: install, client setup (the generic snippet, and the vendor installers setup uses), the safety model, honest limitations.
 - **Done when:** a client configured to read only `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
+- **Status (2026-10-19):**
+  - **Scope audit:** `tests/test_scopes.py` has one app write `personal` data through every write path (memories, recorded chats, vectors). A work-only client then tries every read and write path. It sees and changes none of it: search by keyword and by meaning, profile and its resource, recent conversations, update, forget, appending to a chat, writing into `personal`, near-duplicate reports. Errors for out-of-scope ids are identical to errors for ids that don't exist. Imports take an explicit scope (or an export's own), and capture uses the scope of the app it belongs to. The CLI acts as the owner and sees every scope.
+  - **`openmcp export`:** it writes the `openmcp.export` format (memories with their history, conversations, scopes, recall flags; the file is readable only by the user). `openmcp import` reads it back with scopes kept, unless `--scope` overrides. A round trip into an empty store restores everything current; importing into the same store adds nothing; imported memories go through the secret filter.
+  - **README:** rewritten.
+  - **Remaining:** the v1 success test, by hand.
 
 ### v1 success test
 Start a project in Claude Desktop and work on it over a few exchanges. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**, including picking up the questions you asked and the answers you got.
