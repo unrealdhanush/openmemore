@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from openmcp import repo
+from openmcp import relations, repo
 from openmcp.models import ACTIVE_PROJECT_DAYS, PROFILE_GROUP_CAP, Kind, Memory, Profile, ProfileItem
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
@@ -19,6 +19,7 @@ def _item(m: Memory) -> ProfileItem:
         project=m.project,
         source=m.source_client,
         updated_at=m.updated_at,
+        confidence=m.confidence if m.confidence is not None else relations.DEFAULT_CONFIDENCE,
     )
 
 
@@ -40,7 +41,12 @@ def match_projects(asked: str, labels: list[str]) -> list[str]:
     ]
 
 
-def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = None) -> Profile:
+GROUPS = ("preferences", "active_projects", "recent_decisions", "facts")
+"""The order a token budget fills the profile in, one item from each group at a time."""
+
+
+def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = None,
+                budget_tokens: int | None = None) -> Profile:
     """With `project`, each group holds that project's memories first, then general
     (untagged) ones, since general preferences still apply inside a project. A project
     that matches no stored one gives the whole profile, and the projects there are, rather
@@ -71,11 +77,33 @@ def get_profile(conn: sqlite3.Connection, caller: Caller, project: str | None = 
         )
         return [_item(m) for m in memories]
 
-    return Profile(
+    profile = Profile(
         preferences=group("preference"),
         facts=group("fact"),
         active_projects=group("project", datetime.now(UTC) - timedelta(days=ACTIVE_PROJECT_DAYS)),
         recent_decisions=group("decision"),
         project_note=note,
         known_projects=known,
+        unresolved_conflicts=repo.count_open_contradictions(conn, caller.scopes.read_scopes),
     )
+    return within_budget(profile, budget_tokens) if budget_tokens is not None else profile
+
+
+def within_budget(profile: Profile, budget: int) -> Profile:
+    """Keep the profile within `budget` estimated tokens, taking one item from each group in
+    turn (each group newest first), so no group crowds out the others."""
+    from openmcp.tools.search import estimate_tokens
+
+    queues = {name: list(getattr(profile, name)) for name in GROUPS}
+    kept: dict[str, list[ProfileItem]] = {name: [] for name in GROUPS}
+    used = 0
+    while any(queues.values()):
+        for name in GROUPS:
+            if queues[name]:
+                item = queues[name].pop(0)
+                cost = estimate_tokens(item.content)
+                if used + cost <= budget:
+                    kept[name].append(item)
+                    used += cost
+    dropped = sum(len(getattr(profile, n)) for n in GROUPS) - sum(len(v) for v in kept.values())
+    return profile.model_copy(update={**kept, "tokens_used": used, "dropped": dropped})

@@ -336,9 +336,9 @@ search_context(
   limit?: int = 10            # max 25
 ) -> { results: [{ type: 'memory'|'chat', id, content, kind?, subject?, project?, conversation_id?, title?, role?, source, created_at, score }] }
 ```
-- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion (k = 60), plus a mild recency boost. Up to four ranked lists: keyword and vector, for memories and for chat chunks. Without the embedding model (not downloaded yet) the vector lists are simply missing.
+- Hybrid: FTS5 (BM25) + vector similarity, merged with reciprocal rank fusion (k = 60), plus a mild activation boost (below). Up to four ranked lists: keyword and vector, for memories and for chat chunks. Without the embedding model (not downloaded yet) the vector lists are simply missing.
 - Vector search always returns the nearest items, related or not, so vector hits must have cosine similarity ≥ 0.55 and be within 0.08 of the best vector hit (calibrated for bge-small; Section 14).
-- Recency boost: at most 0.0005 added to a fused score (a top rank is worth ≈ 0.016), halving every 30 days, counted in whole hours so items written close together still tie.
+- Activation boost (M7.7, replacing a 30-day half-life): ACT-R base-level activation, ln Σ age^−d over an item's presentations (its creation, each time a client was shown it, and for memories each confirmation), from Petrov's approximation so only a count and the last time are stored. Its logistic, times a weight, is added to the fused score (a top rank is worth ≈ 0.016), so it orders close matches without overriding relevance. Tuned with M7.6 (2026-10-19): for conversation messages the weight is 0, because any age weighting lowered evidence recall on LongMemEval and LoCoMo. Memories keep 0.0005 as a tie-breaker by use and confirmation (unmeasured: the benchmarks have no memories or usage); which version is current is the timelines' job, not recency's. A memory's confidence adds a similar small boost (M7.7).
 - **Recall turns** ("what did I ask Copilot?") are stored but marked (`messages.recall`) and ranked below the conversations they recap: their score is multiplied by 0.25, they don't set the bar for the vector similarity window, and they keep their own positions when later turns are moved ahead. Unmarked, each recap matched the next such question better than the original and pushed it further down (found in the M2 manual test). A captured transcript turn is a recall when it called `recent_conversations` or `search_context` (Claude Code `tool_use` names, VS Code `toolCallRounds`): the transcript shows what the turn did.
 - `record_exchange` calls aren't marked. A timing rule (marking an exchange recorded soon after a lookup) failed in the follow-up manual test: Claude Desktop runs two server processes and spreads calls across them, and when it did fire, it marked new content (the assistant's own opinion, given right after reading another chat) as a recap. Instead, the instructions tell models not to record pure lookups (Claude Desktop then recorded neither of two lookups), and to search for the topic itself ("cat names", not "the pet question I asked Copilot"), narrowing by assistant with `recent_conversations`.
 - Chat keyword search leaves out the most common query words once the rest already match 8,000 chunks between them: ranking costs ~1.6ms per thousand matches, and BM25 gives such words almost no weight.
@@ -659,6 +659,8 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 | M6 | Background service | — |
 | M7 | Automatic consolidation | M6 |
 | M7.5 | OpenMCP as a library | — (experimental until M9's rename) |
+| M7.6 | Evaluation | — |
+| M7.7 | Truth over time | M7.6 (to measure each change) |
 | M8 | Use it for real | M6, M7 |
 | M8.5 | Documentation | everything before it; pages can be written as features land |
 | M9 | Public release | approval (start now) |
@@ -753,6 +755,49 @@ memory.profile(); memory.recent(); memory.record(question, answer); memory.updat
   - sync and async both work;
   - a store failure doesn't break the function (tested).
 - **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmcp` loading nothing else. Documented in [docs/library.md](docs/library.md).
+
+### M7.6: Evaluation
+Measured retrieval quality, so changes to recall are judged by numbers rather than by feel, on public long-term memory benchmarks:
+- **LongMemEval** (MIT; `longmemeval_s_cleaned`: 500 questions, about 50 sessions of history each, with the sessions and turns holding each answer marked).
+- **LoCoMo** (10 long conversations, 1,986 questions, with evidence turns marked).
+
+The datasets are downloaded to `~/.cache/openmcp-bench` on first use and never committed, since LoCoMo's terms are non-commercial.
+
+- **Retrieval metrics, no model needed:** each question's history is stored in a fresh store, the way capture stores conversations, then searched with `search_context`, with "now" set to the question's date. Metrics at k = 5 and 10:
+  - session recall (share of the answer's sessions found);
+  - any-hit (at least one found);
+  - NDCG;
+  - turn recall, where turns are marked.
+
+  Results are broken down by question type, alongside ingest time and query latency. Abstention questions, which have no evidence, are left out.
+- **Optional judged answers:** a model answers from the retrieved context, and a second call judges it against the reference answer. Both go through any Open Responses or Chat Completions endpoint (M7's client). Retrieval numbers stay the headline.
+- **The runner:** `uv run python -m bench …`. It's a development tool, not shipped in the package. Embeddings are cached by text between runs.
+  - **Reports:** JSON in `bench/results/`, which holds ids and numbers only, no dataset text. `bench/RESULTS.md` keeps the history.
+- **Done when:** a baseline for LongMemEval-S and LoCoMo is recorded with the commit it measured, and the harness is tested on a synthetic dataset in CI.
+- **Status (2026-10-19): done.** Baselines are in `bench/RESULTS.md`, before M7.7, at evidence in the top 5 results:
+  - LongMemEval-S (100-question sample): 0.900 session recall, 0.971 any-hit, 0.614 turn recall.
+  - LoCoMo (all 1,986 questions): 0.833, 0.888 and 0.560. The weakest categories are open-domain (0.51) and multi-hop (0.52).
+  - The harness is tested in `tests/test_bench.py`.
+  - **Limit:** the benchmarks store conversations, not memories, so they measure chat retrieval. Memory behaviour (M7.7 parts 1–5) is covered by tests.
+
+### M7.7: Truth over time
+Ported from LongMemory's design (Apache-2.0), reimplemented rather than translated, and measured with M7.6 as each part lands:
+1. **Two timelines:** memories get `valid_from` / `valid_to` (when it was true) beside recorded time and supersession time (when OpenMCP learned it, and when that changed). A correction closes the old memory's validity. Existing history fills them in.
+2. **Relations:** one table of `supersedes`, `contradicts`, `supports` and `derived_from` links, applied in one transaction, replacing the ad hoc `superseded_by` and metadata fields.
+3. **Recall modes and labels:** `search_context(mode="current" | "history")`. Results are labelled current, superseded (pointing to its correction), contradicted, or recap. Current answers never include a superseded or unresolved-contradicted memory.
+4. **Contradictions in review:** a model or the user can flag that two memories disagree. Unresolved ones are labelled and kept out of current answers until resolved on the review page.
+5. **Support raises confidence:** a re-confirmed memory gains confidence (evidence added in log-odds) instead of being skipped as a duplicate, and ranking uses confidence.
+6. **Explanations and budgets:** `explain` returns why each result was chosen (each signal's contribution), and `budget_tokens` fills the context up to a token limit.
+7. **Activation:** recency and frequency of use (ACT-R style) replace the fixed recency half-life, tuned with M7.6.
+
+What OpenMCP doesn't take: automatic supersession from regular-expression claim extraction. In LongMemory every topic-less preference shares one topic, so a new preference silently supersedes an unrelated one. What replaces what stays a reviewed decision. Out of scope too: project, skill, wiki and code-graph memory, team access control, and connectors.
+- **Done when:** every part is tested, history questions ("what did I prefer before?") are answered while current answers stay current, and M7.6's numbers for knowledge-update and temporal questions don't regress (and improve where the change targets them).
+- **Status (2026-10-19): built and tested,** parts 1–7 (migrations 016–020).
+  - **Measured after M7.7** (evidence recall at 5):
+    - LongMemEval-S: 0.907 overall (was 0.900); knowledge-update 0.958 (0.917); temporal unchanged at 0.864.
+    - LoCoMo: 0.839 overall (0.833); NDCG 0.746 (0.734); temporal 0.835 (0.844). That dip is about 3 of 321 questions, within noise, but it isn't an improvement.
+  - **Activation:** the gains come from removing age weighting from conversation messages (the sweep is in `bench/RESULTS.md`). Memories keep a small tie-breaker by use and confirmation, which the benchmarks can't measure.
+  - **Not yet tried on real clients.**
 
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.

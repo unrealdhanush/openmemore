@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.models import (
     BATCH_CHARS,
     CONVERSATION_BATCH_CHARS,
@@ -120,9 +120,11 @@ def propose_memories(
     result = ProposeResult(note=REVIEW_HINT)
     accepted: list[tuple[int, ProposalInput, str]] = []
     for index, item in enumerate(items):
-        scopes = {_readable(conn, caller, cid).scope for cid in item.conversation_ids}
-        if item.replaces is not None:
-            scopes.add(_replaced(conn, caller, item.replaces).scope)
+        sources = [_readable(conn, caller, cid) for cid in item.conversation_ids]
+        scopes = {c.scope for c in sources}
+        for named in (item.replaces, item.contradicts):
+            if named is not None:
+                scopes.add(_replaced(conn, caller, named).scope)
         if len(scopes) > 1:
             raise ToolError(
                 f"item {index} cites conversations or a memory in different scopes ({', '.join(sorted(scopes))}); "
@@ -131,7 +133,10 @@ def propose_memories(
         if reason := secret_in(item.content, item.subject, item.project, item.reason):
             result.rejected.append(Rejection(index=index, reason=reason))
             continue
-        accepted.append((index, item, scopes.pop() if scopes else caller.scopes.write_scope))
+        # True since the model says, or since the conversation it came from (not since approval).
+        said = max((c.updated_at for c in sources if c.updated_at), default=None)
+        accepted.append((index, item.model_copy(update={"valid_from": item.valid_from or said}),
+                         scopes.pop() if scopes else caller.scopes.write_scope))
     for d in done:
         _readable(conn, caller, d.conversation_id)
     vectors = embed_texts([embed.memory_text(item.subject, item.content) for _, item, _ in accepted])
@@ -140,8 +145,15 @@ def propose_memories(
     with db.transaction(conn):
         for (index, item, scope), vector in zip(accepted, vectors):
             digest = content_hash(item.content)
+            # A statement already stored is confirmed by the conversations it was found in again.
+            if existing := repo.find_active_duplicate(conn, scope, digest):
+                result.skipped_duplicates += 1
+                if any([relations.support(conn, existing.id, now, source=caller.client, conversation_id=cid)
+                        for cid in item.conversation_ids]):
+                    result.confirmed.append(existing.id)
+                continue
             # Earlier items in this call count too: they're pending by now.
-            if repo.find_active_duplicate(conn, scope, digest) or repo.proposed_or_rejected(conn, scope, digest):
+            if repo.proposed_or_rejected(conn, scope, digest):
                 result.skipped_duplicates += 1
                 continue
             similar = _similar_memory(conn, scope, item.kind, vector) if vector is not None else None
@@ -155,6 +167,9 @@ def propose_memories(
                 content_hash=digest,
                 similar_memory_id=similar.id if similar else None,
                 replaces_memory_id=item.replaces,
+                contradicts_memory_id=item.contradicts if item.contradicts != item.replaces else None,
+                valid_from=item.valid_from,
+                valid_to=item.valid_to,
                 created_at=now,
                 conversation_ids=item.conversation_ids,
             ))

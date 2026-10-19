@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.models import (
     ForgetResult,
     Kind,
@@ -86,8 +86,10 @@ def save_memories(
     with db.transaction(conn):
         for (index, item), vector in zip(accepted, vectors):
             digest = content_hash(item.content)
-            if repo.find_active_duplicate(conn, scope, digest):
+            if existing := repo.find_active_duplicate(conn, scope, digest):
                 result.skipped_duplicates += 1
+                if relations.support(conn, existing.id, now, source=caller.client):
+                    result.confirmed.append(existing.id)
                 continue
             # Near-duplicates are saved anyway and reported, so the calling model can follow
             # up with update_memory or forget. Earlier items in this call count too.
@@ -116,8 +118,11 @@ def save_memories(
 
 
 def update_memory(
-    conn: sqlite3.Connection, caller: Caller, memory_id: int, content: str, subject: str | None = None
+    conn: sqlite3.Connection, caller: Caller, memory_id: int, content: str, subject: str | None = None,
+    valid_from: datetime | None = None,
 ) -> UpdateMemoryResult:
+    """A new version of the memory. The old one is kept as history: it stopped being true
+    when the new one started (`valid_from`, default now)."""
     if reason := secret_in(content, subject):
         raise ToolError(f"not saved: {reason}")
     # The subject may come from the old version, which needs a read first; embedding
@@ -141,9 +146,10 @@ def update_memory(
             content_hash=content_hash(content),
             created_at=now,
             updated_at=now,
+            valid_from=valid_from or now,
         )
         new_id = repo.insert_memory(conn, new)
-        repo.mark_superseded(conn, old.id, new_id, now)
+        relations.supersede(conn, new_id, old.id, now, valid_until=valid_from or now, source=caller.client)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(new_id, vector)])
     return UpdateMemoryResult(new_id=new_id, previous_id=old.id)

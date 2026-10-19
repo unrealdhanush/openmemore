@@ -105,13 +105,67 @@ def _memory(row: sqlite3.Row) -> Memory:
     return Memory.model_validate(data)
 
 
+def current_sql(alias: str = "") -> str:
+    """SQL for a current memory: not replaced, and its validity not ended (SPEC.md M7.7).
+    Timestamps are stored in to_iso's format, the same as SQLite's own, so text compares."""
+    a = f"{alias}." if alias else ""
+    return (f"{a}superseded_by IS NULL AND ({a}valid_to IS NULL "
+            f"OR {a}valid_to > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AND NOT EXISTS ("
+            f"SELECT 1 FROM memory_links l WHERE l.type = 'contradicts' AND l.resolved_at IS NULL "
+            f"AND (l.from_memory = {a}id OR l.to_memory = {a}id))")
+
+
+def record_presented(conn: sqlite3.Connection, memory_ids: Sequence[int], chunk_ids: Sequence[int],
+                     now: datetime) -> None:
+    """A client was shown these: one more presentation each, for activation (SPEC.md M7.7)."""
+    at = to_iso(now)
+    for table, ids in (("memories", memory_ids), ("chunks", chunk_ids)):
+        if ids:
+            clause, params = _in("id", list(dict.fromkeys(ids)))
+            conn.execute(f"UPDATE {table} SET presented = presented + 1, last_presented_at = ? WHERE {clause}",
+                         [at, *params])
+
+
+def contradicted(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> set[int]:
+    """Which of these memories are in an unresolved contradiction."""
+    if not memory_ids:
+        return set()
+    marks = ", ".join("?" * len(memory_ids))
+    rows = conn.execute(
+        f"SELECT from_memory, to_memory FROM memory_links WHERE type = 'contradicts' AND resolved_at IS NULL "
+        f"AND (from_memory IN ({marks}) OR to_memory IN ({marks}))", [*memory_ids, *memory_ids])
+    return {i for row in rows for i in row} & set(memory_ids)
+
+
+def count_open_contradictions(conn: sqlite3.Connection, scopes: Sequence[str] | None = None) -> int:
+    where, params = "", []
+    if scopes is not None:
+        clause, params = _in("m.scope", scopes)
+        where = f" AND {clause}"
+    return conn.execute(
+        "SELECT COUNT(*) FROM memory_links l JOIN memories m ON m.id = l.from_memory "
+        f"WHERE l.type = 'contradicts' AND l.resolved_at IS NULL{where}", params).fetchone()[0]
+
+
+def timeline_sql(alias: str = "", *, history: bool = False, as_of: datetime | None = None) -> tuple[str, list]:
+    """Which memories a search sees: current ones; with `history`, every version; with
+    `as_of`, the ones that were true at that moment, replaced since or not."""
+    a = f"{alias}." if alias else ""
+    if as_of is not None:
+        moment = to_iso(as_of)
+        return f"{a}valid_from <= ? AND ({a}valid_to IS NULL OR {a}valid_to > ?)", [moment, moment]
+    return ("1", []) if history else (current_sql(alias), [])
+
+
 def insert_memory(conn: sqlite3.Connection, m: NewMemory) -> int:
     cur = conn.execute(
         "INSERT INTO memories (kind, subject, content, project, scope, source_client, confidence, "
-        "content_hash, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, metadata, created_at, updated_at, valid_from, valid_to) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             m.kind, m.subject, m.content, m.project, m.scope, m.source_client, m.confidence,
             m.content_hash, json.dumps(m.metadata), to_iso(m.created_at), to_iso(m.updated_at),
+            to_iso(m.valid_from or m.created_at), _iso_or_none(m.valid_to),
         ),
     )
     return cur.lastrowid
@@ -130,10 +184,17 @@ def find_active_duplicate(conn: sqlite3.Connection, scope: str, content_hash: st
     return _memory(row) if row else None
 
 
-def mark_superseded(conn: sqlite3.Connection, old_id: int, new_id: int, now: datetime) -> None:
+def mark_superseded(conn: sqlite3.Connection, old_id: int, new_id: int, now: datetime,
+                    valid_until: datetime | None = None) -> None:
+    """Replace `old_id` with `new_id`: OpenMCP learned this `now`, and the old memory
+    stopped being true at `valid_until` (default `now`), unless it had already ended. It
+    never ends before it began."""
+    until = to_iso(valid_until or now)
     conn.execute(
-        "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?",
-        (new_id, to_iso(now), old_id),
+        "UPDATE memories SET superseded_by = ?, updated_at = ?, superseded_at = ?, "
+        "valid_to = CASE WHEN valid_to IS NOT NULL AND valid_to <= ? THEN valid_to "
+        "ELSE MAX(?, COALESCE(valid_from, ?)) END WHERE id = ?",
+        (new_id, to_iso(now), to_iso(now), until, until, until, old_id),
     )
 
 
@@ -198,7 +259,7 @@ def list_memories(
         where.append("updated_at >= ?")
         params.append(to_iso(updated_since))
     if not include_superseded:
-        where.append("superseded_by IS NULL")
+        where.append(current_sql())
     sql = "SELECT * FROM memories"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -209,7 +270,7 @@ def list_memories(
 
 def project_labels(conn: sqlite3.Connection, scopes: Sequence[str] | None) -> list[str]:
     """Project labels of current memories in these scopes, most recently used first."""
-    where, params = ["superseded_by IS NULL", "project IS NOT NULL"], []
+    where, params = [current_sql(), "project IS NOT NULL"], []
     if scopes is not None:
         clause, params = _in("scope", scopes)
         where.append(clause)
@@ -228,11 +289,14 @@ def knn_memories(
     scopes: Sequence[str] | None,
     kinds: Sequence[Kind] = (),
     project: str | None = None,
+    history: bool = False,
+    as_of: datetime | None = None,
 ) -> list[tuple[Memory, float]]:
     """The `k` memories nearest to `query` (an embedding), then filtered like
     search_memories. Returns (memory, cosine distance) pairs, nearest first."""
-    where = ["m.superseded_by IS NULL"]
-    params: list[object] = [query, k]
+    timeline, timeline_params = timeline_sql("m", history=history, as_of=as_of)
+    where = [timeline]
+    params: list[object] = [query, k, *timeline_params]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
         where.append(clause)
@@ -264,14 +328,18 @@ def search_memories(
     kinds: Sequence[Kind] = (),
     project: str | None = None,
     limit: int = 10,
+    history: bool = False,
+    as_of: datetime | None = None,
 ) -> list[tuple[Memory, float]]:
-    """FTS5 search over active memories. `match` is an FTS5 query string.
+    """FTS5 search over memories (current ones unless `history` or `as_of`, as in
+    timeline_sql). `match` is an FTS5 query string.
 
     Returns (memory, bm25) pairs, best first; bm25 is lower-is-better.
     Subject matches weigh twice as much as content matches.
     """
-    where = ["memories_fts MATCH ?", "m.superseded_by IS NULL"]
-    params: list[object] = [match]
+    timeline, timeline_params = timeline_sql("m", history=history, as_of=as_of)
+    where = ["memories_fts MATCH ?", timeline]
+    params: list[object] = [match, *timeline_params]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
         where.append(clause)
@@ -538,6 +606,7 @@ def search_chunks(
           SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?
         )
         SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               c.presented, c.last_presented_at,
                conv.id AS conversation_id, conv.title, conv.provider, best.rank
         FROM best
         JOIN chunks c ON c.id = best.rowid
@@ -565,6 +634,7 @@ def knn_chunks(conn: sqlite3.Connection, query: bytes, *, k: int, scopes: Sequen
         f"""
         WITH knn AS (SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?)
         SELECT c.id AS chunk_id, c.message_id, c.text, msg.role, msg.recall, msg.created_at,
+               c.presented, c.last_presented_at,
                conv.id AS conversation_id, conv.title, conv.provider, knn.distance AS rank
         FROM knn
         JOIN chunks c ON c.id = knn.rowid
@@ -587,7 +657,7 @@ def pending_embeddings(
     """Rows without a vector yet, newest first, as (id, subject, text); subject is None for chunks."""
     if table == "memories":
         sql = (
-            "SELECT id, subject, content FROM memories WHERE embedded = 0 AND superseded_by IS NULL "
+            "SELECT id, subject, content FROM memories WHERE embedded = 0 "
             "ORDER BY id DESC LIMIT ?"
         )
     else:
@@ -620,20 +690,19 @@ def pending_chunks_in(conn: sqlite3.Connection, conversation_ids: Sequence[int])
 
 def count_pending_embeddings(conn: sqlite3.Connection) -> int:
     return conn.execute(
-        "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0 AND superseded_by IS NULL)"
+        "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0)"
         " + (SELECT COUNT(*) FROM chunks WHERE embedded = 0)"
     ).fetchone()[0]
 
 
 def store_vectors(conn: sqlite3.Connection, table: VectorTable, vectors: Sequence[tuple[int, bytes]]) -> int:
-    """Store embeddings for rows that still exist (and, for memories, are still active),
-    replacing any earlier vector: another server may have embedded the same row
+    """Store embeddings for rows that still exist, replacing any earlier vector: another server may have embedded the same row
     meanwhile. Marks them embedded. Returns how many were stored."""
     if not vectors:
         return 0
     ids = [id_ for id_, _ in vectors]
     clause, params = _in("id", ids)
-    live_filter = " AND superseded_by IS NULL" if table == "memories" else ""
+    live_filter = ""  # replaced memories keep vectors too: history is searchable (migration 018)
     live = {r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE {clause}{live_filter}", params)}
     stored = [(id_, v) for id_, v in vectors if id_ in live]
     conn.executemany(f"DELETE FROM {table}_vec WHERE rowid = ?", [(id_,) for id_, _ in stored])
@@ -701,10 +770,12 @@ def mark_consolidated(conn: sqlite3.Connection, conversation_id: int, through: i
 def insert_proposal(conn: sqlite3.Connection, p: NewProposal) -> int:
     cur = conn.execute(
         "INSERT INTO proposals (action, kind, content, subject, project, scope, reason, source_client, confidence, "
-        "content_hash, similar_memory_id, replaces_memory_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "content_hash, similar_memory_id, replaces_memory_id, created_at, valid_from, valid_to, contradicts_memory_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             p.action, p.kind, p.content, p.subject, p.project, p.scope, p.reason, p.source_client, p.confidence,
             p.content_hash, p.similar_memory_id, p.replaces_memory_id, to_iso(p.created_at),
+            _iso_or_none(p.valid_from), _iso_or_none(p.valid_to), p.contradicts_memory_id,
         ),
     )
     proposal_id = cur.lastrowid
@@ -792,7 +863,7 @@ def active_memory_vectors(conn: sqlite3.Connection) -> list[tuple[Memory, bytes]
     """Every current memory that has been embedded, with its vector."""
     rows = conn.execute(
         "SELECT m.*, v.embedding AS vector FROM memories m JOIN memories_vec v ON v.rowid = m.id "
-        "WHERE m.superseded_by IS NULL ORDER BY m.id"
+        f"WHERE {current_sql('m')} ORDER BY m.id"
     ).fetchall()
     out = []
     for r in rows:
@@ -884,10 +955,11 @@ def store_counts(conn: sqlite3.Connection) -> dict[str, object]:
     """What's stored, for `openmcp status`."""
     by_provider = dict(conn.execute("SELECT provider, COUNT(*) FROM conversations GROUP BY provider ORDER BY provider"))
     return {
-        "memories": conn.execute("SELECT COUNT(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0],
+        "memories": conn.execute(f"SELECT COUNT(*) FROM memories WHERE {current_sql()}").fetchone()[0],
         "conversations": by_provider,
         "messages": conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
         "pending_embeddings": count_pending_embeddings(conn),
         "pending_proposals": count_pending_proposals(conn),
         "due_for_consolidation": count_due_conversations(conn, None),
+        "conflicts": count_open_contradictions(conn),
     }

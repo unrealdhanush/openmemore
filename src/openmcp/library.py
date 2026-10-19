@@ -70,6 +70,11 @@ class Hit:
     conversation_id: int | None = None
     title: str | None = None
     created_at: datetime | None = None
+    status: str = "current"
+    """current, superseded, ended, contradicted; chat or recap for conversation messages."""
+    replaced_by: int | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
 
 
 _conversation: contextvars.ContextVar[str | None] = contextvars.ContextVar("openmcp_conversation", default=None)
@@ -120,29 +125,38 @@ class Memory:
     # --- reading --------------------------------------------------------------------
 
     def search(self, query: str, *, limit: int = 10, kinds: Sequence[Kind] = (), project: str | None = None,
-               chats: bool = True) -> list[Hit]:
-        """Memories and conversations related to `query`, by meaning and by words."""
-        from openmcp.tools.search import search_context
+               chats: bool = True, mode: str = "current", as_of: Any = None,
+               budget_tokens: int | None = None) -> list[Hit]:
+        """Memories and conversations related to `query`, by meaning and by words. `mode`
+        "history" includes earlier versions and ended memories; `as_of` ("2024-03", a date)
+        gives what was true then."""
+        from openmcp.models import _moment
+        from openmcp.tools.search import presented, search_context
 
         with self._call("search_context") as (conn, call, caller):
             call.summary = f"q={query[:60]!r}"
-            result = search_context(conn, caller, query, kinds, project, chats, limit)
+            result = search_context(conn, caller, query, kinds, project, chats, limit, mode=mode,
+                                    as_of=_moment(as_of), budget_tokens=budget_tokens)
             call.result_count = len(result.results)
+            presented(conn, result)
         return [
             Hit(type=h.type, id=h.id, text=unwrap(h.content), wrapped=h.content, source=h.source, score=h.score,
                 kind=h.kind, subject=h.subject, project=h.project, conversation_id=h.conversation_id, title=h.title,
-                created_at=h.created_at)
+                created_at=h.created_at, status=h.status, replaced_by=h.replaced_by, valid_from=h.valid_from,
+                valid_to=h.valid_to)
             for h in result.results
         ]
 
-    def profile(self, project: str | None = None) -> Profile:
+    def profile(self, project: str | None = None, *, budget_tokens: int | None = None) -> Profile:
         """Preferences, facts, active projects, and recent decisions (wrapped)."""
         from openmcp.tools.profile import get_profile
+        from openmcp.tools.search import presented
 
         with self._call("get_profile") as (conn, call, caller):
-            result = get_profile(conn, caller, project)
+            result = get_profile(conn, caller, project, budget_tokens)
             call.result_count = sum(len(g) for g in (result.preferences, result.facts, result.active_projects,
                                                      result.recent_decisions))
+            presented(conn, result)
         return result
 
     def recent(self, limit: int = 5, source: str | None = None) -> RecentConversations:
@@ -153,38 +167,48 @@ class Memory:
             call.result_count = len(result.conversations)
         return result
 
-    def context(self, query: str, *, limit: int = 5, kinds: Sequence[Kind] = (), profile: bool = False) -> str:
+    def context(self, query: str, *, limit: int = 5, kinds: Sequence[Kind] = (), profile: bool = False,
+                budget_tokens: int | None = None) -> str:
         """A block to put in a prompt: the stored-data notice, then related items, each
-        wrapped. Empty if nothing is related."""
-        items = [h.wrapped for h in self.search(query, limit=limit, kinds=kinds)]
+        wrapped, within `budget_tokens` (estimated) if given: the profile gets up to a
+        third of it. Empty if nothing is related."""
+        search_budget = budget_tokens
+        items: list[str] = []
         if profile:
-            p = self.profile()
-            items = [i.content for g in (p.preferences, p.facts, p.active_projects, p.recent_decisions) for i in g] + items
+            p = self.profile(budget_tokens=budget_tokens // 3 if budget_tokens else None)
+            items = [i.content for g in (p.preferences, p.facts, p.active_projects, p.recent_decisions) for i in g]
+            if budget_tokens:
+                search_budget = max(0, budget_tokens - (p.tokens_used or 0))
+        items += [h.wrapped for h in self.search(query, limit=limit, kinds=kinds, budget_tokens=search_budget)]
         return "\n".join([NOTICE, *items]) if items else ""
 
     # --- writing --------------------------------------------------------------------
 
     def save(self, content: str, *, kind: Kind = "note", subject: str | None = None,
-             project: str | None = None) -> int | None:
-        """Save a memory in this client's write scope. Returns its id, or None if the
-        same statement is already stored."""
+             project: str | None = None, valid_from: Any = None, valid_to: Any = None) -> int | None:
+        """Save a memory in this client's write scope. `valid_from` / `valid_to` say when
+        it became and stopped being true ("2024-03", a date, or a datetime), if not now.
+        Returns its id, or None if the same statement is already stored."""
         from openmcp.tools.memories import save_memories
 
         with self._call("save_memories") as (conn, call, caller):
             result = save_memories(conn, caller, [MemoryInput(kind=kind, content=content, subject=subject,
-                                                              project=project)])
+                                                              project=project, valid_from=valid_from,
+                                                              valid_to=valid_to)])
             call.summary, call.result_count = "1 items", len(result.saved)
         if result.rejected:
             raise OpenMCPError(f"not saved: {result.rejected[0].reason}")
         return result.saved[0] if result.saved else None
 
-    def update(self, memory_id: int, content: str) -> int:
-        """Correct a memory; returns the new version's id (the old one is kept as history)."""
+    def update(self, memory_id: int, content: str, *, valid_from: Any = None) -> int:
+        """Correct a memory; returns the new version's id. The old one is kept as history,
+        true until the change (`valid_from`, default now)."""
+        from openmcp.models import _moment
         from openmcp.tools.memories import update_memory
 
         with self._call("update_memory") as (conn, call, caller):
             call.summary = f"id={memory_id}"
-            return update_memory(conn, caller, memory_id, content).new_id
+            return update_memory(conn, caller, memory_id, content, valid_from=_moment(valid_from)).new_id
 
     def forget(self, memory_id: int) -> int:
         """Delete a memory and its history; returns how many versions were deleted."""

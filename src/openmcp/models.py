@@ -5,10 +5,11 @@ Nothing reaches the repository (repo.py) without passing through one of these.
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
 
 from openmcp.safety.wrap import NOTICE
 
@@ -29,6 +30,30 @@ Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 MemoryText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 MemoryId = Annotated[int, Field(ge=1)]
+
+
+def _moment(value: Any) -> Any:
+    """A date as people give it ("2024", "2024-03", "2024-03-01", or a full timestamp),
+    as an aware datetime; no time zone means UTC."""
+    if isinstance(value, str):
+        text = value.strip()
+        if re.fullmatch(r"\d{4}", text):
+            text += "-01-01"
+        elif re.fullmatch(r"\d{4}-\d{2}", text):
+            text += "-01"
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return value  # Pydantic reports it
+    elif isinstance(value, date) and not isinstance(value, datetime):
+        value = datetime(value.year, value.month, value.day)
+    if isinstance(value, datetime) and value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value
+
+
+Moment = Annotated[AwareDatetime, BeforeValidator(_moment)]
+"""A point in time on the timeline of when something was true (SPEC.md M7.7)."""
 
 Role = Literal["user", "assistant", "system", "tool"]
 
@@ -94,7 +119,12 @@ class NewMemory(BaseModel):
     content_hash: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: AwareDatetime
+    """When OpenMCP learned it (recorded time)."""
     updated_at: AwareDatetime
+    valid_from: AwareDatetime | None = None
+    """When it became true in the user's life; stored as created_at when not given."""
+    valid_to: AwareDatetime | None = None
+    """When it stopped being true; None while it still is."""
 
 
 class Memory(NewMemory):
@@ -102,10 +132,20 @@ class Memory(NewMemory):
 
     id: int
     superseded_by: int | None = None
+    superseded_at: AwareDatetime | None = None
+    """When OpenMCP learned it had been corrected (recorded time)."""
+    presented: int = 0
+    """Times a client was shown it, or it was confirmed (activation, SPEC.md M7.7)."""
+    last_presented_at: AwareDatetime | None = None
 
     @property
     def active(self) -> bool:
+        """Not replaced by a newer version (it may still have ended: see `current`)."""
         return self.superseded_by is None
+
+    def current(self, now: datetime | None = None) -> bool:
+        """Not replaced, and still true: its validity hasn't ended."""
+        return self.active and (self.valid_to is None or self.valid_to > (now or datetime.now(UTC)))
 
 
 class NewConversation(BaseModel):
@@ -161,6 +201,9 @@ class ChunkMatch(BaseModel):
     title: str | None
     provider: str
     rank: float
+    presented: int = 0
+    """Times a client was shown it (activation, SPEC.md M7.7)."""
+    last_presented_at: datetime | None = None
     """Lower is better: bm25 for keyword matches, cosine distance for vector matches."""
 
 
@@ -231,6 +274,11 @@ class ParsedConversation(BaseModel):
 class ParsedMemory(BaseModel):
     """A memory read from an OpenMCP export, before it is stored."""
 
+    valid_from: AwareDatetime | None = None
+    valid_to: AwareDatetime | None = None
+    derived_from: list[tuple[str, str]] = Field(default_factory=list)
+    """The conversations it came from, as (provider, external id)."""
+
     kind: Kind
     content: MemoryText
     subject: Label | None = None
@@ -263,6 +311,18 @@ class MemoryInput(BaseModel):
     subject: Label | None = Field(default=None, description="Short label, e.g. 'coding style'.")
     project: Label | None = Field(default=None, description="Project name, if this belongs to one.")
     confidence: float | None = Field(default=None, ge=0, le=1, description="How sure you are, 0 to 1.")
+    valid_from: Moment | None = Field(
+        default=None, description="When this became true, if not now: an ISO date such as 2024-03 or 2024-03-15."
+    )
+    valid_to: Moment | None = Field(
+        default=None, description="When it stopped being true, for something that's over (an ISO date)."
+    )
+
+    @model_validator(mode="after")
+    def _ordered(self) -> MemoryInput:
+        if self.valid_from and self.valid_to and self.valid_to < self.valid_from:
+            raise ValueError("valid_to is before valid_from")
+        return self
 
 
 class CodeBlock(BaseModel):
@@ -319,6 +379,8 @@ class Rejection(BaseModel):
 class SaveMemoriesResult(BaseModel):
     saved: list[int] = Field(default_factory=list)
     skipped_duplicates: int = 0
+    confirmed: list[int] = Field(default_factory=list)
+    """Memories already stored that this call stated again: their confidence went up."""
     possible_duplicates: list[PossibleDuplicate] = Field(default_factory=list)
     rejected: list[Rejection] = Field(default_factory=list)
 
@@ -359,6 +421,19 @@ class SearchHit(BaseModel):
     created_at: datetime | None
     score: float
     recall: bool = False
+    status: Literal["current", "superseded", "ended", "contradicted", "chat", "recap"] = "current"
+    """Memories: current; superseded (see replaced_by); ended (no longer true); contradicted
+    (disagrees with another memory, unresolved). Chats: chat, or recap (a lookup turn)."""
+    replaced_by: int | None = None
+    """For a superseded memory: the memory that corrected it."""
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    """For memories: when it was true; valid_to None while it still is."""
+    confidence: float | None = None
+    """For memories: how sure (0.6 when stated once; confirmations raise it)."""
+    explain: dict[str, Any] | None = None
+    """With explain: the lists that found it and at what rank (memory/chat, keyword/meaning),
+    the fused score, and the recency, confidence, and recap adjustments."""
     """A recap of earlier conversations, ranked below them: prefer the original it points to."""
 
 
@@ -366,6 +441,12 @@ class SearchResult(ReadResult):
     note: str | None = None
     """CHAT_ORDER_NOTE when the results include chat messages."""
     results: list[SearchHit] = Field(default_factory=list)
+    tokens_used: int | None = None
+    """With budget_tokens: the estimated tokens of the results kept."""
+    dropped: int = 0
+    """With budget_tokens: results left out to stay within it."""
+    trace: dict[str, Any] | None = None
+    """With explain: the mode, the query words, and how many candidates each list found."""
 
 
 class ProfileItem(BaseModel):
@@ -376,6 +457,8 @@ class ProfileItem(BaseModel):
     project: str | None = None
     source: str
     updated_at: datetime
+    confidence: float | None = None
+    """How sure: stated once is 0.6; each independent confirmation raises it."""
 
 
 class Profile(ReadResult):
@@ -383,6 +466,12 @@ class Profile(ReadResult):
     facts: list[ProfileItem] = Field(default_factory=list)
     active_projects: list[ProfileItem] = Field(default_factory=list)
     recent_decisions: list[ProfileItem] = Field(default_factory=list)
+    unresolved_conflicts: int = 0
+    """Memories that disagree, waiting for the user in `openmcp review`; left out above."""
+    tokens_used: int | None = None
+    """With budget_tokens: the estimated tokens of the items kept."""
+    dropped: int = 0
+    """With budget_tokens: items left out to stay within it."""
     project_note: str | None = None
     """When `project` was asked for: which stored project it was taken to mean, or that
     none matched (then the profile is unfiltered)."""
@@ -497,6 +586,12 @@ class ProposalInput(MemoryInput):
         description="If this updates an existing memory (e.g. a project's state has moved on), that memory's id "
         "from get_profile or search_context. Approving it then makes this a new version of that memory.",
     )
+    contradicts: int | None = Field(
+        default=None,
+        ge=1,
+        description="If this disagrees with an existing memory and it's unclear which is right, that memory's id. "
+        "The user decides when reviewing. Use replaces instead when this is clearly a correction.",
+    )
 
 
 class DoneConversation(BaseModel):
@@ -548,6 +643,8 @@ class ProposeResult(BaseModel):
     proposed: list[int] = Field(default_factory=list)
     skipped_duplicates: int = 0
     """Already a memory, or already proposed or rejected, in that scope."""
+    confirmed: list[int] = Field(default_factory=list)
+    """Memories already stored that new conversations confirmed: their confidence went up."""
     similar_to_memories: list[ProposedSimilar] = Field(default_factory=list)
     rejected: list[Rejection] = Field(default_factory=list)
     conversations_done: int = 0
@@ -571,6 +668,11 @@ class NewProposal(BaseModel):
     """A near-duplicate the vectors found; kept alongside unless the user chooses to replace it."""
     replaces_memory_id: int | None = None
     """The memory the proposing model says this updates; replaced unless the user keeps both."""
+    contradicts_memory_id: int | None = None
+    """A memory this disagrees with, where it's unclear which is right; the user settles it."""
+    valid_from: AwareDatetime | None = None
+    """When the statement became true: the model's date, or its conversations' latest."""
+    valid_to: AwareDatetime | None = None
     created_at: AwareDatetime
     conversation_ids: list[int] = Field(default_factory=list)
     memory_ids: list[int] = Field(default_factory=list)

@@ -82,6 +82,7 @@
     <div class="top"><h1>OpenMCP review</h1><span class="stats" id="stats"></span></div>
     <nav role="tablist">
       <button role="tab" data-tab="proposals" aria-selected="true">Proposals</button>
+      <button role="tab" data-tab="conflicts" aria-selected="false">Conflicts</button>
       <button role="tab" data-tab="memories" aria-selected="false">Memories</button>
       <button role="tab" data-tab="decided" aria-selected="false">Decided</button>
     </nav>
@@ -177,7 +178,8 @@ async function showHistory(id) {
 async function refreshState() {
   state = await api("GET", "/api/state");
   $("stats").textContent =
-    `${state.pending_proposals} to review · ${count(state.memories, "memory", "memories")} · ` +
+    `${state.pending_proposals} to review · ${count(state.conflicts, "conflict")} · ` +
+    `${count(state.memories, "memory", "memories")} · ` +
     `${count(state.due_for_consolidation, "conversation")} not yet consolidated`;
 }
 
@@ -195,6 +197,10 @@ function proposalCard(p, decided) {
   let editing = false;
   const replace = el("input", { type: "checkbox" });
   const keepBoth = el("input", { type: "checkbox" });
+  const conflictChoice = el("select", { "aria-label": "How to settle the conflict" },
+    el("option", { value: "flag" }, "Not sure: keep both, and flag the conflict to settle later"),
+    el("option", { value: "replace" }, "This one is right: replace the other"),
+    el("option", { value: "both" }, "Both are true: no conflict"));
 
   function render() {
     const meta = el("div", { class: "meta" },
@@ -230,6 +236,12 @@ function proposalCard(p, decided) {
               "approving will keep both, or reject this.")));
       if (!current) keepBoth.checked = true;
     }
+    if (p.contradicts && !decided) {
+      parts.push(el("div", { class: "sub" }, `Conflicts with memory #${p.contradicts.id}: `,
+        el("span", {}, p.contradicts.content), " ",
+        el("button", { class: "link", onclick: () => showHistory(p.contradicts.id) }, "history"),
+        el("label", { class: "check" }, conflictChoice)));
+    }
     if (p.similar && !decided) {
       parts.push(el("div", { class: "sub" }, "Similar to an existing memory: ",
         el("span", {}, p.similar.content), " ",
@@ -259,6 +271,7 @@ function proposalCard(p, decided) {
 
   async function approve() {
     const edits = { replace_similar: replace.checked, keep_replaced: keepBoth.checked };
+    if (p.contradicts) edits.on_conflict = conflictChoice.value;
     if (editing) {
       edits.content = fields.content.value.trim();
       edits.kind = fields.kind.value;
@@ -335,6 +348,34 @@ async function decidedTab() {
   return all.length ? all.map((p) => proposalCard(p, true)) : [el("div", { class: "empty" }, "No decisions yet.")];
 }
 
+// --- conflicts ---------------------------------------------------------------------
+
+function conflictCard(c) {
+  const card = el("div", { class: "card" });
+  const settle = (resolution, message) => attempt(async () => {
+    await api("POST", `/api/conflicts/${c.id}/resolve`, { resolution });
+    toast(message);
+    card.remove();
+    await refreshState();
+  });
+  const side = (m, resolution) => el("div", { class: "sub" }, memoryMeta(m), el("div", { class: "content" }, m.content),
+    el("button", { class: "btn primary", onclick: () => settle(resolution, `Kept #${m.id}; the other is history now`) },
+      "This one is right"));
+  card.append(
+    el("div", { class: "meta" }, el("span", { class: "chip" }, "conflict"),
+      el("span", {}, `flagged by ${c.source || "unknown"} · ${when(c.created_at)}`)),
+    el("p", { class: "reason" }, "These disagree. Until you settle it, assistants see neither as current."),
+    side(c.from, "keep_from"), side(c.to, "keep_to"),
+    el("div", { class: "actions" },
+      el("button", { class: "btn", onclick: () => settle("both", "Both kept as true") }, "Both are true")));
+  return card;
+}
+
+async function conflictsTab() {
+  const list = await api("GET", "/api/conflicts");
+  return list.length ? list.map(conflictCard) : [el("div", { class: "empty" }, "No conflicts.")];
+}
+
 // --- memories ----------------------------------------------------------------------
 
 const filters = { q: "", scope: "", kind: "", project: "" };
@@ -408,7 +449,7 @@ async function show(name, keepFocus = false) {
   for (const b of document.querySelectorAll("nav button")) b.setAttribute("aria-selected", b.dataset.tab === name);
   await attempt(async () => {
     await refreshState();  // counts and notes can change behind the page: a client may have just proposed
-    const build = { proposals: proposalsTab, memories: memoriesTab, decided: decidedTab }[name];
+    const build = { proposals: proposalsTab, conflicts: conflictsTab, memories: memoriesTab, decided: decidedTab }[name];
     const focused = keepFocus && document.activeElement?.type === "search";
     $("main").replaceChildren(...(await build()).flat().filter(Boolean));
     if (focused) {

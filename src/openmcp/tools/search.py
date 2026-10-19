@@ -7,15 +7,16 @@ boost. Without the embedding model, the vector lists are simply missing.
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from openmcp import embed, repo
-from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, SearchHit, SearchResult
+from openmcp import embed, relations, repo
+from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, Profile, SearchHit, SearchResult
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
 
@@ -52,10 +53,6 @@ recap matches the next such question better than the conversation it recaps, and
 recall would otherwise push the original further down. 0.25 puts a recap below anything
 found on its own merits (a hit in both lists scores ≈ 0.033) without hiding it."""
 
-RECENCY_WEIGHT = 0.0005
-"""At most this much is added to a fused score (a top rank is worth 1/61 ≈ 0.016), so
-recency breaks near-ties without overriding relevance."""
-RECENCY_HALF_LIFE_DAYS = 30
 
 
 MAX_CHUNK_KEYWORD_MATCHES = 8000
@@ -113,7 +110,15 @@ def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
     return out
 
 
-def _memory_hit(m: Memory, score: float) -> SearchHit:
+def memory_status(m: Memory, now: datetime, disputed: bool = False) -> str:
+    if m.superseded_by is not None:
+        return "superseded"
+    if m.valid_to is not None and m.valid_to <= now:
+        return "ended"
+    return "contradicted" if disputed else "current"
+
+
+def _memory_hit(m: Memory, score: float, now: datetime, disputed: bool = False) -> SearchHit:
     return SearchHit(
         type="memory",
         id=m.id,
@@ -124,6 +129,11 @@ def _memory_hit(m: Memory, score: float) -> SearchHit:
         source=m.source_client,
         created_at=m.created_at,
         score=score,
+        status=memory_status(m, now, disputed),
+        replaced_by=m.superseded_by,
+        valid_from=m.valid_from,
+        valid_to=m.valid_to,
+        confidence=m.confidence if m.confidence is not None else relations.DEFAULT_CONFIDENCE,
     )
 
 
@@ -139,6 +149,7 @@ def _chat_hit(c: ChunkMatch, score: float) -> SearchHit:
         created_at=c.created_at,
         score=score,
         recall=c.recall,
+        status="recap" if c.recall else "chat",
     )
 
 
@@ -160,13 +171,54 @@ def similar_enough(
     )
 
 
-def recency_boost(when: datetime | None, now: datetime) -> float:
-    """Halves every RECENCY_HALF_LIFE_DAYS. Age counts in whole hours, so items written
-    close together tie and the usual tie-breaks (memories first) still apply."""
-    if when is None:
+ACTIVATION_DECAY = 0.5
+"""ACT-R's d: how fast a presentation's influence fades (power law, not a half-life)."""
+MEMORY_ACTIVATION_WEIGHT = 0.0005
+"""Rank boost at full activation, for memories: a tie-breaker by recent and frequent use
+and confirmation. Which version is current is decided by the timelines, not by this. Not
+measured: the benchmarks have no memories and no usage."""
+CHAT_ACTIVATION_WEIGHT = 0.0
+"""For conversation messages: none. Tuned with M7.6 (bench/RESULTS.md, 2026-10-19): any
+age weighting lowered evidence recall on LongMemEval and LoCoMo, more so the stronger it
+was, since questions often ask about older conversations."""
+MIN_AGE_DAYS = 1 / 24
+"""Ages are counted from an hour: a just-made item isn't infinitely active."""
+
+
+def activation(created: datetime | None, presented: int, last: datetime | None, now: datetime,
+               decay: float | None = None) -> float:
+    """ACT-R base-level activation, ln(sum of age_j ** -d) over an item's presentations: its
+    creation, then `presented` more, the last at `last`. Petrov's (2006) approximation needs
+    only the first and last ages: ln(t_last^-d + n * (t_1^(1-d) - t_last^(1-d)) / ((1-d)(t_1 - t_last)))."""
+    d = ACTIVATION_DECAY if decay is None else decay
+    if created is None:
+        return -d * math.log(365)  # no date: as if a year old
+    first = max((now - created).total_seconds() / 86_400, MIN_AGE_DAYS)
+    if not presented or last is None:
+        return -d * math.log(first)
+    recent = min(max((now - last).total_seconds() / 86_400, MIN_AGE_DAYS), first)
+    if first - recent < 1e-9:
+        return math.log((presented + 1) * recent ** -d)
+    rest = presented * (first ** (1 - d) - recent ** (1 - d)) / ((1 - d) * (first - recent))
+    return math.log(recent ** -d + rest)
+
+
+def activation_boost(created: datetime | None, presented: int, last: datetime | None, now: datetime,
+                     weight: float) -> float:
+    """Activation as a rank boost: `weight` times its logistic (0 to 1)."""
+    if not weight:
         return 0.0
-    age_days = max(0, int((now - when).total_seconds() // 3600)) / 24
-    return RECENCY_WEIGHT * 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+    return weight / (1 + math.exp(-activation(created, presented, last, now)))
+
+
+CONFIDENCE_WEIGHT = 0.002
+"""Up to about this much rank boost for a well-confirmed memory: enough to order otherwise
+close matches (a rank step is ~0.0003 near the top), not to outrank a better match."""
+
+
+def confidence_boost(confidence: float | None) -> float:
+    c = confidence if confidence is not None else relations.DEFAULT_CONFIDENCE
+    return CONFIDENCE_WEIGHT * (c - relations.DEFAULT_CONFIDENCE) / (1 - relations.DEFAULT_CONFIDENCE)
 
 
 @dataclass
@@ -176,6 +228,8 @@ class _Fused:
     """0 for memories (distilled, durable), 1 for chats: memories win ties."""
     best_rank: int
     item: Memory | ChunkMatch
+    signals: dict[str, float] = field(default_factory=dict)
+    """What made the score, for `explain`."""
 
 
 def search_context(
@@ -186,7 +240,19 @@ def search_context(
     project: str | None = None,
     include_chats: bool = True,
     limit: int = 10,
+    now: datetime | None = None,
+    mode: str = "current",
+    as_of: datetime | None = None,
+    explain: bool = False,
+    budget_tokens: int | None = None,
 ) -> SearchResult:
+    """`mode="current"` sees current memories only; `"history"` every version, labelled;
+    `as_of` the memories true at that moment (implies history). `now` is the moment
+    recency and status are measured from (default: the current time); evaluation passes
+    a question's date. `explain` adds what made each result's score; `budget_tokens`
+    keeps the results, in rank order, within an estimated token count."""
+    history = mode == "history" or as_of is not None
+    now = now or datetime.now(UTC)
     read = caller.scopes.read_scopes
     words = query_words(query)
     match = fts_query(words)
@@ -195,43 +261,101 @@ def search_context(
     embedder = embed.get_embedder()
     vector = embedder.query(query) if embedder is not None else None
 
-    memory_lists: list[list[Memory]] = []
-    chunk_lists: list[list[ChunkMatch]] = []
+    memory_lists: list[tuple[str, list[Memory]]] = []
+    chunk_lists: list[tuple[str, list[ChunkMatch]]] = []
     if match is not None:
-        memory_lists.append(
-            [m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit)]
-        )
+        memory_lists.append(("memory_keyword", [
+            m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit,
+                                               history=history, as_of=as_of)
+        ]))
         if include_chats and (chunk_match := chunk_keyword_query(conn, words)):
-            chunk_lists.append(later_turns_first(repo.search_chunks(conn, chunk_match, scopes=read, limit=limit)))
+            chunk_lists.append(("chat_keyword", later_turns_first(
+                repo.search_chunks(conn, chunk_match, scopes=read, limit=limit))))
     if vector is not None:
         k = limit * VECTOR_CANDIDATES_PER_RESULT
         near_memories, near_chunks = similar_enough(
-            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project),
+            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project, history=history,
+                              as_of=as_of),
             repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else [],
         )
-        memory_lists.append([m for m, _ in near_memories[:limit]])
+        memory_lists.append(("memory_meaning", [m for m, _ in near_memories[:limit]]))
         if include_chats:
-            chunk_lists.append(later_turns_first(near_chunks[:limit]))
+            chunk_lists.append(("chat_meaning", later_turns_first(near_chunks[:limit])))
 
     # Each list contributes 1 / (RRF_K + rank) to every item in it.
     fused: dict[tuple[str, int], _Fused] = {}
     for kind_order, lists in ((0, memory_lists), (1, chunk_lists)):
-        for ranked in lists:
+        for label, ranked in lists:
             for rank, item in enumerate(ranked, start=1):
                 key = ("memory", item.id) if isinstance(item, Memory) else ("chat", item.chunk_id)
                 entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
                 entry.score += 1 / (RRF_K + rank)
                 entry.best_rank = min(entry.best_rank, rank)
-    now = datetime.now(UTC)
+                entry.signals[f"{label}_rank"] = rank
     for entry in fused.values():
         item = entry.item
-        entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+        entry.signals["fusion"] = entry.score
+        memory = isinstance(item, Memory)
+        entry.signals["activation"] = activation_boost(
+            item.updated_at if memory else item.created_at, item.presented, item.last_presented_at, now,
+            MEMORY_ACTIVATION_WEIGHT if memory else CHAT_ACTIVATION_WEIGHT)
+        entry.score += entry.signals["activation"]
+        if isinstance(item, Memory):
+            entry.signals["confidence"] = confidence_boost(item.confidence)
+            entry.score += entry.signals["confidence"]
         if isinstance(item, ChunkMatch) and item.recall:
+            entry.signals["recap_weight"] = RECALL_WEIGHT
             entry.score *= RECALL_WEIGHT
 
     ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
+    disputed = repo.contradicted(conn, [e.item.id for e in ranked if isinstance(e.item, Memory)])
     hits = [
-        _memory_hit(e.item, e.score) if isinstance(e.item, Memory) else _chat_hit(e.item, e.score) for e in ranked
+        _memory_hit(e.item, e.score, now, e.item.id in disputed) if isinstance(e.item, Memory)
+        else _chat_hit(e.item, e.score) for e in ranked
     ]
+    if explain:
+        for hit, entry in zip(hits, ranked):
+            hit.explain = {k: round(v, 6) if isinstance(v, float) else v for k, v in entry.signals.items()}
+    dropped, tokens = 0, None
+    if budget_tokens is not None:
+        hits, tokens, dropped = within_budget(hits, budget_tokens)
     has_chats = any(h.type == "chat" for h in hits)
-    return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)
+    return SearchResult(
+        note=CHAT_ORDER_NOTE if has_chats else None, results=hits, tokens_used=tokens, dropped=dropped,
+        trace={
+            "mode": "history" if history else "current", "as_of": as_of.isoformat() if as_of else None,
+            "words": words, "meaning_search": vector is not None,
+            "candidates": {label: len(items) for label, items in [*memory_lists, *chunk_lists]},
+        } if explain else None,
+    )
+
+
+def presented(conn: sqlite3.Connection, result: SearchResult | Profile) -> None:
+    """Count what a client was shown, for activation (SPEC.md M7.7): the MCP tools and the
+    library call this. Evaluation calls search_context directly, so benchmark questions
+    don't reinforce each other."""
+    if isinstance(result, SearchResult):
+        memories = [h.id for h in result.results if h.type == "memory"]
+        chunks = [h.id for h in result.results if h.type == "chat"]
+    else:
+        memories = [i.id for g in (result.preferences, result.facts, result.active_projects, result.recent_decisions)
+                    for i in g]
+        chunks = []
+    repo.record_presented(conn, memories, chunks, datetime.now(UTC))
+
+
+def estimate_tokens(text: str) -> int:
+    """Roughly how many tokens a model will count: about four characters each."""
+    return max(1, math.ceil(len(text) / 4))
+
+
+def within_budget(hits: list[SearchHit], budget: int) -> tuple[list[SearchHit], int, int]:
+    """The hits, in rank order, that fit `budget` estimated tokens (one that doesn't fit is
+    skipped, and smaller ones after it may still fit): (kept, tokens used, dropped)."""
+    kept, used = [], 0
+    for hit in hits:
+        cost = estimate_tokens(hit.content)
+        if used + cost <= budget:
+            kept.append(hit)
+            used += cost
+    return kept, used, len(hits) - len(kept)

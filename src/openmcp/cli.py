@@ -618,6 +618,8 @@ def status_command() -> None:
     proposals = counts["pending_proposals"]
     console.print(f"Proposals waiting for review: {proposals}" + (" (run `openmcp review`)" if proposals else ""))
     console.print(f"Conversations not yet consolidated: {counts['due_for_consolidation']}")
+    if counts["conflicts"]:
+        console.print(f"Conflicts to settle: {counts['conflicts']} (run `openmcp review`)")
     console.print(f"Daemon: {_daemon_line()}", markup=False, soft_wrap=True)
     console.print(f"Automatic consolidation: {_consolidation_line()}", markup=False, soft_wrap=True)
 
