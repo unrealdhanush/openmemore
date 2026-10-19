@@ -7,12 +7,29 @@ their own (no record_exchange calls until the user added a standing instruction)
 
 Clients whose transcripts are captured from disk (SPEC.md M1.5) get a variant
 without record_exchange: their conversations are stored without the model's help.
+
+Where the user has to paste the instruction by hand (Claude Desktop keeps it in the
+user's account, beyond setup's reach), they get a short pointer instead: it names the
+calls that matter most and defers to the server instructions for the rest, so the
+pasted text doesn't go stale when the guidance changes.
 """
 
 from __future__ import annotations
 
 STANDING_PREFIX = "Use the openmcp tools"
 """First words of every standing instruction, used to find and replace an earlier copy."""
+
+
+def pointer_instruction() -> str:
+    """The standing instruction for clients where the user pastes it by hand. Stable on
+    purpose: everything that may change lives in server_instructions()."""
+    return (
+        f"{STANDING_PREFIX} (my memory, shared with all my AI assistants) as the openmcp server's "
+        "instructions describe. In particular: call get_profile at the start of each conversation, "
+        "record_exchange after every answer, save_memories when I make a decision or state a preference, "
+        "and recent_conversations or search_context before saying you don't know about something I "
+        "discussed earlier."
+    )
 
 
 def standing_instruction(captured: bool) -> str:

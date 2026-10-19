@@ -126,7 +126,7 @@ def capture(
         conversation_id = state.conversation_id if state is not None else None
         try:
             parsed, resume = SOURCES[name].parse(path, offset)
-        except (OSError, ValueError) as e:
+        except Exception as e:  # noqa: BLE001 - one unreadable transcript mustn't stop the others
             report.errors.append(f"{path}: {type(e).__name__}: {e}")
             parsed, resume = None, offset
         with db.transaction(conn):

@@ -24,7 +24,7 @@ from typing import Any
 import openmcp
 from openmcp import config
 from openmcp.capture import vscode_copilot
-from openmcp.instructions import STANDING_PREFIX, standing_instruction
+from openmcp.instructions import STANDING_PREFIX, pointer_instruction, standing_instruction
 from openmcp.models import CaptureSource
 from openmcp.paths import app_data_dir
 
@@ -33,11 +33,10 @@ BLOCK_START = "<!-- openmcp:start -->"
 BLOCK_END = "<!-- openmcp:end -->"
 COPILOT_INSTRUCTIONS = "github.copilot.chat.codeGeneration.instructions"
 
-# How each application names itself over MCP (clientInfo.name), read from the apps
-# themselves: VS Code sends product.json's nameLong; Claude Code's identity is bundled in
-# Claude.app. Claude Desktop's own name couldn't be confirmed, so it isn't pinned (VS
-# Code still can't pass as claude-desktop: it's pinned to vscode-copilot).
-APP_NAMES = {"vscode-copilot": "Visual Studio Code", "claude-code": "claude-code"}
+# How each application names itself over MCP (clientInfo.name), confirmed from the apps:
+# VS Code sends product.json's nameLong; Claude Code's identity is bundled in Claude.app;
+# Claude Desktop reported 'claude-ai' in the audit log (2026-10-18).
+APP_NAMES = {"claude-desktop": "claude-ai", "vscode-copilot": "Visual Studio Code", "claude-code": "claude-code"}
 VSCODE_DISCOVERY = "chat.mcp.discovery.enabled"
 
 
@@ -63,6 +62,8 @@ class Context:
     command: tuple[str, ...]
     """How to run `openmcp`, e.g. ('/path/.venv/bin/openmcp',)."""
     which: Callable[[str], str | None] = shutil.which
+    copy: Callable[[str], bool] | None = None
+    """Puts text on the clipboard, returning whether it worked (default: copy_to_clipboard)."""
 
 
 def openmcp_command() -> tuple[str, ...]:
@@ -74,6 +75,41 @@ def openmcp_command() -> tuple[str, ...]:
     if found:
         return (found,)
     return (sys.executable, "-m", "openmcp.cli")
+
+
+def copy_to_clipboard(
+    text: str,
+    platform: str = sys.platform,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> bool:
+    """Put `text` on the system clipboard with the platform's own tool. False if none works."""
+    if platform == "darwin":
+        tools = [["pbcopy"]]
+    elif platform == "win32":
+        tools = [["clip"]]
+    else:
+        tools = [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+    for tool in tools:
+        if which(tool[0]) is None:
+            continue
+        try:
+            if run(tool, input=text.encode(), capture_output=True, timeout=5).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def _copy_step(ctx: Context, text: str, where: str) -> Step:
+    """Copies the instruction for a paste step. Never fails setup: without a clipboard
+    tool, the text printed with the next step is the way to get it."""
+
+    def apply() -> str:
+        copied = (ctx.copy or copy_to_clipboard)(text)
+        return "copied" if copied else "no clipboard tool found: copy it from below"
+
+    return Step(f"Copy the standing instruction to your clipboard, for {where}", apply=apply)
 
 
 def development_checkout() -> Path | None:
@@ -210,10 +246,14 @@ def _claude_desktop(ctx: Context) -> list[Step]:
                 path, add_server, json.dumps({"mcpServers": {SERVER_NAME: entry}}, indent=2), indent=2
             ),
         ),
+        _pin_app(ctx, "claude-desktop"),
+        _copy_step(ctx, pointer_instruction(), "Claude Desktop"),
         Step(
             "Add the standing instruction to Claude Desktop",
-            manual="In Claude Desktop, open Settings → Profile and paste this into your personal preferences "
-            "(replacing any earlier OpenMCP instruction):\n\n" + standing_instruction(captured=False),
+            manual="In Claude Desktop, open Settings → Profile and paste it into your personal preferences, "
+            "replacing any earlier OpenMCP instruction. Claude Desktop keeps these in your account, so setup "
+            "can't put it there. It's short on purpose: the details come from the openmcp server, so it "
+            "won't need replacing when they change.\n\n" + pointer_instruction(),
         ),
         Step(
             "Restart Claude Desktop",
@@ -324,10 +364,11 @@ def _manual(ctx: Context, client: str) -> list[Step]:
             manual=f"openmcp setup doesn't configure {client} automatically yet. Most clients take an "
             f"MCP server block like this (Cursor: ~/.cursor/mcp.json; Gemini CLI: ~/.gemini/settings.json):\n\n{snippet}",
         ),
+        _copy_step(ctx, pointer_instruction(), client),
         Step(
             "Add the standing instruction",
-            manual="Paste this where the client reads your own instructions (Cursor: User Rules; "
-            "Gemini CLI: ~/.gemini/GEMINI.md):\n\n" + standing_instruction(captured=False),
+            manual="Paste it where the client reads your own instructions (Cursor: User Rules; "
+            "Gemini CLI: ~/.gemini/GEMINI.md):\n\n" + pointer_instruction(),
         ),
     ]
 
