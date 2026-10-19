@@ -28,6 +28,7 @@ from openmcp.models import (
     CaptureRequest,
     ClientName,
     ConversationFilter,
+    ImportRequest,
     MemoryFilter,
 )
 
@@ -412,6 +413,101 @@ def capture_command(
 
     Servers already do this before each search; run it to catch up on older history."""
     _run_capture(_validated(CaptureRequest, {"sources": "--source", "days": "--days"}, sources=source, days=days))
+
+
+# --- import ---------------------------------------------------------------------------
+
+PROVIDER_NAMES = {"chatgpt": "ChatGPT", "claude": "Claude"}
+
+
+@app.command("import")
+def import_command(
+    path: Path = typer.Argument(..., help="The export: the .zip you downloaded, its conversations.json, or an unpacked folder."),
+    scope: str | None = typer.Option(None, "--scope", "-s", help="Scope to store it in (default: config's default write scope)."),
+) -> None:
+    """Import a ChatGPT or Claude data export, newest conversations first.
+
+    Safe to interrupt: running the same command again resumes where it stopped, and
+    importing a file again does nothing once it's done."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeRemainingColumn
+
+    from openmcp.ingest.detect import ExportError
+    from openmcp.ingest.jobs import import_export
+
+    request = _validated(ImportRequest, {"scope": "--scope"}, scope=scope)
+    cfg = config.load_config(config.config_path(config.home()))
+    target_scope = request.scope or cfg.defaults.write_scope
+    with _db() as conn:
+        with console.status(f"Loading the embedding model ({embed.MODEL})..."):
+            embedder = embed.get_embedder(allow_download=True)
+        if embedder is None:
+            console.print("[yellow]Semantic search unavailable:[/yellow] importing for keyword search only; "
+                          "run `openmcp embed` later to add the rest.")
+        columns = (TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(), TextColumn("conversations"),
+                   TimeRemainingColumn())
+        try:
+            with audit.audited(conn, CLI_CLIENT, "import") as call, Progress(*columns, console=console) as bar:
+                call.summary = f"{path.name}, scope={target_scope}"
+                storing = bar.add_task("Importing", total=None)
+                embedding = bar.add_task("Embedding", total=None, visible=False)
+                report = import_export(
+                    conn, path, scope=target_scope, embedder=embedder,
+                    progress=lambda done, total: bar.update(storing, completed=done, total=total),
+                    embed_progress=lambda done, total: bar.update(embedding, completed=done, total=total, visible=True),
+                )
+                call.result_count = report.messages
+        except ExportError as e:
+            console.print(f"[red]Can't import {path}:[/red] {e}")
+            raise typer.Exit(2) from None
+        except KeyboardInterrupt:
+            console.print(
+                "\nInterrupted. Run the same command again to resume where it stopped. (If it was already "
+                "embedding, everything is stored and searchable by keyword; `openmcp embed` finishes the rest.)"
+            )
+            raise typer.Exit(130) from None
+
+    name = PROVIDER_NAMES[report.provider]
+    if report.already_done:
+        console.print(f"Already imported: this {name} export ({report.total} conversations) was imported before.")
+        return
+    resumed = f", resuming at {report.resumed_from}" if report.resumed_from else ""
+    console.print(
+        f"Imported the {name} export into scope '{target_scope}'{resumed}: {report.conversations} conversations "
+        f"with new messages ({report.messages} messages) of {report.total}."
+    )
+    if report.skipped:
+        console.print(f"Skipped {report.skipped} with nothing to keep, or that you deleted before.")
+    for error in report.errors:
+        console.print(f"[yellow]Skipped[/yellow] {error}", highlight=False)
+
+
+@app.command("status")
+def status_command() -> None:
+    """Show import jobs and what's stored."""
+    with _db() as conn:
+        jobs = repo.list_jobs(conn)
+        counts = repo.store_counts(conn)
+    if jobs:
+        table = Table(box=None, header_style="bold")
+        for column in ("job", "export", "file", "status", "progress", "started", "finished"):
+            table.add_column(column, no_wrap=column != "file")
+        for j in jobs:
+            status = j.status if not j.error else f"{j.status}: {j.error}"
+            table.add_row(
+                str(j.id), PROVIDER_NAMES[j.provider], Text(Path(j.file_path).name), Text(status),
+                f"{j.processed}/{j.total if j.total is not None else '?'}",
+                _when(j.started_at) if j.started_at else "", _when(j.finished_at) if j.finished_at else "",
+            )
+        console.print(table)
+        console.print()
+    else:
+        console.print("No imports yet. Import a ChatGPT or Claude data export with `openmcp import <file>`.\n")
+    conversations = counts["conversations"]
+    by_source = ", ".join(f"{n} from {p}" for p, n in conversations.items()) or "none"
+    console.print(f"Memories: {counts['memories']}")
+    console.print(f"Conversations: {sum(conversations.values())} ({by_source}), {counts['messages']} messages")
+    pending = counts["pending_embeddings"]
+    console.print(f"Waiting for embeddings: {pending}" + (" (run `openmcp embed`)" if pending else ""))
 
 
 # --- embeddings ----------------------------------------------------------------------

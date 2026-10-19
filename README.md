@@ -5,8 +5,8 @@
 A local-first MCP server that gives every AI assistant you use one shared, user-owned
 context store on your own machine. See [SPEC.md](SPEC.md) for the full design.
 
-**Status:** early development (milestones M1, M1.5, M2: memory store, capturing conversations
-across assistants, and semantic search). Not ready for use.
+**Status:** early development (milestones M1 to M3: memory store, capturing conversations across
+assistants, semantic search, importing ChatGPT and Claude exports). Not ready for use.
 
 ## Development
 
@@ -21,6 +21,8 @@ uv run openmcp serve --client my-client   # MCP server over stdio
 uv run openmcp setup claude-desktop       # connect a client (also vscode-copilot, claude-code); --dry-run first
 uv run openmcp capture                    # catch up on transcripts of clients with capture on
 uv run openmcp embed                      # download the embedding model (once) and embed what's pending
+uv run openmcp import ~/Downloads/export.zip  # a ChatGPT or Claude data export; resumable
+uv run openmcp status                     # import jobs and what's stored
 uv run pytest                             # real-model tests download ~70MB once to ~/.cache/openmcp-test-models
 uv run python scripts/benchmark.py        # check the performance budget (SPEC.md 4.3)
 ```
