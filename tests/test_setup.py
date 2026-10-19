@@ -255,10 +255,12 @@ def make_exe(path: Path) -> Path:
 
 
 def test_installed_copy_prefers_uv_tools_and_skips_the_checkout(tmp_path):
+    # The layout uv and venvs use on this OS: Scripts\openmcp.exe on Windows.
+    bin_dir, exe = ("Scripts", "openmcp.exe") if os.name == "nt" else ("bin", "openmcp")
     checkout = tmp_path / "repo"
-    dev = make_exe(checkout / ".venv" / "bin" / "openmcp")
-    tool = make_exe(tmp_path / "tools" / "openmcp" / "bin" / "openmcp")
-    on_path = make_exe(tmp_path / "bin" / "openmcp")
+    dev = make_exe(checkout / ".venv" / bin_dir / exe)
+    tool = make_exe(tmp_path / "tools" / "openmcp" / bin_dir / exe)
+    on_path = make_exe(tmp_path / "bin" / exe)
     uv_dir = lambda *a, **k: subprocess.CompletedProcess(a, 0, str(tmp_path / "tools") + "\n", "")  # noqa: E731
     path = f"{dev.parent}{os.pathsep}{on_path.parent}"
 
