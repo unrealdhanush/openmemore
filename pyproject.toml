@@ -18,7 +18,10 @@ dependencies = [
 openmcp = "openmcp.cli:app"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "opentelemetry-proto>=1.30",  # tests only: encodes OTLP protobuf the official way, to check our reader
+]
 
 [build-system]
 requires = ["hatchling"]

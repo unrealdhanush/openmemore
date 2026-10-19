@@ -781,35 +781,34 @@ def daemon_status() -> None:
 
 
 @daemon_app.command("telemetry")
-def daemon_telemetry(
-    client: str = typer.Argument("claude-code", help="The client to send its conversations (only claude-code exports them)."),
-) -> None:
-    """Print the settings that make a client send its conversations to the daemon."""
+def daemon_telemetry() -> None:
+    """Print the OpenTelemetry settings that send an app's conversations to the daemon."""
     from openmcp import daemon
 
-    if client != "claude-code":
-        console.print(f"{client} doesn't export conversation text through OpenTelemetry (SPEC.md Section 14).")
-        raise typer.Exit(2)
     base = config.home()
     initialize(base)
     token = daemon.ensure_token(base)
     cfg = config.load_config(config.config_path(base))
-    env = {
-        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-        "OTEL_LOGS_EXPORTER": "otlp",
-        "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
-        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": f"{daemon.endpoint(cfg)}/v1/logs",
-        "OTEL_EXPORTER_OTLP_LOGS_HEADERS": f"{daemon.TOKEN_HEADER}={token}",
-        "OTEL_LOG_USER_PROMPTS": "1",
-        "OTEL_LOGS_EXPORT_INTERVAL": "2000",
-    }
     console.print(
-        "Add these to the \"env\" object in ~/.claude/settings.json (create it if there isn't one), then restart "
-        "Claude Code. Its conversations then reach the daemon live; `openmcp daemon install` keeps the daemon running. "
-        "If you already send Claude Code's telemetry somewhere else, these settings replace that for its logs.\n",
-        markup=False,
+        "Any app or library that records its conversations with OpenTelemetry's GenAI conventions "
+        "(gen_ai.input.messages / gen_ai.output.messages) can send them to the daemon. Give it these standard "
+        "OTLP settings, as environment variables:\n",
+        markup=False, soft_wrap=True,
     )
-    console.print(json.dumps({"env": env}, indent=2), markup=False, soft_wrap=True)
+    for key, value in (
+        ("OTEL_EXPORTER_OTLP_ENDPOINT", daemon.endpoint(cfg)),
+        ("OTEL_EXPORTER_OTLP_HEADERS", f"{daemon.TOKEN_HEADER}={token}"),
+    ):
+        console.print(f"  {key}={value}", markup=False, soft_wrap=True)
+    console.print(
+        "\nJSON and protobuf both work. Message content is opt-in in most instrumentation; in OpenTelemetry's own "
+        "GenAI instrumentations it's:\n\n"
+        "  OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental\n"
+        "  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY\n\n"
+        "Conversations are filed under the app's service.name (OTEL_SERVICE_NAME), which `openmcp clients` scopes "
+        "like any client. If the app already sends telemetry elsewhere, these settings replace that destination.",
+        markup=False, soft_wrap=True,
+    )
 
 
 # --- review --------------------------------------------------------------------------

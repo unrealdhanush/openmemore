@@ -803,47 +803,6 @@ def active_memory_vectors(conn: sqlite3.Connection) -> list[tuple[Memory, bytes]
     return out
 
 
-# --- OpenTelemetry capture (SPEC.md M6) ---------------------------------------------
-
-
-def save_otel_prompt(conn: sqlite3.Connection, prompt_id: str, conversation_id: int, message_uuid: str,
-                     now: datetime) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO otel_prompts (prompt_id, conversation_id, message_uuid, created_at) VALUES (?, ?, ?, ?)",
-        (prompt_id, conversation_id, message_uuid, to_iso(now)),
-    )
-
-
-def get_otel_prompt(conn: sqlite3.Connection, prompt_id: str) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM otel_prompts WHERE prompt_id = ?", (prompt_id,)).fetchone()
-
-
-def add_otel_response(conn: sqlite3.Connection, prompt_id: str, sequence: int, text: str,
-                      created_at: datetime | None) -> list[tuple[str, str | None]]:
-    """Keep one part of an answer (repeats of the same event are ignored) and return all
-    parts so far, in order: (text, created_at)."""
-    conn.execute(
-        "INSERT OR IGNORE INTO otel_responses (prompt_id, sequence, text, created_at) VALUES (?, ?, ?, ?)",
-        (prompt_id, sequence, text, _iso_or_none(created_at)),
-    )
-    return [tuple(r) for r in conn.execute(
-        "SELECT text, created_at FROM otel_responses WHERE prompt_id = ? ORDER BY sequence", (prompt_id,)
-    )]
-
-
-def mark_otel_recall(conn: sqlite3.Connection, prompt_id: str) -> sqlite3.Row | None:
-    """Mark a turn as a recall turn: its prompt row, and its messages if stored."""
-    row = get_otel_prompt(conn, prompt_id)
-    if row is None:
-        return None
-    conn.execute("UPDATE otel_prompts SET recall = 1 WHERE prompt_id = ?", (prompt_id,))
-    conn.execute(
-        "UPDATE messages SET recall = 1 WHERE conversation_id = ? AND external_id IN (?, ?)",
-        (row["conversation_id"], row["message_uuid"], f"{row['message_uuid']}:answer"),
-    )
-    return row
-
-
 # --- capture_files -------------------------------------------------------------------
 
 

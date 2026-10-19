@@ -21,7 +21,7 @@ from typer.testing import CliRunner
 from conftest import plain
 from openmcp import config, daemon, db, repo, service
 from openmcp.cli import app, initialize
-from test_otel import otlp, prompt, response
+from test_otel import call, logs_json, text, traces_json, traces_pb
 
 PORT = 47999
 
@@ -43,7 +43,8 @@ def test_the_token_is_made_once_and_kept(home):
 
 def test_the_receiver_stores_conversations(receiver, home):
     client, auth = receiver
-    r = client.post("/v1/logs", json=otlp(prompt("How do I parse TOML?"), response("Use tomllib.")), headers=auth)
+    r = client.post("/v1/traces", json=traces_json(call([text("user", "How do I parse TOML?")], "Use tomllib.")),
+                    headers=auth)
     assert (r.status_code, r.json()) == (200, {"partialSuccess": {}})
     with closing(db.connect(home / "openmcp.db")) as conn:
         [c] = repo.list_conversations(conn, scopes=None)
@@ -52,19 +53,39 @@ def test_the_receiver_stores_conversations(receiver, home):
     assert client.get("/health").json()["ok"] is True
 
 
+def test_the_receiver_takes_protobuf_gzip_and_logs(receiver, home):
+    import gzip
+
+    client, auth = receiver
+    body = traces_pb(call([text("user", "First?")], "One."))
+    r = client.post("/v1/traces", content=body, headers={**auth, "content-type": "application/x-protobuf"})
+    assert (r.status_code, r.content, r.headers["content-type"]) == (200, b"", "application/x-protobuf")
+    zipped = gzip.compress(json.dumps(logs_json(call([text("user", "Second?")], "Two."))).encode())
+    r = client.post("/v1/logs", content=zipped,
+                    headers={**auth, "content-type": "application/json", "content-encoding": "gzip"})
+    assert r.status_code == 200
+    with closing(db.connect(home / "openmcp.db")) as conn:
+        assert sorted(c.title for c in repo.list_conversations(conn, scopes=None)) == ["First?", "Second?"]
+
+
+def test_metrics_are_accepted_and_dropped(receiver, home):
+    client, auth = receiver
+    assert client.post("/v1/metrics", json={"resourceMetrics": []}, headers=auth).status_code == 200
+
+
 @pytest.mark.parametrize("change, status", [
     ({"headers": {"host": "evil.example"}}, 403),
     ({"headers": {daemon.TOKEN_HEADER: "wrong"}}, 401),
     ({"headers": {daemon.TOKEN_HEADER: None}}, 401),
     ({"headers": {"content-type": "text/plain"}}, 415),  # what a web page can send without a preflight
-    ({"headers": {"content-type": "application/x-protobuf"}}, 415),
+    ({"headers": {"content-type": "application/x-protobuf"}}, 400),  # JSON sent as protobuf: not OTLP
 ])
 def test_the_receiver_refuses(receiver, home, change, status):
     client, auth = receiver
     headers = {**auth, "content-type": "application/json", **change["headers"]}
     headers = {k: v for k, v in headers.items() if v is not None}
-    body = json.dumps(otlp(prompt("Injected?"), response("Yes.")))
-    assert client.post("/v1/logs", content=body, headers=headers).status_code == status
+    body = json.dumps(traces_json(call([text("user", "Injected?")], "Yes.")))
+    assert client.post("/v1/traces", content=body, headers=headers).status_code == status
     with closing(db.connect(home / "openmcp.db")) as conn:
         assert repo.list_conversations(conn, scopes=None) == []
 
@@ -178,15 +199,13 @@ def cli(*args):
     return result.exit_code, plain(result.output)
 
 
-def test_telemetry_settings_for_claude_code(home):
+def test_telemetry_prints_the_standard_settings(home):
     code, out = cli("daemon", "telemetry")
-    env = json.loads(out[out.index("{"):])["env"]
     token = config.load_config(home / "config.toml").daemon.token
-    assert code == 0 and env["OTEL_EXPORTER_OTLP_LOGS_HEADERS"] == f"x-openmcp-token={token}"
-    assert env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == "http://127.0.0.1:47318/v1/logs"
-    assert env["OTEL_LOG_USER_PROMPTS"] == "1" and env["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] == "http/json"
-    code, out = cli("daemon", "telemetry", "cursor")
-    assert code == 2 and "doesn't export" in out
+    assert code == 0
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:47318" in out
+    assert f"OTEL_EXPORTER_OTLP_HEADERS=x-openmcp-token={token}" in out
+    assert "gen_ai.input.messages" in out and "claude" not in out.lower()
 
 
 def test_install_dry_run_changes_nothing(home, isolated_user):
@@ -230,7 +249,8 @@ def test_the_daemon_process_receives_and_captures(home, isolated_user):
         import urllib.request
 
         request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/v1/logs", data=json.dumps(otlp(prompt("Hi from OTel."))).encode(),
+            f"http://127.0.0.1:{port}/v1/traces",
+            data=json.dumps(traces_json(call([text("user", "Hi from OTel.")], "Hello."))).encode(),
             headers={"content-type": "application/json", daemon.TOKEN_HEADER: token}, method="POST")
         with urllib.request.urlopen(request, timeout=10) as r:
             assert r.status == 200
