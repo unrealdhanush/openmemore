@@ -1,0 +1,501 @@
+[
+ {
+  "title": "Flask rate limiting",
+  "create_time": 1790000000,
+  "update_time": 1790000600,
+  "mapping": {
+   "root": {
+    "id": "root",
+    "message": null,
+    "parent": null,
+    "children": [
+     "sys"
+    ]
+   },
+   "sys": {
+    "id": "sys",
+    "message": {
+     "id": "sys",
+     "author": {
+      "role": "system",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": null,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       ""
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {
+      "is_visually_hidden_from_conversation": true
+     },
+     "recipient": "all"
+    },
+    "parent": "root",
+    "children": [
+     "ctx"
+    ]
+   },
+   "ctx": {
+    "id": "ctx",
+    "message": {
+     "id": "ctx",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000000,
+     "update_time": null,
+     "content": {
+      "content_type": "user_editable_context",
+      "user_profile": "I'm a backend developer.",
+      "user_instructions": "Be terse."
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "sys",
+    "children": [
+     "u1"
+    ]
+   },
+   "u1": {
+    "id": "u1",
+    "message": {
+     "id": "u1",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000010,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "How do I rate-limit a Flask API?"
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "ctx",
+    "children": [
+     "a1-old",
+     "a1"
+    ]
+   },
+   "a1-old": {
+    "id": "a1-old",
+    "message": {
+     "id": "a1-old",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000020,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Regenerated away: use a global sleep."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "u1",
+    "children": []
+   },
+   "a1": {
+    "id": "a1",
+    "message": {
+     "id": "a1",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000030,
+     "update_time": null,
+     "content": {
+      "content_type": "code",
+      "language": "python",
+      "text": "import flask_limiter"
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "python"
+    },
+    "parent": "u1",
+    "children": [
+     "tool1"
+    ]
+   },
+   "tool1": {
+    "id": "tool1",
+    "message": {
+     "id": "tool1",
+     "author": {
+      "role": "tool",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000031,
+     "update_time": null,
+     "content": {
+      "content_type": "execution_output",
+      "text": "ok"
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "a1",
+    "children": [
+     "think"
+    ]
+   },
+   "think": {
+    "id": "think",
+    "message": {
+     "id": "think",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000032,
+     "update_time": null,
+     "content": {
+      "content_type": "thoughts",
+      "thoughts": [
+       {
+        "summary": "consider redis",
+        "content": "..."
+       }
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "tool1",
+    "children": [
+     "a2"
+    ]
+   },
+   "a2": {
+    "id": "a2",
+    "message": {
+     "id": "a2",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000040,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Use Flask-Limiter backed by Redis."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "think",
+    "children": [
+     "u2"
+    ]
+   },
+   "u2": {
+    "id": "u2",
+    "message": {
+     "id": "u2",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000300,
+     "update_time": null,
+     "content": {
+      "content_type": "multimodal_text",
+      "parts": [
+       {
+        "content_type": "image_asset_pointer",
+        "asset_pointer": "file-service://file-123",
+        "width": 512,
+        "height": 512
+       },
+       "What does this diagram show?"
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "a2",
+    "children": [
+     "a3"
+    ]
+   },
+   "a3": {
+    "id": "a3",
+    "message": {
+     "id": "a3",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790000310,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "It shows a token bucket refilling at 100 requests per minute."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "u2",
+    "children": []
+   }
+  },
+  "moderation_results": [],
+  "current_node": "a3",
+  "plugin_ids": null,
+  "conversation_id": "chatgpt-flask",
+  "conversation_template_id": null,
+  "gizmo_id": null,
+  "is_archived": false,
+  "safe_urls": [],
+  "default_model_slug": "gpt-4o",
+  "id": "chatgpt-flask"
+ },
+ {
+  "title": "",
+  "create_time": 1790001000,
+  "update_time": 1790001100,
+  "mapping": {
+   "r": {
+    "id": "r",
+    "message": null,
+    "parent": null,
+    "children": [
+     "q"
+    ]
+   },
+   "q": {
+    "id": "q",
+    "message": {
+     "id": "q",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790001000,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Name three orange cat breeds."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "r",
+    "children": [
+     "a"
+    ]
+   },
+   "a": {
+    "id": "a",
+    "message": {
+     "id": "a",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790001010,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Tabby, Maine Coon, British Shorthair."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "q",
+    "children": []
+   }
+  },
+  "current_node": null,
+  "conversation_id": "chatgpt-untitled",
+  "id": "chatgpt-untitled"
+ },
+ {
+  "title": "Empty",
+  "create_time": 1790002000,
+  "update_time": 1790002000,
+  "mapping": {
+   "r": {
+    "id": "r",
+    "message": null,
+    "parent": null,
+    "children": [
+     "s"
+    ]
+   },
+   "s": {
+    "id": "s",
+    "message": {
+     "id": "s",
+     "author": {
+      "role": "system",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": null,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       ""
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {
+      "is_visually_hidden_from_conversation": true
+     },
+     "recipient": "all"
+    },
+    "parent": "r",
+    "children": []
+   }
+  },
+  "current_node": "s",
+  "conversation_id": "chatgpt-empty",
+  "id": "chatgpt-empty"
+ },
+ {
+  "title": "Deploy key",
+  "create_time": 1790003000,
+  "update_time": 1790003010,
+  "mapping": {
+   "r": {
+    "id": "r",
+    "message": null,
+    "parent": null,
+    "children": [
+     "q"
+    ]
+   },
+   "q": {
+    "id": "q",
+    "message": {
+     "id": "q",
+     "author": {
+      "role": "user",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790003000,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "Why does ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 fail?"
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "r",
+    "children": [
+     "a"
+    ]
+   },
+   "a": {
+    "id": "a",
+    "message": {
+     "id": "a",
+     "author": {
+      "role": "assistant",
+      "name": null,
+      "metadata": {}
+     },
+     "create_time": 1790003010,
+     "update_time": null,
+     "content": {
+      "content_type": "text",
+      "parts": [
+       "That token was revoked."
+      ]
+     },
+     "status": "finished_successfully",
+     "end_turn": true,
+     "weight": 1.0,
+     "metadata": {},
+     "recipient": "all"
+    },
+    "parent": "q",
+    "children": []
+   }
+  },
+  "current_node": "a",
+  "conversation_id": "chatgpt-secret",
+  "id": "chatgpt-secret"
+ }
+]

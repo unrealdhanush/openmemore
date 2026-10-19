@@ -21,6 +21,7 @@ from openmcp.models import (
     CaptureFile,
     ChunkMatch,
     Conversation,
+    IngestJob,
     Kind,
     Memory,
     Message,
@@ -324,6 +325,16 @@ def upsert_conversation(conn: sqlite3.Connection, c: NewConversation) -> int:
     return row[0]
 
 
+def was_deleted(conn: sqlite3.Connection, provider: str, external_id: str) -> bool:
+    """Whether the user deleted this conversation (migration 009 keeps a record)."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM deleted_conversations WHERE provider = ? AND external_id = ?", (provider, external_id)
+        ).fetchone()
+        is not None
+    )
+
+
 def get_conversation(conn: sqlite3.Connection, conversation_id: int) -> Conversation | None:
     row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
     return _conversation(row) if row else None
@@ -557,6 +568,30 @@ def pending_embeddings(
     return [(r[0], r[1], r[2]) for r in conn.execute(sql, (limit,))]
 
 
+def conversation_ids(conn: sqlite3.Connection, provider: str, external_ids: Sequence[str]) -> list[int]:
+    """Stored ids for these external ids, in the order given (missing ones left out)."""
+    if not external_ids:
+        return []
+    clause, params = _in("external_id", list(external_ids))
+    found = dict(conn.execute(f"SELECT external_id, id FROM conversations WHERE provider = ? AND {clause}", [provider, *params]))
+    return [found[e] for e in external_ids if e in found]
+
+
+def pending_chunks_in(conn: sqlite3.Connection, conversation_ids: Sequence[int]) -> list[tuple[int, str]]:
+    """Chunks without a vector in these conversations, as (chunk id, text)."""
+    if not conversation_ids:
+        return []
+    clause, params = _in("msg.conversation_id", list(conversation_ids))
+    return [
+        (r[0], r[1])
+        for r in conn.execute(
+            f"SELECT c.id, c.text FROM chunks c JOIN messages msg ON msg.id = c.message_id "
+            f"WHERE c.embedded = 0 AND {clause} ORDER BY c.id",
+            params,
+        )
+    ]
+
+
 def count_pending_embeddings(conn: sqlite3.Connection) -> int:
     return conn.execute(
         "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0 AND superseded_by IS NULL)"
@@ -604,3 +639,64 @@ def save_capture_file(conn: sqlite3.Connection, f: CaptureFile) -> None:
             to_iso(f.captured_at),
         ),
     )
+
+
+# --- ingest_jobs ---------------------------------------------------------------------
+
+
+def _job(row: sqlite3.Row) -> IngestJob:
+    return IngestJob.model_validate(dict(row))
+
+
+def job_by_hash(conn: sqlite3.Connection, file_hash: str) -> IngestJob | None:
+    row = conn.execute("SELECT * FROM ingest_jobs WHERE file_hash = ?", (file_hash,)).fetchone()
+    return _job(row) if row else None
+
+
+def insert_job(conn: sqlite3.Connection, job: IngestJob) -> int:
+    return conn.execute(
+        "INSERT INTO ingest_jobs (provider, file_path, file_hash, status, total, processed, cursor, started_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            job.provider, job.file_path, job.file_hash, job.status, job.total, job.processed, job.cursor,
+            _iso_or_none(job.started_at),
+        ),
+    ).lastrowid
+
+
+def start_job(conn: sqlite3.Connection, job_id: int, *, file_path: str, total: int, now: datetime) -> None:
+    """Mark a job running (again): a resumed job keeps its cursor and its first start time."""
+    conn.execute(
+        "UPDATE ingest_jobs SET status = 'running', file_path = ?, total = ?, error = NULL, "
+        "started_at = COALESCE(started_at, ?), finished_at = NULL WHERE id = ?",
+        (file_path, total, to_iso(now), job_id),
+    )
+
+
+def advance_job(conn: sqlite3.Connection, job_id: int, processed: int) -> None:
+    """Record progress; called in the same transaction as the batch it describes."""
+    conn.execute("UPDATE ingest_jobs SET processed = ?, cursor = ? WHERE id = ?", (processed, str(processed), job_id))
+
+
+def finish_job(conn: sqlite3.Connection, job_id: int, status: str, now: datetime, error: str | None = None) -> None:
+    conn.execute(
+        "UPDATE ingest_jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+        (status, error, to_iso(now), job_id),
+    )
+
+
+def list_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[IngestJob]:
+    """Most recently started first."""
+    rows = conn.execute("SELECT * FROM ingest_jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [_job(r) for r in rows]
+
+
+def store_counts(conn: sqlite3.Connection) -> dict[str, object]:
+    """What's stored, for `openmcp status`."""
+    by_provider = dict(conn.execute("SELECT provider, COUNT(*) FROM conversations GROUP BY provider ORDER BY provider"))
+    return {
+        "memories": conn.execute("SELECT COUNT(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0],
+        "conversations": by_provider,
+        "messages": conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
+        "pending_embeddings": count_pending_embeddings(conn),
+    }

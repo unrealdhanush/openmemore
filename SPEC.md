@@ -73,7 +73,7 @@ Key consequences:
 ~/.openmcp/
   openmcp.db         # SQLite database
   config.toml        # clients + scopes
-  imports/           # copies of imported export zips (optional, user can delete)
+  imports/           # reserved; exports are read where they are, not copied
   logs/
 ```
 
@@ -158,11 +158,11 @@ openmcp/
       vscode_copilot.py # VS Code Copilot Chat session parser
     embed.py            # fastembed wrapper, lazy-loaded; embeds pending rows
     ingest/
-      jobs.py           # job table, resumable runner
-      normalize.py      # common conversation/message schema
+      __init__.py       # store_conversation: shared by imports and transcript capture
+      jobs.py           # job table, resumable runner (store, then embed newest first)
       chatgpt.py        # ChatGPT export parser
       claude.py         # Claude export parser
-      detect.py         # auto-detect provider from zip contents
+      detect.py         # open a zip/json/folder, auto-detect the provider from its contents
     audit.py
   scripts/
     benchmark.py        # performance budget check (Section 4.3)
@@ -269,6 +269,14 @@ CREATE TABLE capture_files (
   conversation_id  INTEGER,
   ignored          INTEGER NOT NULL DEFAULT 0,   -- set when the user deletes the conversation: never re-captured
   captured_at      TEXT NOT NULL
+);
+
+-- Conversations the user deleted, by source id, so a later export or capture doesn't bring them back
+CREATE TABLE deleted_conversations (
+  provider     TEXT NOT NULL,
+  external_id  TEXT NOT NULL,
+  deleted_at   TEXT NOT NULL,
+  PRIMARY KEY (provider, external_id)
 );
 
 CREATE TABLE schema_version (version INTEGER NOT NULL);
@@ -509,10 +517,11 @@ openmcp status                                     # job progress, counts
 ### Pipeline
 1. **Detect** provider from the zip's contents (`detect.py`).
 2. **Hash** the file. If a `done` job has this hash, exit early.
-3. **Parse** with the provider adapter into the normalized schema (`normalize.py`).
-4. **Order newest-first** by conversation `updated_at`. Recent history becomes searchable within minutes; older history fills in later.
-5. **Batch** (e.g., 50 conversations per transaction). Insert conversations, messages, and chunks; embed chunks; update FTS. Commit, then advance `cursor` and `processed`.
-6. **Resume**: if interrupted, re-running `openmcp import` on the same file continues from `cursor`.
+3. **Parse** with the provider adapter into the normalized schema (`ParsedConversation`, shared with transcript capture), one conversation at a time.
+4. **Order newest-first** by conversation `updated_at`. Recent history becomes searchable first.
+5. **Store**, 50 conversations per transaction: conversations, messages, and chunks (indexed for keyword search), through the same store as capture (secrets redacted, messages upserted by the provider's ids). The job's `cursor` and `processed` advance in the same transaction. Storing runs at ~10k messages a second, so a whole export is keyword-searchable within seconds.
+6. **Embed**, newest conversations first, after everything is stored. With bge-small this runs at ~70 messages a second on a laptop (a 1,000-conversation, 10,000-message export: ~1s to store, ~2 min to embed). Embedding inside each batch instead held the oldest conversations back from keyword search for as long as embedding everything took. If this phase is interrupted, `openmcp embed` finishes it.
+7. **Resume**: if interrupted while storing, re-running `openmcp import` on the same file continues from `cursor`. A newer export of the same account adds only what's new. Conversations the user deleted are not imported again (`deleted_conversations`).
 
 Imports store **conversations and messages only**. They do not auto-create memories in v1; distilling memories from history is consolidation ("Later").
 
@@ -563,12 +572,28 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
 - Job table, ChatGPT and Claude adapters, auto-detect, newest-first batching, resume.
 - `openmcp import`, `openmcp status` with a `rich` progress bar.
 - Imported conversations are searchable and listable alongside captured ones (same tables, same tools).
-- **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates.
+- Parsers: ChatGPT (follows `current_node` to the root, so abandoned branches are left out; skips system and tool messages, hidden scaffolding, tool calls, custom instructions, reasoning, and images) and Claude (text blocks; tool use and results skipped). Unknown shapes are skipped, and a conversation that fails to parse is reported, not fatal.
+- **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates. Both are tested: after the first batch, a second connection finds the newest conversation and not the oldest; an import killed after 150 conversations resumes at 150 and ends with exactly 500 conversations and 2,000 messages. Still to do by hand: check the parsers against a real export of each provider (kept out of the repo), since the formats are undocumented.
+
+### M3.5 — Any MCP client
+**Goal: OpenMCP works with every MCP client and every assistant provider, not a fixed list.** Claude Desktop, VS Code, and Claude Code are the first entries in a registry, not the design. Setup so far is code per client (config file, instruction location, transcript format), which works for three clients and not for the hundreds that speak MCP. Only capture really needs per-client code. Three tiers:
+- **Tier 0, any MCP client, no client-specific code.** One identical server snippet, server instructions and tool descriptions to drive the model, `record_exchange` for capture. The long tail lives here, so it must work fully, not as a degraded mode.
+- **Tier 1, popular clients, configured automatically** from a declarative registry rather than a function per client: config path per OS, the key the server entry goes under (`mcpServers`, `servers`, ...), the entry's shape, where the standing instruction goes (a file or setting setup can write, or paste via clipboard), and the client's MCP `clientInfo.name`. An entry is marked supported only after it's checked on a real install. Candidates: Claude Desktop, VS Code, Claude Code, Cursor, Windsurf, Gemini CLI, Zed, Cline.
+- **Tier 2, a few top clients, transcript capture** through the existing adapter interface (a file finder plus a parser), documented so adapters can be contributed.
+
+History from any provider, not just ChatGPT and Claude, works the same way: export importers (M3) and transcript readers (M1.5) become registries of adapters that all produce `ParsedConversation`, with detection by contents. Adding a provider (Gemini via Google Takeout, Cursor, Perplexity, Copilot, ...) means adding an adapter and synthetic fixtures modeled on a real export or transcript, not changing the core.
+
+Work:
+- **Client identity from `clientInfo`.** `--client` becomes optional: the server names the client from what the application reports when the session starts (`claude-ai` → `claude-desktop`, `Visual Studio Code` → `vscode-copilot`, unknown apps by their own name), and `[clients.<name>]` scopes apply to that. This is what lets one snippet work everywhere, and it removes the failure where one app's config entry is started by another (VS Code discovery). `--client` remains an explicit override.
+- **Registry-driven `openmcp setup`**, with the generic snippet plus the pointer instruction (copied to the clipboard) for any client not in the registry.
+- **One-click installs** where a client offers them (e.g. installable extension bundles, install links), each verified on a current version before relying on it.
+- Web-only assistants (ChatGPT, claude.ai, Gemini on the web) can't start a local server: they're reachable through exports (M3) or remote access (Section 12). Documented, not hidden.
+- **Done when:** a client with no registry entry and no `--client` (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; at least four registry clients, Cursor among them, are set up automatically and verified; importers and transcript readers are registries, with a third provider's importer added through the registry alone; existing setups keep working.
 
 ### M4 — Scopes and ownership
 - Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
 - `openmcp export` dumps all memories and conversations to JSON.
-- README: install, per-client config snippets, the safety model, honest limitations.
+- README: install, client setup (from the M3.5 registry, plus the generic path), the safety model, honest limitations.
 - **Done when:** a `cursor` client scoped to `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 
 ### v1 success test
@@ -582,10 +607,9 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - **Drift detection**: notice when recent behavior contradicts stored preferences, lower confidence, and ask instead of assuming.
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
 - **Review UI**: small local web page to browse, edit, and approve memories.
-- **More importers**: Gemini (Google Takeout), others.
+- **More importers and capture sources** beyond the M3.5 registries' first entries, each checked against a real export or install; client hooks where they exist, for capture without waiting for the next read.
 - **Vector compression**, when stores grow well past 100k chunks (the exact scan is ~60ms there). sqlite-vec stores only float32, int8, and bit vectors, so TurboQuant or PolarQuant as published would need a custom scan outside SQLite; their core idea (a fixed random rotation, so one calibrated quantizer fits every coordinate) can be applied to sqlite-vec's int8 storage. Its built-in `vec_quantize_int8(v, 'unit')` wastes most of the range on bge vectors (coordinates ≈ ±0.05) and kept only 82% of the true top 10 in a test.
 - **A stronger embedding model**, if bge-small's misses matter in practice (Section 14).
-- **More capture sources**: Cursor and others that keep local transcripts (verify each format on a real install first); client hooks where they exist, for capture without waiting for the next read.
 - **Per-user evals**: auto-generated tests checking whether stored context actually improves answers.
 
 ---
@@ -602,7 +626,7 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - Should `get_profile` be called automatically at session start, or left to the model? (Depends on client support for resources versus tools.)
 - ~~What's the right near-duplicate threshold?~~ 0.92 with bge-small: rewordings score 0.97–0.995, different facts 0.73–0.84 ("allergic to peanuts" vs "shellfish": 0.84), but true paraphrases sit right on the line ("Allergic to peanuts." vs "Has a peanut allergy.": 0.920). Revisit on real data.
 - Search similarity cutoffs (0.55 floor, 0.08 window) come from a 20-question synthetic set: 18/20 paraphrases found, ~1 unrelated item per query. bge-small misses some paraphrases entirely: "how was I planning to deal with the fitness app throttling me" ranks the Strava 429 memory 11th (similarity 0.48). A test records this as an expected failure, so a better model shows up as a test to update.
-- Should imported chats ever be readable by default, or opt-in per scope?
+- ~~Should imported chats ever be readable by default, or opt-in per scope?~~ They go to the default write scope, or `--scope`; which clients can read them follows that scope's config like everything else.
 - ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
 - Recaps recorded through `record_exchange` despite the instructions aren't marked (Section 7.2). Telling a recap from new content by what it says (does the answer mostly restate what the lookup returned?) may work where timing didn't. The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

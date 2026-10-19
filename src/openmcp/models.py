@@ -36,6 +36,10 @@ VectorTable = Literal["memories", "chunks"]
 """Tables whose rows get embeddings (SPEC.md M2); each has a `<table>_vec` companion."""
 VECTOR_TABLES: tuple[VectorTable, ...] = ("memories", "chunks")
 
+ExportProvider = Literal["chatgpt", "claude"]
+"""Providers whose data exports `openmcp import` reads (SPEC.md M3)."""
+JobStatus = Literal["queued", "running", "done", "failed"]
+
 CaptureSource = Literal["claude-code", "vscode-copilot"]
 """Clients whose transcripts OpenMCP can read from disk (SPEC.md M1.5). Each name is
 also the client name it connects with, and the `provider` of what it captures."""
@@ -171,6 +175,24 @@ class CaptureFile(BaseModel):
     ignored: bool = False
     """The user deleted the conversation, so changes to the file are no longer captured."""
     captured_at: AwareDatetime
+
+
+class IngestJob(BaseModel):
+    """A row of `ingest_jobs`: one export file being imported, resumable from `cursor`."""
+
+    id: int | None = None
+    provider: ExportProvider
+    file_path: str
+    file_hash: str
+    """sha256 of the file: importing the same file again is a no-op once it's done."""
+    status: JobStatus
+    total: int | None = None
+    processed: int = 0
+    cursor: str | None = None
+    """Where to resume: how many conversations (newest first) are stored."""
+    error: str | None = None
+    started_at: AwareDatetime | None = None
+    finished_at: AwareDatetime | None = None
 
 
 # --- Conversations read from transcripts ---------------------------------------------
@@ -394,6 +416,14 @@ class AuditFilter(BaseModel):
     client: str | None = None
     tool: str | None = None
     limit: int = Field(default=50, ge=1, le=10_000)
+
+
+class ImportRequest(BaseModel):
+    """Options for `openmcp import`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: Scope | None = None
 
 
 class CaptureRequest(BaseModel):
