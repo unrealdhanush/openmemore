@@ -593,10 +593,12 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
   - **Scope audit:** `tests/test_scopes.py` has one app write `personal` data through every write path (memories, recorded chats, vectors). A work-only client then tries every read and write path. It sees and changes none of it: search by keyword and by meaning, profile and its resource, recent conversations, update, forget, appending to a chat, writing into `personal`, near-duplicate reports. Errors for out-of-scope ids are identical to errors for ids that don't exist. Imports take an explicit scope (or an export's own), and capture uses the scope of the app it belongs to. The CLI acts as the owner and sees every scope.
   - **`openmcp export`:** it writes the `openmcp.export` format (memories with their history, conversations, scopes, recall flags; the file is readable only by the user). `openmcp import` reads it back with scopes kept, unless `--scope` overrides. A round trip into an empty store restores everything current; importing into the same store adds nothing; imported memories go through the secret filter.
   - **README:** rewritten.
-  - **Remaining:** the v1 success test, by hand.
+  - **v1 success test: passed (2026-10-19)**, below. **M4 and v1 are done.**
 
 ### v1 success test
 Start a project in Claude Desktop and work on it over a few exchanges. The next day, open a different client (Cursor or Gemini CLI) and continue the project **without re-explaining anything**, including picking up the questions you asked and the answers you got.
+
+**Result (2026-10-19), passed.** Two exchanges in Claude Desktop planned a project: three ideas, then architecture diagrams for two of them. In Cursor, a new chat referred to the project by one of its details rather than its name. Without being told where to look, Cursor called `get_profile`, `recent_conversations` and `search_context`, then opened Claude's conversation in full. It answered with both ideas, the trade-off between them and the agreed next step, and recorded its own exchange for Claude to see. Both chats happened the same day rather than a day apart; the cross-client path is the same. One gap was found and fixed: `get_profile` had matched project names exactly, and the model's guess returned an empty profile (it now matches loosely, and lists the projects there are when nothing matches).
 
 ---
 
@@ -623,7 +625,10 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 
 - [ ] Get employer approval for publishing open source work in this area. Keep the repo private until then.
 - [ ] Pick a final name and check package-registry and GitHub availability.
-- [ ] Confirm no real personal data exists anywhere in the git history.
+- [ ] Confirm no real personal data exists anywhere in the git history. **Scanned 2026-10-19** (all 38 commits, 248 file versions, commit messages, PR texts): file contents hold only synthetic data, now that the test data in commit 315a64b is replaced. Still to do before publishing:
+  - commit 315a64b's message names a real project from a live test: rewrite or squash the history;
+  - most commits carry a personal email address as author: rewrite them to a GitHub noreply address;
+  - rescan after the rewrite.
 - [ ] Choose a license (MIT or Apache-2.0 are the usual picks).
 
 ## 14. Open questions

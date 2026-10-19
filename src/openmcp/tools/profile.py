@@ -23,12 +23,12 @@ def _item(m: Memory) -> ProfileItem:
 
 
 MIN_PARTIAL = 3
-"""Shortest name matched as part of another ('hackathon' in 'Open Agent Hackathon 2026')."""
+"""Shortest name matched as part of another ('renovation' in 'Kitchen Renovation 2026')."""
 
 
 def match_projects(asked: str, labels: list[str]) -> list[str]:
-    """The stored project labels a model's `project` means. Models guess the name ('zetaris',
-    'hackathon', 'openmcp'), so: the same name ignoring case; otherwise labels containing
+    """The stored project labels a model's `project` means. Models guess the name ('cabinets',
+    'renovation', 'openmcp'), so: the same name ignoring case; otherwise labels containing
     it, or contained in it."""
     key = asked.casefold().strip()
     same = [label for label in labels if label.casefold() == key]
