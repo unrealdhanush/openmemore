@@ -125,7 +125,8 @@ class Memory:
     # --- reading --------------------------------------------------------------------
 
     def search(self, query: str, *, limit: int = 10, kinds: Sequence[Kind] = (), project: str | None = None,
-               chats: bool = True, mode: str = "current", as_of: Any = None) -> list[Hit]:
+               chats: bool = True, mode: str = "current", as_of: Any = None,
+               budget_tokens: int | None = None) -> list[Hit]:
         """Memories and conversations related to `query`, by meaning and by words. `mode`
         "history" includes earlier versions and ended memories; `as_of` ("2024-03", a date)
         gives what was true then."""
@@ -135,7 +136,7 @@ class Memory:
         with self._call("search_context") as (conn, call, caller):
             call.summary = f"q={query[:60]!r}"
             result = search_context(conn, caller, query, kinds, project, chats, limit, mode=mode,
-                                    as_of=_moment(as_of))
+                                    as_of=_moment(as_of), budget_tokens=budget_tokens)
             call.result_count = len(result.results)
         return [
             Hit(type=h.type, id=h.id, text=unwrap(h.content), wrapped=h.content, source=h.source, score=h.score,
@@ -145,12 +146,12 @@ class Memory:
             for h in result.results
         ]
 
-    def profile(self, project: str | None = None) -> Profile:
+    def profile(self, project: str | None = None, *, budget_tokens: int | None = None) -> Profile:
         """Preferences, facts, active projects, and recent decisions (wrapped)."""
         from openmcp.tools.profile import get_profile
 
         with self._call("get_profile") as (conn, call, caller):
-            result = get_profile(conn, caller, project)
+            result = get_profile(conn, caller, project, budget_tokens)
             call.result_count = sum(len(g) for g in (result.preferences, result.facts, result.active_projects,
                                                      result.recent_decisions))
         return result
@@ -163,13 +164,19 @@ class Memory:
             call.result_count = len(result.conversations)
         return result
 
-    def context(self, query: str, *, limit: int = 5, kinds: Sequence[Kind] = (), profile: bool = False) -> str:
+    def context(self, query: str, *, limit: int = 5, kinds: Sequence[Kind] = (), profile: bool = False,
+                budget_tokens: int | None = None) -> str:
         """A block to put in a prompt: the stored-data notice, then related items, each
-        wrapped. Empty if nothing is related."""
-        items = [h.wrapped for h in self.search(query, limit=limit, kinds=kinds)]
+        wrapped, within `budget_tokens` (estimated) if given: the profile gets up to a
+        third of it. Empty if nothing is related."""
+        search_budget = budget_tokens
+        items: list[str] = []
         if profile:
-            p = self.profile()
-            items = [i.content for g in (p.preferences, p.facts, p.active_projects, p.recent_decisions) for i in g] + items
+            p = self.profile(budget_tokens=budget_tokens // 3 if budget_tokens else None)
+            items = [i.content for g in (p.preferences, p.facts, p.active_projects, p.recent_decisions) for i in g]
+            if budget_tokens:
+                search_budget = max(0, budget_tokens - (p.tokens_used or 0))
+        items += [h.wrapped for h in self.search(query, limit=limit, kinds=kinds, budget_tokens=search_budget)]
         return "\n".join([NOTICE, *items]) if items else ""
 
     # --- writing --------------------------------------------------------------------

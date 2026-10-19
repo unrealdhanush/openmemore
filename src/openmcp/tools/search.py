@@ -7,11 +7,12 @@ boost. Without the embedding model, the vector lists are simply missing.
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from openmcp import embed, relations, repo
@@ -200,6 +201,8 @@ class _Fused:
     """0 for memories (distilled, durable), 1 for chats: memories win ties."""
     best_rank: int
     item: Memory | ChunkMatch
+    signals: dict[str, float] = field(default_factory=dict)
+    """What made the score, for `explain`."""
 
 
 def search_context(
@@ -213,11 +216,14 @@ def search_context(
     now: datetime | None = None,
     mode: str = "current",
     as_of: datetime | None = None,
+    explain: bool = False,
+    budget_tokens: int | None = None,
 ) -> SearchResult:
     """`mode="current"` sees current memories only; `"history"` every version, labelled;
     `as_of` the memories true at that moment (implies history). `now` is the moment
     recency and status are measured from (default: the current time); evaluation passes
-    a question's date."""
+    a question's date. `explain` adds what made each result's score; `budget_tokens`
+    keeps the results, in rank order, within an estimated token count."""
     history = mode == "history" or as_of is not None
     now = now or datetime.now(UTC)
     read = caller.scopes.read_scopes
@@ -228,15 +234,16 @@ def search_context(
     embedder = embed.get_embedder()
     vector = embedder.query(query) if embedder is not None else None
 
-    memory_lists: list[list[Memory]] = []
-    chunk_lists: list[list[ChunkMatch]] = []
+    memory_lists: list[tuple[str, list[Memory]]] = []
+    chunk_lists: list[tuple[str, list[ChunkMatch]]] = []
     if match is not None:
-        memory_lists.append(
-            [m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit,
-                                                history=history, as_of=as_of)]
-        )
+        memory_lists.append(("memory_keyword", [
+            m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit,
+                                               history=history, as_of=as_of)
+        ]))
         if include_chats and (chunk_match := chunk_keyword_query(conn, words)):
-            chunk_lists.append(later_turns_first(repo.search_chunks(conn, chunk_match, scopes=read, limit=limit)))
+            chunk_lists.append(("chat_keyword", later_turns_first(
+                repo.search_chunks(conn, chunk_match, scopes=read, limit=limit))))
     if vector is not None:
         k = limit * VECTOR_CANDIDATES_PER_RESULT
         near_memories, near_chunks = similar_enough(
@@ -244,25 +251,30 @@ def search_context(
                               as_of=as_of),
             repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else [],
         )
-        memory_lists.append([m for m, _ in near_memories[:limit]])
+        memory_lists.append(("memory_meaning", [m for m, _ in near_memories[:limit]]))
         if include_chats:
-            chunk_lists.append(later_turns_first(near_chunks[:limit]))
+            chunk_lists.append(("chat_meaning", later_turns_first(near_chunks[:limit])))
 
     # Each list contributes 1 / (RRF_K + rank) to every item in it.
     fused: dict[tuple[str, int], _Fused] = {}
     for kind_order, lists in ((0, memory_lists), (1, chunk_lists)):
-        for ranked in lists:
+        for label, ranked in lists:
             for rank, item in enumerate(ranked, start=1):
                 key = ("memory", item.id) if isinstance(item, Memory) else ("chat", item.chunk_id)
                 entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
                 entry.score += 1 / (RRF_K + rank)
                 entry.best_rank = min(entry.best_rank, rank)
+                entry.signals[f"{label}_rank"] = rank
     for entry in fused.values():
         item = entry.item
-        entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+        entry.signals["fusion"] = entry.score
+        entry.signals["recency"] = recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+        entry.score += entry.signals["recency"]
         if isinstance(item, Memory):
-            entry.score += confidence_boost(item.confidence)
+            entry.signals["confidence"] = confidence_boost(item.confidence)
+            entry.score += entry.signals["confidence"]
         if isinstance(item, ChunkMatch) and item.recall:
+            entry.signals["recap_weight"] = RECALL_WEIGHT
             entry.score *= RECALL_WEIGHT
 
     ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
@@ -271,5 +283,35 @@ def search_context(
         _memory_hit(e.item, e.score, now, e.item.id in disputed) if isinstance(e.item, Memory)
         else _chat_hit(e.item, e.score) for e in ranked
     ]
+    if explain:
+        for hit, entry in zip(hits, ranked):
+            hit.explain = {k: round(v, 6) if isinstance(v, float) else v for k, v in entry.signals.items()}
+    dropped, tokens = 0, None
+    if budget_tokens is not None:
+        hits, tokens, dropped = within_budget(hits, budget_tokens)
     has_chats = any(h.type == "chat" for h in hits)
-    return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)
+    return SearchResult(
+        note=CHAT_ORDER_NOTE if has_chats else None, results=hits, tokens_used=tokens, dropped=dropped,
+        trace={
+            "mode": "history" if history else "current", "as_of": as_of.isoformat() if as_of else None,
+            "words": words, "meaning_search": vector is not None,
+            "candidates": {label: len(items) for label, items in [*memory_lists, *chunk_lists]},
+        } if explain else None,
+    )
+
+
+def estimate_tokens(text: str) -> int:
+    """Roughly how many tokens a model will count: about four characters each."""
+    return max(1, math.ceil(len(text) / 4))
+
+
+def within_budget(hits: list[SearchHit], budget: int) -> tuple[list[SearchHit], int, int]:
+    """The hits, in rank order, that fit `budget` estimated tokens (one that doesn't fit is
+    skipped, and smaller ones after it may still fit): (kept, tokens used, dropped)."""
+    kept, used = [], 0
+    for hit in hits:
+        cost = estimate_tokens(hit.content)
+        if used + cost <= budget:
+            kept.append(hit)
+            used += cost
+    return kept, used, len(hits) - len(kept)

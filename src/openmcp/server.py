@@ -228,6 +228,13 @@ def build_server(base: Path) -> MCPServer:
             Moment | None,
             Field(description="What was true at this time (an ISO date such as 2024-03); implies history."),
         ] = None,
+        explain: Annotated[
+            bool, Field(description="Also say what made each result's score (which searches found it, where).")
+        ] = False,
+        budget_tokens: Annotated[
+            int | None,
+            Field(ge=50, le=100_000, description="Keep the results within about this many tokens, best first."),
+        ] = None,
     ) -> SearchResult:
         """Search the user's shared memory for something specific: a preference, a fact, a
         project's state, a past decision, or something they asked any of their assistants
@@ -251,7 +258,8 @@ def build_server(base: Path) -> MCPServer:
             if note := refresh_transcripts(conn):
                 call.summary += f", {note}"
             result = search_tools.search_context(
-                conn, caller, query, kinds or (), project, include_chats, limit, mode=mode, as_of=as_of
+                conn, caller, query, kinds or (), project, include_chats, limit, mode=mode, as_of=as_of,
+                explain=explain, budget_tokens=budget_tokens,
             )
             call.result_count = len(result.results)
             return result
@@ -262,6 +270,10 @@ def build_server(base: Path) -> MCPServer:
         project: Annotated[
             Label | None,
             Field(description="Include this project's memories alongside the user's general ones."),
+        ] = None,
+        budget_tokens: Annotated[
+            int | None,
+            Field(ge=50, le=100_000, description="Keep the profile within about this many tokens."),
         ] = None,
     ) -> Profile:
         """Load what the user's AI assistants already know about them: preferences, facts,
@@ -274,7 +286,7 @@ def build_server(base: Path) -> MCPServer:
         """
         with tool_call("get_profile", ctx) as (conn, call, caller):
             call.summary = f"project={project!r}" if project else None
-            result = profile_tools.get_profile(conn, caller, project)
+            result = profile_tools.get_profile(conn, caller, project, budget_tokens)
             call.result_count = sum(
                 len(g) for g in (result.preferences, result.facts, result.active_projects, result.recent_decisions)
             )

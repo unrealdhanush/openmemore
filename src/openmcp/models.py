@@ -425,6 +425,9 @@ class SearchHit(BaseModel):
     """For memories: when it was true; valid_to None while it still is."""
     confidence: float | None = None
     """For memories: how sure (0.6 when stated once; confirmations raise it)."""
+    explain: dict[str, Any] | None = None
+    """With explain: the lists that found it and at what rank (memory/chat, keyword/meaning),
+    the fused score, and the recency, confidence, and recap adjustments."""
     """A recap of earlier conversations, ranked below them: prefer the original it points to."""
 
 
@@ -432,6 +435,12 @@ class SearchResult(ReadResult):
     note: str | None = None
     """CHAT_ORDER_NOTE when the results include chat messages."""
     results: list[SearchHit] = Field(default_factory=list)
+    tokens_used: int | None = None
+    """With budget_tokens: the estimated tokens of the results kept."""
+    dropped: int = 0
+    """With budget_tokens: results left out to stay within it."""
+    trace: dict[str, Any] | None = None
+    """With explain: the mode, the query words, and how many candidates each list found."""
 
 
 class ProfileItem(BaseModel):
@@ -453,6 +462,10 @@ class Profile(ReadResult):
     recent_decisions: list[ProfileItem] = Field(default_factory=list)
     unresolved_conflicts: int = 0
     """Memories that disagree, waiting for the user in `openmcp review`; left out above."""
+    tokens_used: int | None = None
+    """With budget_tokens: the estimated tokens of the items kept."""
+    dropped: int = 0
+    """With budget_tokens: items left out to stay within it."""
     project_note: str | None = None
     """When `project` was asked for: which stored project it was taken to mean, or that
     none matched (then the profile is unfiltered)."""
