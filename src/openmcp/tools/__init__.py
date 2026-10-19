@@ -18,10 +18,12 @@ class Caller:
     scopes: ClientScopes
 
     def can_read(self, scope: str) -> bool:
-        return scope in self.scopes.read_scopes
+        return self.scopes.read_scopes is None or scope in self.scopes.read_scopes
 
     def can_write(self, scope: str) -> bool:
-        return scope == self.scopes.write_scope
+        """New items go to write_scope; with ignore_scopes (read_scopes None), existing
+        items in any scope can be changed too."""
+        return self.scopes.read_scopes is None or scope == self.scopes.write_scope
 
 
 def require_writable(caller: Caller, memory: Memory | None, memory_id: int) -> Memory:

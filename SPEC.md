@@ -449,6 +449,8 @@ This doesn't make injection impossible. It makes it visible and harder. Say so h
 `config.toml`, created by `openmcp init`, starts with only `[defaults]` and a commented example:
 
 ```toml
+ignore_scopes = false
+
 [defaults]
 read_scopes = ["personal"]
 write_scope = "personal"
@@ -459,7 +461,8 @@ write_scope = "personal"
 ```
 
 - Clients without a `[clients.<name>]` table use `[defaults]`.
-- Scopes are free-form strings; `personal` and `work` are just the starting set.
+- Scopes are labels on every memory and conversation; free-form strings, `personal` and `work` are just the starting set. They let an assistant be kept away from part of the user's data.
+- `ignore_scopes = true` (top level; off by default) turns that off: every client reads every scope and can change items in any scope. New items still get the client's `write_scope` as their label, so separation can be turned back on later. `ping` reports `read_scopes: null`, and `openmcp clients` shows "all".
 - A client configured to read only `work` can't read what others write to `personal`. That's the isolation working as designed; the cross-assistant tests (M1, v1) need clients that share a scope.
 
 `[capture]` (M1.5) lists the transcript readers in use; it starts empty:

@@ -13,14 +13,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from openmcp.models import CaptureSource, Scope
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "ignore_scopes": False,
     "defaults": {"read_scopes": ["personal"], "write_scope": "personal"},
     "capture": {"sources": [], "days": 30},
 }
 
 CONFIG_HEADER = """\
-# OpenMCP configuration. A client is named by what its application reports when it
-# connects ('Some Editor 2' -> some-editor-2); `openmcp clients` lists the ones that
-# have connected. Clients without a [clients.<name>] table use [defaults]. For example:
+# OpenMCP configuration.
+#
+# Scopes are labels on every memory and conversation (e.g. personal, work). Each client
+# reads some and writes one, so an assistant can be kept away from part of your data.
+# Set ignore_scopes = true to share everything with every client: scopes stay as labels
+# but nothing is hidden or locked.
+#
+# A client is named by what its application reports when it connects ('Some Editor 2'
+# -> some-editor-2); `openmcp clients` lists the ones that have connected. Clients
+# without a [clients.<name>] table use [defaults]. For example:
 #
 #   [clients.cursor-vscode]
 #   read_scopes = ["work", "personal"]
@@ -34,8 +42,10 @@ class ClientScopes(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    read_scopes: tuple[Scope, ...]
+    read_scopes: tuple[Scope, ...] | None
+    """None: every scope (ignore_scopes), and existing items in any scope can be changed."""
     write_scope: Scope
+    """The label new items get."""
 
 
 class ClientOverride(BaseModel):
@@ -63,6 +73,9 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    ignore_scopes: bool = False
+    """Share everything with every client: scopes stay as labels on new items, but every
+    client reads and changes items in any scope."""
     defaults: ClientScopes = ClientScopes(read_scopes=("personal",), write_scope="personal")
     clients: dict[str, ClientOverride] = Field(default_factory=dict)
     capture: CaptureConfig = CaptureConfig()
@@ -116,7 +129,11 @@ def enable_capture(path: Path, source: CaptureSource) -> bool:
 def resolve_client(config: Config, client: str) -> ClientScopes:
     """Scopes for a client name; unknown clients (or missing keys) fall back to [defaults]."""
     override = config.clients.get(client, ClientOverride())
+    if config.ignore_scopes:
+        read_scopes = None
+    else:
+        read_scopes = override.read_scopes if override.read_scopes is not None else config.defaults.read_scopes
     return ClientScopes(
-        read_scopes=override.read_scopes if override.read_scopes is not None else config.defaults.read_scopes,
+        read_scopes=read_scopes,
         write_scope=override.write_scope if override.write_scope is not None else config.defaults.write_scope,
     )
