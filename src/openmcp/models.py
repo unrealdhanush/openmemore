@@ -311,11 +311,13 @@ class ForgetResult(BaseModel):
 
 
 class RecordExchangeResult(BaseModel):
-    conversation_id: int
-    """Pass this back on later record_exchange calls in the same chat."""
-    message_ids: list[int]
+    conversation_id: int | None
+    """Pass this back on later record_exchange calls in the same chat (None if not stored)."""
+    message_ids: list[int] = Field(default_factory=list)
     redacted: list[str] = Field(default_factory=list)
     """Why parts of the exchange were replaced with [REDACTED], if any were."""
+    note: str | None = None
+    """Why nothing was stored, when nothing was."""
 
 
 class SearchHit(BaseModel):

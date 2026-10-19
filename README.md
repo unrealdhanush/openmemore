@@ -18,8 +18,8 @@ Python builds disable.
 uv sync
 uv run openmcp init                       # creates ~/.openmcp (override with OPENMCP_HOME)
 uv run openmcp serve --client my-client   # MCP server over stdio
-uv run openmcp clients                    # clients setup knows; any other MCP client works too
-uv run openmcp setup claude-desktop       # connect a client; --dry-run first; an unknown name prints a generic snippet
+uv run openmcp setup [client]             # connect any MCP client (vscode-copilot, cursor, claude-code use their own installers)
+uv run openmcp clients                    # the MCP clients that have connected, and their scopes
 uv run openmcp capture                    # catch up on transcripts of clients with capture on
 uv run openmcp embed                      # download the embedding model (once) and embed what's pending
 uv run openmcp import ~/Downloads/export.zip  # a ChatGPT or Claude data export; resumable

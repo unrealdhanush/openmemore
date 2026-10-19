@@ -100,21 +100,24 @@ def _client_name(value: str, option: str) -> str:
 
 @app.command()
 def setup(
-    client: str = typer.Argument(
-        ..., help="A client from `openmcp clients`, or any other MCP client's name (it gets the generic snippet)."
+    client: str | None = typer.Argument(
+        None,
+        help="The client: vscode-copilot, cursor, or claude-code use the app's own install command; "
+        "any other name (or none) gets the snippet that works in every MCP client.",
+    ),
+    config_file: Path | None = typer.Option(
+        None, "--config", help="Merge the server into this JSON config file (its mcpServers; keeps a .bak copy)."
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the steps without changing anything."),
-    try_unverified: bool = typer.Option(
-        False, "--try", help="Write files for a client whose entry isn't verified on a real install yet (keeps .bak copies)."
-    ),
     dev: bool = typer.Option(
         False, "--dev", help="Register this development checkout itself: the app then runs whatever branch is checked out."
     ),
 ) -> None:
-    """Connect an AI assistant to OpenMCP and install the standing instruction it needs."""
+    """Connect an MCP client to OpenMCP and put the standing instruction on your clipboard."""
     from openmcp import setup as client_setup
 
-    client = _client_name(client, "CLIENT")
+    if client is not None:
+        client = _client_name(client, "CLIENT")
     checkout = client_setup.development_checkout()
     if checkout is not None and not dev:
         # Registering this checkout would make the app run whatever branch is checked out,
@@ -133,7 +136,8 @@ def setup(
             f"{installed[0]} instead, so the app and your data don't follow your branches. "
             "(--dev registers the checkout.)"
         )
-        args = [*installed, "setup", client, *(["--dry-run"] if dry_run else []), *(["--try"] if try_unverified else [])]
+        args = [*installed, "setup", *([client] if client else []),
+                *(["--config", str(config_file)] if config_file else []), *(["--dry-run"] if dry_run else [])]
         raise typer.Exit(subprocess.run(args).returncode)
     base = config.home()
     initialize(base)
@@ -141,7 +145,7 @@ def setup(
         base=base, user_home=Path.home(), platform=sys.platform, command=client_setup.openmcp_command()
     )
     incomplete = False
-    for number, step in enumerate(client_setup.plan(client, ctx, try_unverified), start=1):
+    for number, step in enumerate(client_setup.plan(client, ctx, config_file), start=1):
         console.print(f"[bold]{number}. {step.description}[/bold]")
         if step.apply is not None:
             if dry_run:
@@ -168,21 +172,29 @@ def setup(
 
 @app.command("clients")
 def clients_command() -> None:
-    """List the clients `openmcp setup` knows how to configure. Any other MCP client works too."""
-    from openmcp.clients import CLIENTS
+    """List the MCP clients that have connected, and the scopes each one gets."""
+    from openmcp.capture import captured_source
 
+    cfg = config.load_config(config.config_path(config.home()))
+    with _db() as conn:
+        seen = repo.seen_clients(conn)
+    if not seen:
+        console.print("No MCP client has connected yet. `openmcp setup` connects one; any MCP client works.")
+        return
     table = Table(box=None, header_style="bold")
-    for column in ("client", "app", "setup", "capture", "verified on a real install"):
-        table.add_column(column, overflow="fold", no_wrap=column in ("client", "setup", "capture"))
-    for spec in CLIENTS.values():
+    for column in ("client", "application", "reads", "writes", "capture", "calls", "last seen"):
+        table.add_column(column, no_wrap=column != "application")
+    for client, app, calls, last in seen:
+        scopes = config.resolve_client(cfg, client)
+        source = captured_source(client, app, cfg.capture.sources)
         table.add_row(
-            spec.name, Text(spec.display), "automatic" if spec.verified else "printed (--try writes)",
-            "transcripts" if spec.capture else "record_exchange", Text(spec.verified or "not yet"),
+            client, Text(app or "(unknown)"), ", ".join(scopes.read_scopes), scopes.write_scope,
+            f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
         )
     console.print(table)
     console.print(
-        "\nAny other MCP client: `openmcp setup <its name>` prints a snippet that works in any client, and the "
-        "server identifies the client from the name it reports when it connects."
+        "\nA client's name is what its application reports, unless config pins another: app = \"...\" under "
+        "[clients.<name>]. Give a client scopes with read_scopes and write_scope there."
     )
 
 

@@ -71,14 +71,12 @@ def app_name(ctx: Context | None) -> str | None:
 class ClientIdentity:
     """Notices when an application uses a client name that isn't its own.
 
-    The client name comes from `--client` in whatever config launched the server, so it
-    can be wrong: VS Code can start servers configured for Claude Desktop, and Copilot
-    then runs with Claude Desktop's scopes and tools. Which application a name is for
-    comes from config (`app` under [clients.<name>], written by `openmcp setup`), never
-    from who connected first, so the order apps connect in doesn't matter:
+    Rarely needed since M3.5: without `--client`, every application is named by what it
+    reports. It still catches a shared `--client` (an older config, or VS Code starting
+    servers configured for another app) using only what the user put in config:
 
-    - the name has an `app`: any other application is flagged;
-    - the application is another client's `app`: flagged (VS Code as claude-desktop);
+    - the name has an `app` pin: any other application is flagged;
+    - the application is pinned to another client name: flagged;
     - otherwise, if two or more applications not explained by those rules have used the
       name, each is flagged as ambiguous, without picking one.
 
@@ -400,6 +398,18 @@ def build_server(client: str | None, base: Path) -> MCPServer:
         Secrets and credentials are replaced with [REDACTED] before anything is stored.
         """
         with tool_call("record_exchange", ctx) as (conn, call, caller):
+            if not captured and cfg.capture.sources:
+                # A client named from clientInfo can still be one whose transcripts are
+                # captured (its tools were set before it said who it is): don't store twice.
+                from openmcp.capture import captured_source
+
+                if source := captured_source(caller.client, app_name(ctx), cfg.capture.sources):
+                    call.summary = f"skipped: captured from {source} transcripts"
+                    return RecordExchangeResult(
+                        conversation_id=None,
+                        note="Not stored: this assistant's conversations are captured from its transcripts "
+                        "automatically, so record_exchange isn't needed here.",
+                    )
             result = conversation_tools.record_exchange(
                 conn, caller, question, answer_summary, conversation_id, title, code or ()
             )

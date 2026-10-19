@@ -14,10 +14,8 @@ from mcp.types import Implementation
 from conftest import plain
 from openmcp import config
 from openmcp.cli import initialize
-from openmcp.clients import CLIENTS, client_for_app, slug
-from openmcp.models import CAPTURE_SOURCES
+from openmcp.clients import client_for_app, slug
 from openmcp.server import build_server
-from openmcp.setup import Context, SetupError, plan
 
 SOME_EDITOR = Implementation(name="Some Editor 2", version="1.0")
 COMMAND = ("/opt/openmcp/bin/openmcp",)
@@ -35,10 +33,12 @@ def generic(home, app):
 # --- naming clients from what they report ----------------------------------------------
 
 
-def test_client_names_come_from_pins_then_the_registry_then_the_app():
+def test_client_names_come_from_pins_then_the_app_itself():
+    """No table of known clients: a name is what the app reports, unless config pins one."""
     assert client_for_app("Some Editor", {"Some Editor": "my-editor"}) == "my-editor"
-    assert client_for_app("claude-ai", {}) == "claude-desktop"
-    assert client_for_app("Visual Studio Code", {}) == "vscode-copilot"
+    assert client_for_app("claude-ai", {}) == "claude-ai"
+    assert client_for_app("Visual Studio Code", {}) == "visual-studio-code"
+    assert client_for_app("cursor-vscode", {}) == "cursor-vscode"
     assert client_for_app("Some Editor 2", {}) == "some-editor-2"
     assert client_for_app(None, {}) == "mcp-client"
     assert slug("Zed / Preview!") == "zed-preview" and slug("???") == "mcp-client"
@@ -78,11 +78,28 @@ async def test_m3_5_done_when_an_unknown_client_works_from_the_generic_snippet(h
 
 
 @pytest.mark.anyio
-async def test_known_apps_get_their_registry_name_without_client(home):
+async def test_configs_from_before_keep_their_names_through_pins(home):
+    """Existing [clients.claude-desktop] scopes keep applying once the app is pinned to it."""
     initialize(home)
+    config.set_client_app(home / "config.toml", "claude-desktop", "claude-ai")
     async with Client(build_server(None, home), client_info=Implementation(name="claude-ai", version="1")) as c:
         ping = (await c.call_tool("ping", {})).structured_content
-    assert (ping["client"], ping["read_scopes"]) == ("claude-desktop", ["personal", "work"])  # claude-desktop's scopes
+    assert (ping["client"], ping["read_scopes"]) == ("claude-desktop", ["personal", "work"])
+
+
+@pytest.mark.anyio
+async def test_a_captured_app_without_a_client_name_isnt_recorded_twice(home):
+    """VS Code started from the generic snippet, with its transcripts captured: its
+    record_exchange calls are skipped, not stored on top of the captured chat."""
+    initialize(home)
+    config.enable_capture(home / "config.toml", "vscode-copilot")
+    vscode = Implementation(name="Visual Studio Code", version="1.99.3")
+    async with Client(build_server(None, home), client_info=vscode) as c:
+        result = (await c.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
+    assert result["conversation_id"] is None and "captured" in result["note"]
+    async with Client(build_server(None, home), client_info=SOME_EDITOR) as c:
+        stored = (await c.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
+    assert stored["conversation_id"] is not None
 
 
 @pytest.mark.anyio
@@ -102,114 +119,27 @@ async def test_an_explicit_client_still_wins(home):
     assert (ping["client"], ping["identified_by"]) == ("cursor", "--client")
 
 
-# --- the registry ----------------------------------------------------------------------
-
-
-def test_registry_entries_are_complete():
-    for spec in CLIENTS.values():
-        assert spec.name == slug(spec.name) and spec.display
-        assert spec.server is not None or spec.name in ("vscode-copilot", "claude-code")  # special-cased in setup
-        assert spec.capture in (None, *CAPTURE_SOURCES)
-        if spec.verified:
-            assert spec.app, f"{spec.name}: verified entries confirm their clientInfo name"
-        for platform in ("darwin", "win32", "linux"):
-            if spec.server:
-                assert spec.server.path(Path("/home/u"), platform).name
-            if spec.instruction.path:
-                assert spec.instruction.path(Path("/home/u"), platform).name
-
-
-@pytest.fixture
-def ctx(tmp_path) -> Context:
-    user_home = tmp_path / "user"
-    base = user_home / ".openmcp"
-    initialize(base)
-    return Context(base=base, user_home=user_home, platform="darwin", command=COMMAND, which=lambda _: None)
-
-
-def run(steps):
-    errors = []
-    for step in steps:
-        if step.apply:
-            try:
-                step.apply()
-            except SetupError as e:
-                errors.append(str(e))
-    return errors
-
-
-def json_block(text):
-    """The first JSON object printed in a step's instructions."""
-    return json.JSONDecoder().raw_decode(text[text.index("{"):])[0]
-
-
-def written(ctx):
-    return sorted(str(p.relative_to(ctx.user_home)) for p in ctx.user_home.rglob("*")
-                  if p.is_file() and ".openmcp" not in p.parts)
-
-
-def test_unverified_clients_are_printed_unless_tried(ctx, clipboard):
-    config_file = ctx.user_home / ".codeium" / "windsurf" / "mcp_config.json"
-    steps = plan("windsurf", ctx)
-    assert run(steps) == [] and written(ctx) == []
-    manual = "\n".join(s.manual for s in steps if s.manual)
-    assert str(config_file) in manual and "--try" in manual
-    assert json_block(manual)["mcpServers"]["openmcp"]["args"] == ["serve", "--client", "windsurf"]
-
-    run(plan("windsurf", ctx, try_unverified=True))
-    entry = json.loads(config_file.read_text())["mcpServers"]["openmcp"]
-    assert entry["args"] == ["serve", "--client", "windsurf"]
-
-
-def test_cursor_is_set_up_automatically(ctx, clipboard):
-    """Verified on Cursor 3.25.9: written without --try, and its app name pinned."""
-    run(plan("cursor", ctx))
-    entry = json.loads((ctx.user_home / ".cursor" / "mcp.json").read_text())["mcpServers"]["openmcp"]
-    assert entry["args"] == ["serve", "--client", "cursor"]
-    assert config.load_config(config.config_path(ctx.base)).clients["cursor"].app == "cursor-vscode"
-    assert client_for_app("cursor-vscode", {}) == "cursor"
-
-
-def test_trying_a_markdown_instruction_client(ctx):
-    run(plan("gemini-cli", ctx, try_unverified=True))
-    assert json.loads((ctx.user_home / ".gemini" / "settings.json").read_text())["mcpServers"]["openmcp"]
-    assert "<!-- openmcp:start -->" in (ctx.user_home / ".gemini" / "GEMINI.md").read_text()
-
-
-def test_toml_clients_keep_other_settings_and_refuse_commented_files(ctx):
-    path = ctx.user_home / ".codex" / "config.toml"
-    path.parent.mkdir(parents=True)
-    path.write_text('model = "o4"\n')
-    assert run(plan("codex-cli", ctx, try_unverified=True)) == []
-    data = tomllib.loads(path.read_text())
-    assert data["model"] == "o4" and data["mcp_servers"]["openmcp"]["args"] == ["serve", "--client", "codex-cli"]
-
-    path.write_text('# my settings\nmodel = "o4"\n')
-    [error] = run(plan("codex-cli", ctx, try_unverified=True))
-    assert "comments" in error and path.read_text().startswith("# my settings")
-
-
-def test_unknown_clients_get_the_generic_snippet_without_a_client_name(ctx, clipboard):
-    steps = plan("some-new-editor", ctx)
-    assert run(steps) == [] and written(ctx) == []
-    manual = "\n".join(s.manual for s in steps if s.manual)
-    assert json_block(manual)["mcpServers"]["openmcp"]["args"] == ["serve"]
-    assert "any MCP client works" in manual
-    assert len(clipboard) == 1
-
-
 # --- CLI -------------------------------------------------------------------------------
 
 
-def test_clients_command_lists_the_registry(home):
+@pytest.mark.anyio
+async def test_clients_command_lists_the_apps_that_connected(home):
     from typer.testing import CliRunner
     from openmcp.cli import app
+    initialize(home)
+    async with Client(build_server(None, home), client_info=SOME_EDITOR) as c:
+        await c.call_tool("ping", {})
     result = CliRunner().invoke(app, ["clients"], env={"COLUMNS": "200"})
     out = plain(result.output)
     assert result.exit_code == 0
-    for spec in CLIENTS.values():
-        assert spec.name in out
-    assert "printed (--try writes)" in out and "Any other MCP client" in out
+    assert "some-editor-2" in out and "Some Editor 2" in out and "record_exchange" in out
+
+
+def test_clients_command_before_anything_connects(home):
+    from typer.testing import CliRunner
+    from openmcp.cli import app
+    initialize(home)
+    assert "No MCP client has connected yet" in plain(CliRunner().invoke(app, ["clients"]).output)
 
 
 # --- importers from any provider ---------------------------------------------------------
