@@ -113,6 +113,16 @@ def current_sql(alias: str = "") -> str:
             f"OR {a}valid_to > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
 
 
+def timeline_sql(alias: str = "", *, history: bool = False, as_of: datetime | None = None) -> tuple[str, list]:
+    """Which memories a search sees: current ones; with `history`, every version; with
+    `as_of`, the ones that were true at that moment, replaced since or not."""
+    a = f"{alias}." if alias else ""
+    if as_of is not None:
+        moment = to_iso(as_of)
+        return f"{a}valid_from <= ? AND ({a}valid_to IS NULL OR {a}valid_to > ?)", [moment, moment]
+    return ("1", []) if history else (current_sql(alias), [])
+
+
 def insert_memory(conn: sqlite3.Connection, m: NewMemory) -> int:
     cur = conn.execute(
         "INSERT INTO memories (kind, subject, content, project, scope, source_client, confidence, "
@@ -245,11 +255,14 @@ def knn_memories(
     scopes: Sequence[str] | None,
     kinds: Sequence[Kind] = (),
     project: str | None = None,
+    history: bool = False,
+    as_of: datetime | None = None,
 ) -> list[tuple[Memory, float]]:
     """The `k` memories nearest to `query` (an embedding), then filtered like
     search_memories. Returns (memory, cosine distance) pairs, nearest first."""
-    where = [current_sql("m")]
-    params: list[object] = [query, k]
+    timeline, timeline_params = timeline_sql("m", history=history, as_of=as_of)
+    where = [timeline]
+    params: list[object] = [query, k, *timeline_params]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
         where.append(clause)
@@ -281,14 +294,18 @@ def search_memories(
     kinds: Sequence[Kind] = (),
     project: str | None = None,
     limit: int = 10,
+    history: bool = False,
+    as_of: datetime | None = None,
 ) -> list[tuple[Memory, float]]:
-    """FTS5 search over active memories. `match` is an FTS5 query string.
+    """FTS5 search over memories (current ones unless `history` or `as_of`, as in
+    timeline_sql). `match` is an FTS5 query string.
 
     Returns (memory, bm25) pairs, best first; bm25 is lower-is-better.
     Subject matches weigh twice as much as content matches.
     """
-    where = ["memories_fts MATCH ?", current_sql("m")]
-    params: list[object] = [match]
+    timeline, timeline_params = timeline_sql("m", history=history, as_of=as_of)
+    where = ["memories_fts MATCH ?", timeline]
+    params: list[object] = [match, *timeline_params]
     if scopes is not None:
         clause, p = _in("m.scope", scopes)
         where.append(clause)
@@ -604,7 +621,7 @@ def pending_embeddings(
     """Rows without a vector yet, newest first, as (id, subject, text); subject is None for chunks."""
     if table == "memories":
         sql = (
-            "SELECT id, subject, content FROM memories WHERE embedded = 0 AND superseded_by IS NULL "
+            "SELECT id, subject, content FROM memories WHERE embedded = 0 "
             "ORDER BY id DESC LIMIT ?"
         )
     else:
@@ -637,20 +654,19 @@ def pending_chunks_in(conn: sqlite3.Connection, conversation_ids: Sequence[int])
 
 def count_pending_embeddings(conn: sqlite3.Connection) -> int:
     return conn.execute(
-        "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0 AND superseded_by IS NULL)"
+        "SELECT (SELECT COUNT(*) FROM memories WHERE embedded = 0)"
         " + (SELECT COUNT(*) FROM chunks WHERE embedded = 0)"
     ).fetchone()[0]
 
 
 def store_vectors(conn: sqlite3.Connection, table: VectorTable, vectors: Sequence[tuple[int, bytes]]) -> int:
-    """Store embeddings for rows that still exist (and, for memories, are still active),
-    replacing any earlier vector: another server may have embedded the same row
+    """Store embeddings for rows that still exist, replacing any earlier vector: another server may have embedded the same row
     meanwhile. Marks them embedded. Returns how many were stored."""
     if not vectors:
         return 0
     ids = [id_ for id_, _ in vectors]
     clause, params = _in("id", ids)
-    live_filter = " AND superseded_by IS NULL" if table == "memories" else ""
+    live_filter = ""  # replaced memories keep vectors too: history is searchable (migration 018)
     live = {r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE {clause}{live_filter}", params)}
     stored = [(id_, v) for id_, v in vectors if id_ in live]
     conn.executemany(f"DELETE FROM {table}_vec WHERE rowid = ?", [(id_,) for id_, _ in stored])

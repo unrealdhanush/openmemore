@@ -413,6 +413,14 @@ class SearchHit(BaseModel):
     created_at: datetime | None
     score: float
     recall: bool = False
+    status: Literal["current", "superseded", "ended", "contradicted", "chat", "recap"] = "current"
+    """Memories: current; superseded (see replaced_by); ended (no longer true); contradicted
+    (disagrees with another memory, unresolved). Chats: chat, or recap (a lookup turn)."""
+    replaced_by: int | None = None
+    """For a superseded memory: the memory that corrected it."""
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    """For memories: when it was true; valid_to None while it still is."""
     """A recap of earlier conversations, ranked below them: prefer the original it points to."""
 
 

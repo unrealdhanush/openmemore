@@ -113,7 +113,15 @@ def later_turns_first(chunks: list[ChunkMatch]) -> list[ChunkMatch]:
     return out
 
 
-def _memory_hit(m: Memory, score: float) -> SearchHit:
+def memory_status(m: Memory, now: datetime) -> str:
+    if m.superseded_by is not None:
+        return "superseded"
+    if m.valid_to is not None and m.valid_to <= now:
+        return "ended"
+    return "current"
+
+
+def _memory_hit(m: Memory, score: float, now: datetime) -> SearchHit:
     return SearchHit(
         type="memory",
         id=m.id,
@@ -124,6 +132,10 @@ def _memory_hit(m: Memory, score: float) -> SearchHit:
         source=m.source_client,
         created_at=m.created_at,
         score=score,
+        status=memory_status(m, now),
+        replaced_by=m.superseded_by,
+        valid_from=m.valid_from,
+        valid_to=m.valid_to,
     )
 
 
@@ -139,6 +151,7 @@ def _chat_hit(c: ChunkMatch, score: float) -> SearchHit:
         created_at=c.created_at,
         score=score,
         recall=c.recall,
+        status="recap" if c.recall else "chat",
     )
 
 
@@ -187,9 +200,15 @@ def search_context(
     include_chats: bool = True,
     limit: int = 10,
     now: datetime | None = None,
+    mode: str = "current",
+    as_of: datetime | None = None,
 ) -> SearchResult:
-    """`now` is the moment recency is measured from (default: the current time);
-    evaluation passes a question's date."""
+    """`mode="current"` sees current memories only; `"history"` every version, labelled;
+    `as_of` the memories true at that moment (implies history). `now` is the moment
+    recency and status are measured from (default: the current time); evaluation passes
+    a question's date."""
+    history = mode == "history" or as_of is not None
+    now = now or datetime.now(UTC)
     read = caller.scopes.read_scopes
     words = query_words(query)
     match = fts_query(words)
@@ -202,14 +221,16 @@ def search_context(
     chunk_lists: list[list[ChunkMatch]] = []
     if match is not None:
         memory_lists.append(
-            [m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit)]
+            [m for m, _ in repo.search_memories(conn, match, scopes=read, kinds=kinds, project=project, limit=limit,
+                                                history=history, as_of=as_of)]
         )
         if include_chats and (chunk_match := chunk_keyword_query(conn, words)):
             chunk_lists.append(later_turns_first(repo.search_chunks(conn, chunk_match, scopes=read, limit=limit)))
     if vector is not None:
         k = limit * VECTOR_CANDIDATES_PER_RESULT
         near_memories, near_chunks = similar_enough(
-            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project),
+            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project, history=history,
+                              as_of=as_of),
             repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else [],
         )
         memory_lists.append([m for m, _ in near_memories[:limit]])
@@ -225,7 +246,6 @@ def search_context(
                 entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
                 entry.score += 1 / (RRF_K + rank)
                 entry.best_rank = min(entry.best_rank, rank)
-    now = now or datetime.now(UTC)
     for entry in fused.values():
         item = entry.item
         entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
@@ -234,7 +254,7 @@ def search_context(
 
     ranked = sorted(fused.values(), key=lambda e: (-e.score, e.kind_order, e.best_rank))[:limit]
     hits = [
-        _memory_hit(e.item, e.score) if isinstance(e.item, Memory) else _chat_hit(e.item, e.score) for e in ranked
+        _memory_hit(e.item, e.score, now) if isinstance(e.item, Memory) else _chat_hit(e.item, e.score) for e in ranked
     ]
     has_chats = any(h.type == "chat" for h in hits)
     return SearchResult(note=CHAT_ORDER_NOTE if has_chats else None, results=hits)

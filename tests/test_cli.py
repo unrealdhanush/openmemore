@@ -200,8 +200,8 @@ def test_embed_command(store, fake_embedder):
     conn, _ = store  # three memories inserted without vectors
     result = run("embed")
     assert result.exit_code == 0, result.output
-    assert "embedded 2 memories" in result.output  # the superseded version isn't embedded
-    assert conn.execute("SELECT COUNT(*) FROM memories_vec").fetchone()[0] == 2
+    assert "embedded 3 memories" in result.output  # the superseded version too: history is searchable
+    assert conn.execute("SELECT COUNT(*) FROM memories_vec").fetchone()[0] == 3
 
 
 def test_embed_without_a_model_says_so(store):

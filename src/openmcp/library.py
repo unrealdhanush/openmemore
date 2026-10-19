@@ -70,6 +70,11 @@ class Hit:
     conversation_id: int | None = None
     title: str | None = None
     created_at: datetime | None = None
+    status: str = "current"
+    """current, superseded, ended, contradicted; chat or recap for conversation messages."""
+    replaced_by: int | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
 
 
 _conversation: contextvars.ContextVar[str | None] = contextvars.ContextVar("openmcp_conversation", default=None)
@@ -120,18 +125,23 @@ class Memory:
     # --- reading --------------------------------------------------------------------
 
     def search(self, query: str, *, limit: int = 10, kinds: Sequence[Kind] = (), project: str | None = None,
-               chats: bool = True) -> list[Hit]:
-        """Memories and conversations related to `query`, by meaning and by words."""
+               chats: bool = True, mode: str = "current", as_of: Any = None) -> list[Hit]:
+        """Memories and conversations related to `query`, by meaning and by words. `mode`
+        "history" includes earlier versions and ended memories; `as_of` ("2024-03", a date)
+        gives what was true then."""
+        from openmcp.models import _moment
         from openmcp.tools.search import search_context
 
         with self._call("search_context") as (conn, call, caller):
             call.summary = f"q={query[:60]!r}"
-            result = search_context(conn, caller, query, kinds, project, chats, limit)
+            result = search_context(conn, caller, query, kinds, project, chats, limit, mode=mode,
+                                    as_of=_moment(as_of))
             call.result_count = len(result.results)
         return [
             Hit(type=h.type, id=h.id, text=unwrap(h.content), wrapped=h.content, source=h.source, score=h.score,
                 kind=h.kind, subject=h.subject, project=h.project, conversation_id=h.conversation_id, title=h.title,
-                created_at=h.created_at)
+                created_at=h.created_at, status=h.status, replaced_by=h.replaced_by, valid_from=h.valid_from,
+                valid_to=h.valid_to)
             for h in result.results
         ]
 
