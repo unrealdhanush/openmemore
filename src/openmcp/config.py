@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field
@@ -95,6 +95,25 @@ class DaemonConfig(BaseModel):
     """Seconds between checks for changed transcripts."""
 
 
+class ConsolidationConfig(BaseModel):
+    """[consolidation]: automatic consolidation with a model OpenMCP calls itself
+    (SPEC.md M7). Off until the user sets it up with `openmcp consolidate setup`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    endpoint: str = ""
+    """Base URL of an Open Responses (or Chat Completions) endpoint, e.g. http://127.0.0.1:11434/v1."""
+    model: str = ""
+    api: Literal["responses", "chat-completions"] = "responses"
+    schedule: str = Field(default="03:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    """Local time of day for the daemon's daily run."""
+    max_conversations: int = Field(default=50, ge=1, le=10_000)
+    """Conversations per run; the rest wait for the next."""
+    allowed_host: str | None = None
+    """The non-local host the user allowed conversations to be sent to (set when asked)."""
+
+
 class Config(BaseModel):
     """config.toml. Unknown keys are rejected so typos (e.g. `read_scope`) don't pass silently."""
 
@@ -107,6 +126,7 @@ class Config(BaseModel):
     clients: dict[str, ClientOverride] = Field(default_factory=dict)
     capture: CaptureConfig = CaptureConfig()
     daemon: DaemonConfig = DaemonConfig()
+    consolidation: ConsolidationConfig = ConsolidationConfig()
 
 
 def home() -> Path:

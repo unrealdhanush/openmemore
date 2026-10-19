@@ -619,6 +619,7 @@ def status_command() -> None:
     console.print(f"Proposals waiting for review: {proposals}" + (" (run `openmcp review`)" if proposals else ""))
     console.print(f"Conversations not yet consolidated: {counts['due_for_consolidation']}")
     console.print(f"Daemon: {_daemon_line()}", markup=False, soft_wrap=True)
+    console.print(f"Automatic consolidation: {_consolidation_line()}", markup=False, soft_wrap=True)
 
 
 # --- daemon --------------------------------------------------------------------------
@@ -815,6 +816,163 @@ def daemon_telemetry() -> None:
         "like any client. If the app already sends telemetry elsewhere, these settings replace that destination.",
         markup=False, soft_wrap=True,
     )
+
+
+# --- automatic consolidation ------------------------------------------------------------
+
+consolidate_app = typer.Typer(
+    no_args_is_help=True,
+    help="Consolidate conversations into proposed memories with a model OpenMCP calls itself (off until set up).",
+)
+app.add_typer(consolidate_app, name="consolidate")
+
+
+def _consolidation_line() -> str:
+    from openmcp import consolidate, llm
+
+    base = config.home()
+    cfg = config.load_config(config.config_path(base)).consolidation
+    if not cfg.enabled:
+        return "off (`openmcp consolidate setup` turns it on)"
+    with _db() as conn:
+        last = consolidate.last_run(conn)
+    line = f"daily at {cfg.schedule} with {cfg.model} at {llm.host(cfg.endpoint)}"
+    if last:
+        line += (f"; last run {last['started_at'][:16].replace('T', ' ')} UTC: {last['conversations']} conversations, "
+                 f"{last['proposals']} proposals" + (f", error: {last['error']}" if last["error"] else ""))
+    return line
+
+
+@consolidate_app.command("setup")
+def consolidate_setup(
+    endpoint: str = typer.Option(..., "--endpoint", help="Base URL of an Open Responses or Chat Completions endpoint, "
+                                 "e.g. http://127.0.0.1:11434/v1 or https://api.openai.com/v1."),
+    model: str = typer.Option(..., "--model", help="The model's name at that endpoint."),
+    api: str = typer.Option("responses", "--api", help="responses (Open Responses, the default) or chat-completions."),
+    schedule: str = typer.Option("03:00", "--schedule", help="Local time of the daily run (HH:MM)."),
+    key: bool = typer.Option(False, "--key", help="Prompt for an API key, kept in a file only you can read."),
+    check: bool = typer.Option(True, "--check/--no-check", help="Send a one-line test request first."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before allowing a non-local endpoint."),
+) -> None:
+    """Set up automatic consolidation (off until you do): which model to use, and when."""
+    from urllib.parse import urlparse
+
+    from openmcp import consent, consolidate, llm
+
+    if urlparse(endpoint).scheme not in ("http", "https") or not urlparse(endpoint).hostname:
+        console.print("The endpoint must be an http(s) URL, e.g. http://127.0.0.1:11434/v1")
+        raise typer.Exit(2)
+    if api not in ("responses", "chat-completions"):
+        console.print("--api must be responses or chat-completions")
+        raise typer.Exit(2)
+    base = config.home()
+    initialize(base)
+    path = config.config_path(base)
+    cfg = config.load_config(path)
+    host = llm.host(endpoint)
+    if not llm.is_local(endpoint) and cfg.consolidation.allowed_host != host:
+        answer = "allowed" if yes else consent.ask(
+            f"Send your conversations to {host}?",
+            f"Automatic consolidation sends each conversation's new messages, and related memories, to {host} "
+            f"for {model} to read. They're handled under that provider's terms. Nothing becomes a memory until "
+            "you approve it with openmcp review.\n\nTurn it off any time with: openmcp consolidate off",
+        )
+        if answer != "allowed":
+            console.print(f"Not set up: conversations won't be sent to {host}." if answer == "denied" else
+                          "Couldn't ask (no desktop or terminal); pass --yes to allow it.")
+            raise typer.Exit(1)
+    if key:
+        consolidate.save_key(base, typer.prompt(f"API key for {host}", hide_input=True))
+    try:
+        cfg.consolidation = config.ConsolidationConfig(
+            enabled=False, endpoint=endpoint, model=model, api=api, schedule=schedule,
+            max_conversations=cfg.consolidation.max_conversations,
+            allowed_host=None if llm.is_local(endpoint) else host,
+        )
+    except ValidationError as e:
+        console.print(f"Invalid setting: {e.errors()[0]['msg']}")
+        raise typer.Exit(2) from None
+    if check:
+        try:
+            reply = llm.complete(consolidate.model_from(base, cfg), "Answer with the single word OK.", "Are you there?")
+        except llm.ModelError as e:
+            config.save_config(path, cfg)  # kept, but off until it works
+            console.print(f"[red]The test request failed:[/red] {escape(str(e))}\nSaved but left off; fix it and run "
+                          "setup again (or pass --no-check).")
+            raise typer.Exit(1) from None
+        console.print(f"Test request answered: {reply.strip()[:40]!r}", markup=False)
+    cfg.consolidation.enabled = True
+    config.save_config(path, cfg)
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "consolidate setup") as call:
+        call.summary = f"{model} at {host}" + (
+            "" if llm.is_local(endpoint) else (", allowed with --yes" if yes else ", allowed when asked"))
+    console.print(f"Automatic consolidation: {_consolidation_line()}", markup=False, soft_wrap=True)
+    if not _daemon_line().startswith("running"):
+        console.print("It runs in the daemon, which isn't running: `openmcp daemon install`. "
+                      "`openmcp consolidate run` runs it now.")
+
+
+@consolidate_app.command("run")
+def consolidate_run(
+    limit: int | None = typer.Option(None, "--limit", "-n", min=1, help="At most this many conversations."),
+) -> None:
+    """Consolidate now, instead of waiting for the daily run."""
+    from openmcp import consolidate, llm
+
+    base = config.home()
+    initialize(base)
+    cfg = config.load_config(config.config_path(base))
+    model = consolidate.model_from(base, cfg)
+    if model is None:
+        console.print("Not set up yet: `openmcp consolidate setup --endpoint URL --model NAME`.")
+        raise typer.Exit(2)
+    if not consolidate.permitted(cfg):
+        console.print(f"Sending conversations to {llm.host(model.endpoint)} hasn't been allowed; run setup again.")
+        raise typer.Exit(2)
+
+    def progress(report) -> None:
+        console.print(f"  {report.conversations} conversations, {report.proposals} proposals so far")
+
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "consolidate") as call:
+        report = consolidate.run(conn, cfg, model, limit=limit, progress=progress)
+        call.summary = (f"{report.conversations} conversations, {report.proposals} proposals, {model.model} at "
+                        f"{llm.host(model.endpoint)}")
+        call.result_count = report.proposals
+    console.print(f"Consolidated {report.conversations} conversations into {report.proposals} proposals"
+                  + (f" ({report.dropped} unusable items dropped)" if report.dropped else "") + ".")
+    for error in report.errors:
+        console.print(f"[yellow]{escape(error)}[/yellow]")
+    if report.proposals:
+        console.print("Review them with `openmcp review`: nothing is saved until you approve it.")
+    if report.errors and not report.conversations:
+        raise typer.Exit(1)
+
+
+@consolidate_app.command("status")
+def consolidate_status() -> None:
+    """Whether automatic consolidation is on, and how the last run went."""
+    console.print(f"Automatic consolidation: {_consolidation_line()}", markup=False, soft_wrap=True)
+    with _db() as conn:
+        due = repo.count_due_conversations(conn, None)
+    console.print(f"Conversations not yet consolidated: {due}")
+
+
+@consolidate_app.command("off")
+def consolidate_off(
+    forget: bool = typer.Option(False, "--forget", help="Also delete the saved API key and the allowed host."),
+) -> None:
+    """Turn automatic consolidation off."""
+    from openmcp import consolidate
+
+    base = config.home()
+    path = config.config_path(base)
+    cfg = config.load_config(path)
+    cfg.consolidation.enabled = False
+    if forget:
+        cfg.consolidation.allowed_host = None
+        consolidate.key_path(base).unlink(missing_ok=True)
+    config.save_config(path, cfg)
+    console.print("Automatic consolidation is off." + (" The API key and allowed host are forgotten." if forget else ""))
 
 
 # --- review --------------------------------------------------------------------------

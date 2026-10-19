@@ -126,6 +126,17 @@ The review page lets you:
 - find near-duplicate memories and merge them into one, keeping history;
 - search, edit and delete memories, and see each one's history.
 
+**Automatic consolidation (optional, off by default).** OpenMCP can also consolidate on its own each night, with a model you choose. It calls any endpoint that speaks the open LLM API standard, Open Responses, such as OpenAI, Ollama, LM Studio, vLLM or OpenRouter. Endpoints that only speak OpenAI-style Chat Completions work too:
+
+```sh
+openmcp consolidate setup --endpoint http://127.0.0.1:11434/v1 --model qwen2.5:7b             # a local server
+openmcp consolidate setup --endpoint https://api.openai.com/v1 --model <model> --key   # hosted: asks first
+openmcp consolidate run      # now, instead of at 03:00
+openmcp consolidate off
+```
+
+A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
+
 A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmcp review` prints.
 
 ## Import and export
@@ -150,6 +161,7 @@ An export contains every memory, with its earlier versions, and every conversati
 | `openmcp memories list\|show\|rm` | Browse and delete memories |
 | `openmcp conversations list\|show\|rm` | Browse and delete conversations |
 | `openmcp review` | Approve proposed memories; browse, edit and delete memories |
+| `openmcp consolidate setup\|run\|status\|off` | Optional nightly consolidation with a model you choose |
 | `openmcp import <file>` / `openmcp export` | Bring history in, take everything out |
 | `openmcp capture` | Catch up on transcripts from capture-enabled apps |
 | `openmcp daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints the OpenTelemetry settings |
