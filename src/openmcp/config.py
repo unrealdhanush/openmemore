@@ -14,12 +14,19 @@ from openmcp.models import CaptureSource, Scope
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "defaults": {"read_scopes": ["personal"], "write_scope": "personal"},
-    "clients": {
-        "claude-desktop": {"read_scopes": ["personal", "work"], "write_scope": "personal"},
-        "cursor": {"read_scopes": ["work"], "write_scope": "work"},
-    },
     "capture": {"sources": [], "days": 30},
 }
+
+CONFIG_HEADER = """\
+# OpenMCP configuration. A client is named by what its application reports when it
+# connects ('Some Editor 2' -> some-editor-2); `openmcp clients` lists the ones that
+# have connected. Clients without a [clients.<name>] table use [defaults]. For example:
+#
+#   [clients.cursor-vscode]
+#   read_scopes = ["work", "personal"]
+#   write_scope = "work"
+
+"""
 
 
 class ClientScopes(BaseModel):
@@ -38,9 +45,6 @@ class ClientOverride(BaseModel):
 
     read_scopes: tuple[Scope, ...] | None = None
     write_scope: Scope | None = None
-    app: str | None = Field(default=None, min_length=1, max_length=200)
-    """The application this client name is for, as it names itself over MCP (clientInfo.name),
-    e.g. 'Visual Studio Code'. Another application using the name gets a warning."""
 
 
 class CaptureConfig(BaseModel):
@@ -82,7 +86,7 @@ def write_default_config(path: Path) -> bool:
     """Write the default config if none exists. Returns True if a file was written."""
     if path.exists():
         return False
-    path.write_text(tomli_w.dumps(DEFAULT_CONFIG), encoding="utf-8")
+    path.write_text(CONFIG_HEADER + tomli_w.dumps(DEFAULT_CONFIG), encoding="utf-8")
     return True
 
 
@@ -96,7 +100,7 @@ def load_config(path: Path) -> Config:
 
 def save_config(path: Path, config: Config) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)), encoding="utf-8")
+    path.write_text(CONFIG_HEADER + tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)), encoding="utf-8")
 
 
 def enable_capture(path: Path, source: CaptureSource) -> bool:
@@ -105,17 +109,6 @@ def enable_capture(path: Path, source: CaptureSource) -> bool:
     if source in cfg.capture.sources:
         return False
     cfg.capture.sources = (*cfg.capture.sources, source)
-    save_config(path, cfg)
-    return True
-
-
-def set_client_app(path: Path, client: str, app: str) -> bool:
-    """Record which application a client name is for. Returns False if already set to it."""
-    cfg = load_config(path)
-    entry = cfg.clients.setdefault(client, ClientOverride())
-    if entry.app == app:
-        return False
-    entry.app = app
     save_config(path, cfg)
     return True
 

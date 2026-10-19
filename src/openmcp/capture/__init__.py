@@ -19,6 +19,7 @@ from pathlib import Path
 
 from openmcp import db, repo
 from openmcp.capture import claude_code, vscode_copilot
+from openmcp.clients import client_name
 from openmcp.config import Config, resolve_client
 from openmcp.ingest import store_conversation
 from openmcp.models import CaptureFile, CaptureSource, ParsedConversation
@@ -44,10 +45,10 @@ SOURCES: dict[CaptureSource, Source] = {
 }
 
 
-def captured_source(client: str, app: str | None, enabled: Iterable[str]) -> str | None:
-    """The enabled transcript reader for this client, by its name or its application."""
+def captured_source(app: str | None, enabled: Iterable[str]) -> str | None:
+    """The enabled transcript reader for this application, if any."""
     for name in enabled:
-        if name == client or (app is not None and SOURCES[name].app == app):
+        if app is not None and SOURCES[name].app == app:
             return name
     return None
 
@@ -108,7 +109,10 @@ def capture(
             parsed, resume = None, offset
         with db.transaction(conn):
             if parsed is not None:
-                conversation_id, changed = store_conversation(conn, parsed, resolve_client(cfg, name).write_scope)
+                # Stored under the reader's descriptive name ('vscode-copilot'), in the scope of
+                # the application it reads, the same client its live calls come from.
+                scope = resolve_client(cfg, client_name(SOURCES[name].app)).write_scope
+                conversation_id, changed = store_conversation(conn, parsed, scope)
                 if changed:
                     report.conversations += 1
                     report.messages += changed

@@ -84,14 +84,6 @@ def seen_clients(conn: sqlite3.Connection) -> list[tuple[str, str | None, int, d
     return [(c, a, n, datetime.fromisoformat(t.replace("Z", "+00:00"))) for c, a, n, t in rows]
 
 
-def apps_for(conn: sqlite3.Connection, client: str) -> list[str]:
-    """Every application recorded calling as `client`, in order of first appearance."""
-    rows = conn.execute(
-        "SELECT app FROM audit_log WHERE client = ? AND app IS NOT NULL GROUP BY app ORDER BY MIN(id)", (client,)
-    )
-    return [r[0] for r in rows]
-
-
 def audit_durations(conn: sqlite3.Connection) -> dict[str, list[float]]:
     """duration_ms of every logged call, grouped by tool."""
     out: dict[str, list[float]] = defaultdict(list)
