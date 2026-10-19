@@ -658,7 +658,9 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 |---|---|---|
 | M6 | Background service | — |
 | M7 | Automatic consolidation | M6 |
+| M7.5 | OpenMCP as a library | — (experimental until M9's rename) |
 | M8 | Use it for real | M6, M7 |
+| M8.5 | Documentation | everything before it; pages can be written as features land |
 | M9 | Public release | approval (start now) |
 | M10 | Web and mobile clients | M9 |
 | M11 | Transcript standard | M9, and evidence from M6 and M8 |
@@ -716,6 +718,42 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
   - The local-only check runs a real local stand-in server, with every outgoing connection recorded and a proxy configured in the environment. Only 127.0.0.1 is contacted, and with the guard removed the test fails.
   - **Not yet run:** against a real model, which waits for the user to pick one.
 
+### M7.5: OpenMCP as a library
+Agents and programs the user writes get the same shared memory as their assistants, in-process, with no server: `from openmcp import Memory`. It's the M5/M6 store and rules (scopes, secret filter, wrapping, embeddings, audit), not a second implementation: the library calls the same tool functions the MCP server does.
+
+```python
+from openmcp import Memory
+
+memory = Memory("trip-planner")      # a client name, like an app's MCP clientInfo: [clients.trip-planner] scopes it
+
+@memory.recall(query="request")      # before each call: related memories and chats, passed in as `context`
+@memory.remember(question="request") # after each call: the request and the result, stored as an exchange
+def plan(request: str, context: str = "") -> str: ...
+
+memory.save("Prefers aisle seats.", kind="preference")
+hits = memory.search("seat preference")        # Hit(text, wrapped, type, kind, source, conversation_id, score, ...)
+memory.context("seat preference")              # a prompt-ready block: the stored-data notice and wrapped items
+memory.profile(); memory.recent(); memory.record(question, answer); memory.update(id, text); memory.forget(id)
+```
+
+- **Decorators:** `@memory.remember` and `@memory.recall` work on sync and `async` functions; the store work runs in a thread for async ones.
+  - **Errors:** a store failure is logged (`openmcp` logger) and never breaks the decorated function. Direct calls raise `OpenMCPError`.
+- **What `remember` records:** the question is the named argument (`question=`), or the first string argument, or all arguments. The answer is the return value as text.
+  - **Conversations:** calls are grouped into one conversation per decorated function, per `Memory`, per process. `conversation=` names a group, and `with memory.conversation("trip-42"):` groups across functions.
+- **What `recall` passes in:** `memory.context(...)` goes into the argument named by `into=` (default `context`). The function must accept it; that's checked when it's decorated.
+  - `profile=True` adds the profile, and `limit=` and `kinds=` narrow the search.
+- **Text and wrapping:** results carry `wrapped` text (Section 8), for putting in a prompt, and plain `text`, for program logic.
+- **Home:** `Memory(..., home=path)` overrides the data directory, which is otherwise the same as the CLI's, so the agent shares the store with the user's apps.
+- **Import cost:** `import openmcp` stays cheap. `Memory` loads lazily, and the embedding model only when something needs a vector, as in the server.
+- **Experimental until M9.** The import name changes with the final name. A lighter install without the embedding runtime is an M9 packaging question.
+- **Done when:**
+  - a decorated function's exchanges are found by an assistant through MCP;
+  - the function receives what an assistant saved;
+  - scopes apply by client name;
+  - sync and async both work;
+  - a store failure doesn't break the function (tested).
+- **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmcp` loading nothing else. Documented in [docs/library.md](docs/library.md).
+
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.
 - **`openmcp report`:** a usage report from the audit log:
@@ -726,11 +764,27 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 - **Fix what hurts,** including the slow-runner timeout in the stdio scope test.
 - **Done when:** a week of real use needs no manual database fixes, and the report gives an evidence-based list of what to build next.
 
+### M8.5: Documentation
+Every public surface documented in `docs/`, written for someone who has never seen the project, before the public release (M9). Pages can be written as features land; the first, [the model endpoint for consolidation](docs/consolidation-endpoint.md), came with M7.
+- **Getting started:** install, connect each kind of app, the standing instruction, what to expect.
+- **Guides:** scopes, capture (transcripts, folders, the daemon, OpenTelemetry), consolidation and review, import and export, deleting things.
+- **Reference:**
+  - every CLI command and option;
+  - every `config.toml` key;
+  - every MCP tool, prompt and resource, with arguments and results;
+  - the OpenMCP export format, as JSON Schema;
+  - what the OpenTelemetry endpoint accepts (GenAI conventions, encodings, the token);
+  - the consolidation endpoint contract;
+  - the library API (M7.5).
+- **Security and privacy:** what's stored where, what leaves the machine and when, permissions, the threat model, and its limits.
+- **Kept current by tests:** a test fails when a CLI command, config key or MCP tool has no reference entry, so the docs can't fall behind.
+- **Done when:** a reader can install, connect, configure and troubleshoot from `docs/` alone, and the coverage tests pass.
+
 ### M9: Public release
 - **Pre-flight (Section 13):** employer approval, a final name, a license.
 - **New repository:** publish only the clean `main`, because GitHub keeps old PR refs.
 - **A package on PyPI** (`uv tool install <name>`).
-- **A README** for people who've never seen the project.
+- **A README** for people who've never seen the project, linking the documentation (M8.5).
 - **The OpenMCP format** published as JSON Schema.
 - **Done when:** someone else, on a clean machine, installs it and connects two apps in under five minutes from the README alone.
 

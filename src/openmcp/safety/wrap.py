@@ -49,3 +49,16 @@ def wrap(content: str, *, source: str, id: int | str, max_chars: int = MAX_ITEM_
     if flagged:
         attrs += ' flagged="possible_injection"'
     return f"<stored_context {attrs}>\n{body}\n</stored_context>"
+
+
+_WRAPPED = re.compile(r"^<stored_context [^>]*>\n(.*)\n</stored_context>$", re.DOTALL)
+_NEUTRALIZED = re.compile(r"&lt;(/?)(stored_context)", re.IGNORECASE)
+
+
+def unwrap(wrapped: str) -> str:
+    """The stored text inside a wrapper, for programs rather than models (the library's
+    plain `text`). Truncation, if any, stays."""
+    match = _WRAPPED.match(wrapped)
+    if match is None:
+        return wrapped
+    return _NEUTRALIZED.sub(lambda m: f"<{m.group(1)}{m.group(2)}", match.group(1))
