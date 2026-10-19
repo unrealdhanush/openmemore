@@ -167,9 +167,9 @@ def test_a_growing_turn_is_updated_in_place_and_new_turns_are_added(conn, user_h
     assert [m.id for m in after[:4]] == [m.id for m in before]
     assert after[3].content.endswith("needs rotating.\n\nAlso log each retry.")
     assert after[4].content == "Ship it." and len(after) == 5
-    assert search_context(conn, GEMINI, "log each retry").results[0].id in {
-        r[0] for r in conn.execute("SELECT id FROM chunks WHERE message_id = ?", (after[3].id,))
-    }
+    updated_chunks = {r[0] for r in conn.execute("SELECT id FROM chunks WHERE message_id = ?", (after[3].id,))}
+    [hit] = [h for h in search_context(conn, GEMINI, "log each retry").results if h.id in updated_chunks]
+    assert hit.recall  # this turn called search_context (see the fixture)
     assert conn.execute("SELECT COUNT(*) FROM chunks WHERE message_id = ?", (after[3].id,)).fetchone()[0] == 1
 
 

@@ -4,7 +4,7 @@ Workspace chats live in <user dir>/workspaceStorage/<hash>/chatSessions/<id>.jso
 chats with no folder open in <user dir>/globalStorage/emptyWindowChatSessions/. Each
 file holds `requests`; each request has the prompt (`message.text`), a millisecond
 `timestamp`, and `response` parts: markdown (`value`), inline file references, and
-tool calls (skipped).
+tool calls (skipped, except that calling OpenMCP's recall tools makes it a recall turn).
 
 Checked against VS Code 1.99. The format is undocumented: unknown parts are ignored.
 """
@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePath
 from typing import Any
 
+from openmcp.capture.common import RECALL_TOOLS, is_recall_tool
 from openmcp.models import ParsedConversation, ParsedMessage
 from openmcp.paths import app_data_dir
 
@@ -63,6 +64,24 @@ def _response_text(parts: Any) -> str:
     return "".join(out).strip()
 
 
+def _calls_recall_tool(request: dict[str, Any]) -> bool:
+    """From the tool calls in result.metadata.toolCallRounds ('590_recent_conversations'),
+    or failing that, the 'Running `recent_conversations`' messages in the response."""
+    metadata = (request.get("result") or {}).get("metadata") or {}
+    rounds = metadata.get("toolCallRounds") if isinstance(metadata, dict) else None
+    for round_ in rounds if isinstance(rounds, list) else []:
+        calls = round_.get("toolCalls") if isinstance(round_, dict) else None
+        for call in calls if isinstance(calls, list) else []:
+            if isinstance(call, dict) and isinstance(call.get("name"), str) and is_recall_tool(call["name"]):
+                return True
+    for part in request.get("response") or []:
+        if isinstance(part, dict) and part.get("kind") == "toolInvocationSerialized":
+            message = (part.get("invocationMessage") or {}).get("value")
+            if isinstance(message, str) and any(f"`{tool}`" in message for tool in RECALL_TOOLS):
+                return True
+    return False
+
+
 def _workspace(path: Path) -> str | None:
     """The folder or workspace a chat belongs to, from workspaceStorage/<hash>/workspace.json."""
     try:
@@ -86,15 +105,20 @@ def parse(path: Path, offset: int = 0) -> tuple[ParsedConversation | None, int]:
         if not isinstance(r, dict) or not isinstance(r.get("requestId"), str):
             continue
         when = _when(r.get("timestamp"))
+        recall = _calls_recall_tool(r)
         prompt = (r.get("message") or {}).get("text")
         if isinstance(prompt, str) and prompt.strip():
             messages.append(
-                ParsedMessage(external_id=r["requestId"], role="user", content=prompt.strip(), created_at=when)
+                ParsedMessage(
+                    external_id=r["requestId"], role="user", content=prompt.strip(), created_at=when, recall=recall
+                )
             )
         answer = _response_text(r.get("response"))
         if answer:
             answer_id = r.get("responseId") if isinstance(r.get("responseId"), str) else f"{r['requestId']}:response"
-            messages.append(ParsedMessage(external_id=answer_id, role="assistant", content=answer, created_at=when))
+            messages.append(
+                ParsedMessage(external_id=answer_id, role="assistant", content=answer, created_at=when, recall=recall)
+            )
     if not messages:
         return None, 0
 

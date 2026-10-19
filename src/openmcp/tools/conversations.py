@@ -79,7 +79,9 @@ def default_title(question: str) -> str:
     return first_line if len(first_line) <= TITLE_CHARS else first_line[: TITLE_CHARS - 1] + "…"
 
 
-def _add_message(conn: sqlite3.Connection, conversation_id: int, role: Role, content: str, now: datetime) -> int:
+def _add_message(
+    conn: sqlite3.Connection, conversation_id: int, role: Role, content: str, now: datetime, recall: bool = False
+) -> int:
     """Same role, content, and timestamp in the same conversation is the same message
     (e.g. a retried call), so it is stored once."""
     message_id, inserted = repo.insert_message(
@@ -90,6 +92,7 @@ def _add_message(conn: sqlite3.Connection, conversation_id: int, role: Role, con
             content=content,
             created_at=now,
             content_hash=message_hash(role, content, now),
+            recall=recall,
         ),
     )
     if inserted:
@@ -105,7 +108,10 @@ def record_exchange(
     conversation_id: int | None = None,
     title: str | None = None,
     code: Sequence[CodeBlock] = (),
+    recall: bool = False,
 ) -> RecordExchangeResult:
+    """`recall` marks an exchange that only looked up earlier conversations; the server
+    decides it from the calls it just served, not the model."""
     question, q_reasons = redact(question)
     answer, a_reasons = redact(with_code(answer_summary, code))
     title, t_reasons = redact(title) if title else (None, [])
@@ -136,8 +142,8 @@ def record_exchange(
                 ),
             )
         ids = [
-            _add_message(conn, conversation_id, "user", question, now),
-            _add_message(conn, conversation_id, "assistant", answer, now),
+            _add_message(conn, conversation_id, "user", question, now, recall),
+            _add_message(conn, conversation_id, "assistant", answer, now, recall),
         ]
     # After the write, so the transaction stays short; newest first, so this exchange's
     # chunks are embedded before any backlog.

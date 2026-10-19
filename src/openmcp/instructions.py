@@ -25,14 +25,16 @@ def standing_instruction(captured: bool) -> str:
         lines.append("- Don't call record_exchange: conversations here are captured automatically.")
     else:
         lines.append(
-            "- After every answer (skip only greetings and thanks), call record_exchange with my question "
-            "and a short summary of your answer, putting any code you wrote in its `code` field. Reuse the "
-            "conversation_id it returns for the rest of the chat."
+            "- After every answer, call record_exchange with my question and a short summary of your answer, "
+            "putting any code you wrote in its `code` field. Reuse the conversation_id it returns for the rest "
+            "of the chat. Skip greetings, thanks, and turns where you only looked up earlier conversations."
         )
     lines += [
         '- When I make a decision, also save it with save_memories (kind "decision").',
         "- When I mention an earlier conversation, including one with another assistant, call "
-        "recent_conversations or search_context before saying you don't know.",
+        "recent_conversations or search_context before saying you don't know. Search for the topic itself "
+        "(\"cat names\", not \"the pet question I asked Copilot\"); to narrow by assistant, use "
+        "recent_conversations with source.",
         "- Never record secrets or credentials.",
     ]
     return "\n".join(lines)
@@ -57,14 +59,17 @@ def server_instructions(captured: bool) -> str:
             "- After every answer, call record_exchange with the user's question and a short summary of "
             "your answer, including any code you wrote, so another assistant can pick up where you left "
             "off. Reuse the conversation_id from your first record_exchange call for later turns of the "
-            "same chat. Skip only greetings and thanks."
+            "same chat. Skip greetings, thanks, and turns where you only looked up earlier conversations: "
+            "a recap of a conversation is not worth storing beside the conversation itself."
         )
     lines += [
         "- When the user makes a decision, also save it with save_memories (kind 'decision'), so it "
         "outranks options that were discussed before it.",
         "- When the user refers to an earlier conversation, including one with a different assistant "
         "('what did I ask Claude earlier?', 'continue what I started in Cursor'), call "
-        "recent_conversations or search_context before saying you don't know.",
+        "recent_conversations or search_context before saying you don't know. Search for the topic itself "
+        "('cat names', not 'the pet question I asked Copilot'); to narrow by assistant, use "
+        "recent_conversations with source.",
         "- Save other lasting preferences, facts, and project state with save_memories.",
         "Never record secrets, credentials, or other people's private details.",
     ]
