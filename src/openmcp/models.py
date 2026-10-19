@@ -16,7 +16,7 @@ ClientName = Annotated[
     str,
     StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"),
 ]
-"""Name a client connects as (`openmcp serve --client <name>`); recorded in the audit log."""
+"""A client name, as typed for `openmcp setup <client>`."""
 
 Scope = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
 
@@ -270,17 +270,15 @@ class PingResult(BaseModel):
     ok: bool
     version: str
     client: str
-    identified_by: Literal["--client", "clientInfo"]
-    """How the client name was found: given at start, or from the name the app reported."""
-    read_scopes: list[str]
+    """The name this client gets its scopes under: what its application reports, made config-friendly."""
+    read_scopes: list[str] | None
+    """None: every scope (ignore_scopes is on)."""
     write_scope: str
     schema_version: int
     semantic_search: str
     """'ready (<model>)', or why only keyword search is available."""
     connected_app: str | None = None
     """What the application on the other end calls itself (MCP clientInfo.name)."""
-    warning: str | None = None
-    """Set when a different application than usual is using this client name."""
 
 
 class PossibleDuplicate(BaseModel):

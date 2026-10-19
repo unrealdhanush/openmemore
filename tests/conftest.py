@@ -7,8 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from mcp import Client
+from mcp.types import Implementation
 
-from openmcp import db, embed, repo
+from openmcp import config, db, embed, repo
 from openmcp import setup as client_setup
 from openmcp.config import ClientScopes
 from openmcp.models import NewMemory
@@ -136,6 +138,24 @@ def anyio_backend() -> str:
 def conn(tmp_path: Path):
     with closing(db.open_db(tmp_path / "t.db")) as c:
         yield c
+
+
+def connect(home: Path, app: str = "claude-desktop") -> Client:
+    """An in-process MCP session with a server for `home`, as the application `app`
+    (which is also the client name, since app names are already config-friendly here)."""
+    from openmcp.server import build_server
+
+    return Client(build_server(home), client_info=Implementation(name=app, version="test"))
+
+
+def example_clients(home: Path) -> None:
+    """Scopes for the scope tests (once the shipped defaults): 'claude-desktop' reads
+    personal and work, 'cursor' reads only work."""
+    path = home / "config.toml"
+    cfg = config.load_config(path)
+    cfg.clients["claude-desktop"] = config.ClientOverride(read_scopes=("personal", "work"), write_scope="personal")
+    cfg.clients["cursor"] = config.ClientOverride(read_scopes=("work",), write_scope="work")
+    config.save_config(path, cfg)
 
 
 def caller(client: str = "claude-desktop", read=("personal", "work"), write="personal") -> Caller:

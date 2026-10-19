@@ -11,10 +11,10 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from mcp.types import Implementation
 
-from conftest import plain
+from conftest import connect, plain
 from openmcp import config
 from openmcp.cli import initialize
-from openmcp.clients import client_for_app, slug
+from openmcp.clients import client_name
 from openmcp.server import build_server
 
 SOME_EDITOR = Implementation(name="Some Editor 2", version="1.0")
@@ -22,7 +22,7 @@ COMMAND = ("/opt/openmcp/bin/openmcp",)
 
 
 def generic(home, app):
-    """The generic snippet's server: `openmcp serve`, no --client, in its own process."""
+    """The generic snippet's server: `openmcp serve`, in its own process."""
     return Client(
         StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve"],
                               env={"OPENMCP_HOME": str(home)}),
@@ -33,20 +33,19 @@ def generic(home, app):
 # --- naming clients from what they report ----------------------------------------------
 
 
-def test_client_names_come_from_pins_then_the_app_itself():
-    """No table of known clients: a name is what the app reports, unless config pins one."""
-    assert client_for_app("Some Editor", {"Some Editor": "my-editor"}) == "my-editor"
-    assert client_for_app("claude-ai", {}) == "claude-ai"
-    assert client_for_app("Visual Studio Code", {}) == "visual-studio-code"
-    assert client_for_app("cursor-vscode", {}) == "cursor-vscode"
-    assert client_for_app("Some Editor 2", {}) == "some-editor-2"
-    assert client_for_app(None, {}) == "mcp-client"
-    assert slug("Zed / Preview!") == "zed-preview" and slug("???") == "mcp-client"
+def test_client_names_are_the_apps_own():
+    """No table of known clients and no renaming: a name is what the app reports."""
+    assert client_name("claude-ai") == "claude-ai"
+    assert client_name("Visual Studio Code") == "visual-studio-code"
+    assert client_name("cursor-vscode") == "cursor-vscode"
+    assert client_name("Some Editor 2") == "some-editor-2"
+    assert client_name("Zed / Preview!") == "zed-preview"
+    assert client_name(None) == client_name("???") == "mcp-client"
 
 
 @pytest.mark.anyio
 async def test_m3_5_done_when_an_unknown_client_works_from_the_generic_snippet(home):
-    """No registry entry, no --client: the server names the client from clientInfo, applies
+    """Nothing about this client is known: the server names it from clientInfo, applies
     the scopes configured for that name, and it records and recalls like any client."""
     initialize(home)
     path = home / "config.toml"
@@ -60,7 +59,7 @@ async def test_m3_5_done_when_an_unknown_client_works_from_the_generic_snippet(h
             "question": "How do I profile a slow SQLite query?", "answer_summary": "Use EXPLAIN QUERY PLAN.",
         })
         assert not recorded.is_error
-    assert (ping["client"], ping["identified_by"]) == ("some-editor-2", "clientInfo")
+    assert ping["client"] == "some-editor-2"
     assert (ping["read_scopes"], ping["write_scope"]) == (["work"], "work")
 
     async with generic(home, Implementation(name="Another Tool", version="3")) as other:
@@ -78,45 +77,35 @@ async def test_m3_5_done_when_an_unknown_client_works_from_the_generic_snippet(h
 
 
 @pytest.mark.anyio
-async def test_configs_from_before_keep_their_names_through_pins(home):
-    """Existing [clients.claude-desktop] scopes keep applying once the app is pinned to it."""
-    initialize(home)
-    config.set_client_app(home / "config.toml", "claude-desktop", "claude-ai")
-    async with Client(build_server(None, home), client_info=Implementation(name="claude-ai", version="1")) as c:
-        ping = (await c.call_tool("ping", {})).structured_content
-    assert (ping["client"], ping["read_scopes"]) == ("claude-desktop", ["personal", "work"])
-
-
-@pytest.mark.anyio
-async def test_a_captured_app_without_a_client_name_isnt_recorded_twice(home):
-    """VS Code started from the generic snippet, with its transcripts captured: its
-    record_exchange calls are skipped, not stored on top of the captured chat."""
+async def test_a_captured_app_isnt_recorded_twice(home):
+    """VS Code, with its transcripts captured: its record_exchange calls are skipped,
+    not stored on top of the captured chat."""
     initialize(home)
     config.enable_capture(home / "config.toml", "vscode-copilot")
     vscode = Implementation(name="Visual Studio Code", version="1.99.3")
-    async with Client(build_server(None, home), client_info=vscode) as c:
+    async with Client(build_server(home), client_info=vscode) as c:
         result = (await c.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
     assert result["conversation_id"] is None and "captured" in result["note"]
-    async with Client(build_server(None, home), client_info=SOME_EDITOR) as c:
+    async with Client(build_server(home), client_info=SOME_EDITOR) as c:
         stored = (await c.call_tool("record_exchange", {"question": "q", "answer_summary": "a"})).structured_content
     assert stored["conversation_id"] is not None
 
 
 @pytest.mark.anyio
-async def test_a_pin_in_config_names_an_app(home):
+async def test_each_call_records_the_application(home):
+    """The audit log keeps what each application called itself, beside its client name;
+    resources (which get no context) use the session's application."""
     initialize(home)
-    config.set_client_app(home / "config.toml", "my-editor", "Some Editor 2")
-    async with Client(build_server(None, home), client_info=SOME_EDITOR) as c:
-        ping = (await c.call_tool("ping", {})).structured_content
-    assert (ping["client"], ping["warning"]) == ("my-editor", None)
+    async with Client(build_server(home), client_info=Implementation(name="claude-ai", version="1")) as c:
+        assert (await c.call_tool("ping", {})).structured_content["connected_app"] == "claude-ai"
+        await c.read_resource("openmcp://profile")
+    rows = [tuple(r) for r in config_db(home).execute("SELECT client, app, tool FROM audit_log ORDER BY id")]
+    assert rows == [("claude-ai", "claude-ai", "ping"), ("claude-ai", "claude-ai", "openmcp://profile")]
 
 
-@pytest.mark.anyio
-async def test_an_explicit_client_still_wins(home):
-    initialize(home)
-    async with Client(build_server("cursor", home), client_info=SOME_EDITOR) as c:
-        ping = (await c.call_tool("ping", {})).structured_content
-    assert (ping["client"], ping["identified_by"]) == ("cursor", "--client")
+def config_db(home):
+    from openmcp import db
+    return db.connect(home / "openmcp.db")
 
 
 # --- CLI -------------------------------------------------------------------------------
@@ -127,7 +116,7 @@ async def test_clients_command_lists_the_apps_that_connected(home):
     from typer.testing import CliRunner
     from openmcp.cli import app
     initialize(home)
-    async with Client(build_server(None, home), client_info=SOME_EDITOR) as c:
+    async with Client(build_server(home), client_info=SOME_EDITOR) as c:
         await c.call_tool("ping", {})
     result = CliRunner().invoke(app, ["clients"], env={"COLUMNS": "200"})
     out = plain(result.output)
