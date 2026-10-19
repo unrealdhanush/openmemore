@@ -8,12 +8,13 @@ from __future__ import annotations
 import hashlib
 import json
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from openmcp.ingest import registry
 from openmcp.ingest.registry import Importer
+from openmcp.models import ParsedMemory
 
 
 class ExportError(ValueError):
@@ -26,6 +27,8 @@ class Export:
     conversations: list[Any]
     """Raw conversations as exported; the importer parses one at a time."""
     file_hash: str
+    memories: list[ParsedMemory] = field(default_factory=list)
+    memory_errors: list[str] = field(default_factory=list)
 
 
 def file_hash(path: Path) -> str:
@@ -73,6 +76,10 @@ def load(path: Path) -> Export:
     importer = recognize(doc)
     try:
         conversations = importer.items(doc)
+        memories, memory_errors = importer.memories(doc) if importer.memories else ([], [])
     except ValueError as e:
         raise ExportError(str(e)) from None
-    return Export(importer=importer, conversations=conversations, file_hash=file_hash(identity))
+    return Export(
+        importer=importer, conversations=conversations, file_hash=file_hash(identity),
+        memories=memories, memory_errors=memory_errors,
+    )

@@ -143,6 +143,7 @@ class Message(NewMessage):
     """A row of `messages`."""
 
     id: int
+    recall: bool = False
 
 
 class ChunkMatch(BaseModel):
@@ -217,6 +218,23 @@ class ParsedConversation(BaseModel):
     updated_at: AwareDatetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     messages: list[ParsedMessage] = Field(default_factory=list)
+    scope: Scope | None = None
+    """The scope it had where it came from (an OpenMCP export); None for provider exports."""
+
+
+class ParsedMemory(BaseModel):
+    """A memory read from an OpenMCP export, before it is stored."""
+
+    kind: Kind
+    content: MemoryText
+    subject: Label | None = None
+    project: Label | None = None
+    scope: Scope | None = None
+    source_client: str
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
 
 
 # --- MCP tool arguments --------------------------------------------------------------

@@ -164,13 +164,19 @@ def setup(
 
 
 @app.command("clients")
-def clients_command() -> None:
+def clients_command(
+    show_all: bool = typer.Option(False, "--all", "-a", help="Also list names from earlier versions' audit history."),
+) -> None:
     """List the MCP clients that have connected, and the scopes each one gets."""
     from openmcp.capture import captured_source
+    from openmcp.clients import client_name
 
     cfg = config.load_config(config.config_path(config.home()))
     with _db() as conn:
         seen = repo.seen_clients(conn)
+    current = [row for row in seen if row[1] is not None and row[0] == client_name(row[1])]
+    earlier = len(seen) - len(current)
+    seen = seen if show_all else current
     if not seen:
         console.print("No MCP client has connected yet. `openmcp setup` connects one; any MCP client works.")
         return
@@ -186,9 +192,12 @@ def clients_command() -> None:
             f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
         )
     console.print(table)
+    if earlier and not show_all:
+        console.print(f"({earlier} earlier names in the audit history: --all lists them)")
     console.print(
         "\nA client's name is what its application reports. Give it scopes with read_scopes and write_scope "
-        "under [clients.<name>] in config.toml."
+        "under [clients.<name>] in config.toml.",
+        markup=False,
     )
 
 
@@ -461,9 +470,12 @@ def _format_name(importer_name: str) -> str:
 @app.command("import")
 def import_command(
     path: Path = typer.Argument(..., help="The export: the .zip you downloaded, its conversations.json, or an unpacked folder."),
-    scope: str | None = typer.Option(None, "--scope", "-s", help="Scope to store it in (default: config's default write scope)."),
+    scope: str | None = typer.Option(
+        None, "--scope", "-s",
+        help="Scope to store everything in. Default: an OpenMCP export's own scopes; others go to config's default write scope.",
+    ),
 ) -> None:
-    """Import a ChatGPT or Claude data export (or the OpenMCP format), newest conversations first.
+    """Import a ChatGPT or Claude data export (or an OpenMCP export), newest conversations first.
 
     Safe to interrupt: running the same command again resumes where it stopped, and
     importing a file again does nothing once it's done."""
@@ -489,7 +501,7 @@ def import_command(
                 storing = bar.add_task("Importing", total=None)
                 embedding = bar.add_task("Embedding", total=None, visible=False)
                 report = import_export(
-                    conn, path, scope=target_scope, embedder=embedder,
+                    conn, path, scope=target_scope, keep_scopes=request.scope is None, embedder=embedder,
                     progress=lambda done, total: bar.update(storing, completed=done, total=total),
                     embed_progress=lambda done, total: bar.update(embedding, completed=done, total=total, visible=True),
                 )
@@ -509,14 +521,47 @@ def import_command(
         console.print(f"Already imported: this {name} export ({report.total} conversations) was imported before.")
         return
     resumed = f", resuming at {report.resumed_from}" if report.resumed_from else ""
+    what = name if report.provider == "openmcp" else f"{name} export"  # "OpenMCP export" already says it
+    where = f"into scope '{target_scope}'" if request.scope or report.provider != "openmcp" else "keeping its scopes"
     console.print(
-        f"Imported the {name} export into scope '{target_scope}'{resumed}: {report.conversations} conversations "
+        f"Imported the {what} {where}{resumed}: {report.conversations} conversations "
         f"with new messages ({report.messages} messages) of {report.total}."
     )
+    if report.memories or report.memories_present:
+        console.print(f"Memories: {report.memories} added, {report.memories_present} already here.")
     if report.skipped:
         console.print(f"Skipped {report.skipped} with nothing to keep, or that you deleted before.")
     for error in report.errors:
         console.print(f"[yellow]Skipped[/yellow] {error}", highlight=False)
+
+
+@app.command("export")
+def export_command(
+    output: str | None = typer.Option(
+        None, "--output", "-o", help="File to write (default: openmcp-export-<date>.json here), or '-' for stdout."
+    ),
+    scope: list[str] = typer.Option([], "--scope", "-s", help="Only these scopes (default: everything). Repeatable."),
+) -> None:
+    """Export every memory and conversation, in the format `openmcp import` reads back."""
+    from openmcp.export import export_document
+
+    with _db() as conn, audit.audited(conn, CLI_CLIENT, "export") as call:
+        doc = export_document(conn, scopes=scope or None)
+        call.summary = f"{len(doc['memories'])} memories, {len(doc['conversations'])} conversations"
+        call.result_count = len(doc["memories"]) + len(doc["conversations"])
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    if output == "-":
+        sys.stdout.write(text)
+        return
+    path = Path(output) if output else Path(f"openmcp-export-{datetime.now():%Y%m%d-%H%M%S}.json")
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o600)  # everything you've stored: readable by you only
+    messages = sum(len(c["messages"]) for c in doc["conversations"])
+    current = sum(1 for m in doc["memories"] if m["superseded_by"] is None)
+    console.print(
+        f"Exported {current} memories ({len(doc['memories']) - current} earlier versions) and "
+        f"{len(doc['conversations'])} conversations ({messages} messages) to {path}"
+    )
 
 
 @app.command("status")

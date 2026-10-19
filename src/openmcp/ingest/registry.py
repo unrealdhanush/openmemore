@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from openmcp.models import ParsedConversation
+from openmcp.models import ParsedConversation, ParsedMemory
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,8 @@ class Importer:
     """A raw conversation's (provider, id), as stored."""
     conversation: Callable[[Any], ParsedConversation | None]
     """A raw conversation, parsed; None if there's nothing to keep."""
+    memories: Callable[[Any], tuple[list[ParsedMemory], list[str]]] | None = None
+    """The document's memories, and why any were skipped (OpenMCP exports have them)."""
 
 
 _registered: list[Importer] = []
