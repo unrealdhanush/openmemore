@@ -36,8 +36,6 @@ VectorTable = Literal["memories", "chunks"]
 """Tables whose rows get embeddings (SPEC.md M2); each has a `<table>_vec` companion."""
 VECTOR_TABLES: tuple[VectorTable, ...] = ("memories", "chunks")
 
-ExportProvider = Literal["chatgpt", "claude"]
-"""Providers whose data exports `openmcp import` reads (SPEC.md M3)."""
 JobStatus = Literal["queued", "running", "done", "failed"]
 
 CaptureSource = Literal["claude-code", "vscode-copilot"]
@@ -181,7 +179,8 @@ class IngestJob(BaseModel):
     """A row of `ingest_jobs`: one export file being imported, resumable from `cursor`."""
 
     id: int | None = None
-    provider: ExportProvider
+    provider: str
+    """The importer that read it (openmcp.ingest.registry), e.g. 'chatgpt'."""
     file_path: str
     file_hash: str
     """sha256 of the file: importing the same file again is a no-op once it's done."""
@@ -271,6 +270,8 @@ class PingResult(BaseModel):
     ok: bool
     version: str
     client: str
+    identified_by: Literal["--client", "clientInfo"]
+    """How the client name was found: given at start, or from the name the app reported."""
     read_scopes: list[str]
     write_scope: str
     schema_version: int
@@ -310,11 +311,13 @@ class ForgetResult(BaseModel):
 
 
 class RecordExchangeResult(BaseModel):
-    conversation_id: int
-    """Pass this back on later record_exchange calls in the same chat."""
-    message_ids: list[int]
+    conversation_id: int | None
+    """Pass this back on later record_exchange calls in the same chat (None if not stored)."""
+    message_ids: list[int] = Field(default_factory=list)
     redacted: list[str] = Field(default_factory=list)
     """Why parts of the exchange were replaced with [REDACTED], if any were."""
+    note: str | None = None
+    """Why nothing was stored, when nothing was."""
 
 
 class SearchHit(BaseModel):

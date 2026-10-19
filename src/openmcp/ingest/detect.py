@@ -1,6 +1,7 @@
 """Opening an export (SPEC.md Section 10): the .zip a provider sends, the
-conversations.json inside it, or a folder it was unpacked into. The provider is
-recognized from the contents, not the file name."""
+conversations.json inside it, an unpacked folder, or any JSON file in a registered
+format. The format is recognized from the contents by the importer registry, never from
+the file name."""
 
 from __future__ import annotations
 
@@ -9,13 +10,10 @@ import json
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
-from openmcp.ingest import chatgpt, claude
-from openmcp.models import ExportProvider
-
-PARSERS: dict[ExportProvider, ModuleType] = {"chatgpt": chatgpt, "claude": claude}
+from openmcp.ingest import registry
+from openmcp.ingest.registry import Importer
 
 
 class ExportError(ValueError):
@@ -24,9 +22,9 @@ class ExportError(ValueError):
 
 @dataclass
 class Export:
-    provider: ExportProvider
+    importer: Importer
     conversations: list[Any]
-    """Raw conversations as exported; the provider's parser reads one at a time."""
+    """Raw conversations as exported; the importer parses one at a time."""
     file_hash: str
 
 
@@ -38,8 +36,8 @@ def file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _conversations_file(path: Path) -> tuple[bytes, Path]:
-    """The bytes of conversations.json, and the file whose hash identifies the export."""
+def _document_file(path: Path) -> tuple[bytes, Path]:
+    """The bytes of the export's JSON document, and the file whose hash identifies it."""
     if path.is_dir():
         candidate = path / "conversations.json"
         if not candidate.is_file():
@@ -54,24 +52,27 @@ def _conversations_file(path: Path) -> tuple[bytes, Path]:
     return path.read_bytes(), path
 
 
-def detect(conversations: list[Any]) -> ExportProvider:
-    for raw in conversations:
-        if isinstance(raw, dict):
-            if "mapping" in raw:
-                return "chatgpt"
-            if "chat_messages" in raw:
-                return "claude"
-    raise ExportError("conversations.json doesn't look like a ChatGPT or Claude export")
+def recognize(doc: Any) -> Importer:
+    for importer in registry.importers():
+        if importer.matches(doc):
+            return importer
+    known = ", ".join(i.display for i in registry.importers())
+    raise ExportError(f"this doesn't look like a format OpenMCP can import (it reads: {known})")
 
 
 def load(path: Path) -> Export:
     if not path.exists():
         raise ExportError(f"{path} doesn't exist")
-    data, identity = _conversations_file(path)
+    data, identity = _document_file(path)
     try:
-        conversations = json.loads(data)
+        doc = json.loads(data)
     except ValueError as e:
-        raise ExportError(f"conversations.json isn't valid JSON: {e}") from None
-    if not isinstance(conversations, list):
-        raise ExportError("conversations.json should hold a list of conversations")
-    return Export(provider=detect(conversations), conversations=conversations, file_hash=file_hash(identity))
+        raise ExportError(f"it isn't valid JSON: {e}") from None
+    if not isinstance(doc, (list, dict)):
+        raise ExportError("it should hold a list of conversations, or an OpenMCP conversations document")
+    importer = recognize(doc)
+    try:
+        conversations = importer.items(doc)
+    except ValueError as e:
+        raise ExportError(str(e)) from None
+    return Export(importer=importer, conversations=conversations, file_hash=file_hash(identity))

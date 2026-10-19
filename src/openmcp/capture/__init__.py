@@ -26,16 +26,30 @@ from openmcp.models import CaptureFile, CaptureSource, ParsedConversation
 
 @dataclass(frozen=True)
 class Source:
+    """A transcript reader: the only client-specific code OpenMCP needs, and optional
+    (record_exchange works for every client). It names the application it reads, as
+    that application reports itself over MCP."""
+
     files: Callable[[Path], Iterable[Path]]
     """User home -> this source's transcript files."""
     parse: Callable[[Path, int], tuple[ParsedConversation | None, int]]
     """(file, byte offset) -> (conversation, offset to resume from next time)."""
+    app: str
+    """The application's MCP clientInfo name, confirmed from a real session."""
 
 
 SOURCES: dict[CaptureSource, Source] = {
-    "claude-code": Source(claude_code.transcript_files, claude_code.parse),
-    "vscode-copilot": Source(vscode_copilot.transcript_files, vscode_copilot.parse),
+    "claude-code": Source(claude_code.transcript_files, claude_code.parse, app="claude-code"),
+    "vscode-copilot": Source(vscode_copilot.transcript_files, vscode_copilot.parse, app="Visual Studio Code"),
 }
+
+
+def captured_source(client: str, app: str | None, enabled: Iterable[str]) -> str | None:
+    """The enabled transcript reader for this client, by its name or its application."""
+    for name in enabled:
+        if name == client or (app is not None and SOURCES[name].app == app):
+            return name
+    return None
 
 
 @dataclass
