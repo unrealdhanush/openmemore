@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from openmcp import embed, repo
+from openmcp import embed, relations, repo
 from openmcp.models import CHAT_ORDER_NOTE, ChunkMatch, Kind, Memory, SearchHit, SearchResult
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
@@ -136,6 +136,7 @@ def _memory_hit(m: Memory, score: float, now: datetime, disputed: bool = False) 
         replaced_by=m.superseded_by,
         valid_from=m.valid_from,
         valid_to=m.valid_to,
+        confidence=m.confidence if m.confidence is not None else relations.DEFAULT_CONFIDENCE,
     )
 
 
@@ -171,6 +172,16 @@ def similar_enough(
         [(m, d) for m, d in memories if embed.similarity(d) >= cutoff],
         [c for c in chunks if embed.similarity(c.rank) >= cutoff],
     )
+
+
+CONFIDENCE_WEIGHT = 0.002
+"""Up to about this much rank boost for a well-confirmed memory: enough to order otherwise
+close matches (a rank step is ~0.0003 near the top), not to outrank a better match."""
+
+
+def confidence_boost(confidence: float | None) -> float:
+    c = confidence if confidence is not None else relations.DEFAULT_CONFIDENCE
+    return CONFIDENCE_WEIGHT * (c - relations.DEFAULT_CONFIDENCE) / (1 - relations.DEFAULT_CONFIDENCE)
 
 
 def recency_boost(when: datetime | None, now: datetime) -> float:
@@ -249,6 +260,8 @@ def search_context(
     for entry in fused.values():
         item = entry.item
         entry.score += recency_boost(item.updated_at if isinstance(item, Memory) else item.created_at, now)
+        if isinstance(item, Memory):
+            entry.score += confidence_boost(item.confidence)
         if isinstance(item, ChunkMatch) and item.recall:
             entry.score *= RECALL_WEIGHT
 

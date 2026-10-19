@@ -6,13 +6,15 @@ change, done here and only here, inside the caller's transaction:
   new one starts (openmcp.repo.mark_superseded).
 - derived_from (memory -> conversation): where a memory came from.
 - contradicts (a <-> b): the two disagree; until resolved, neither is current truth.
-- supports (memory -> conversation or memory): a confirmation, which raises confidence.
+- supports (memory -> conversation, or -> itself when no conversation is cited): a
+  confirmation by a source, which raises confidence (see `confirmed`).
 
 Callers hold a transaction (db.transaction) around these.
 """
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime
@@ -106,6 +108,54 @@ def open_contradictions(conn: sqlite3.Connection, scopes=None) -> list[Link]:
     return [Link.model_validate(dict(r)) for r in conn.execute(
         "SELECT l.* FROM memory_links l JOIN memories m ON m.id = l.from_memory "
         f"WHERE l.type = 'contradicts' AND l.resolved_at IS NULL{where} ORDER BY l.id", params)]
+
+
+DEFAULT_CONFIDENCE = 0.6
+"""Confidence of a memory saved without one: stated once, by one source."""
+CONFIDENCE_CAP = 0.98
+"""Confirmation raises confidence towards this, never to certainty."""
+SUPPORT_LIKELIHOOD_RATIO = 2.0
+"""How much one independent confirmation multiplies the odds that a memory is right."""
+SAME_SOURCE_WINDOW_S = 86_400
+"""A source confirming the same memory again within a day counts once."""
+
+
+def confirmed(confidence: float | None, reliability: float = 1.0) -> float:
+    """Confidence after one independent confirmation, adding evidence in log-odds (after
+    LongMemory's evidence formula): logit(c) + reliability * ln(likelihood ratio)."""
+    c = min(max(confidence if confidence is not None else DEFAULT_CONFIDENCE, 0.01), CONFIDENCE_CAP)
+    logit = math.log(c / (1 - c)) + reliability * math.log(SUPPORT_LIKELIHOOD_RATIO)
+    return round(min(1 / (1 + math.exp(-logit)), CONFIDENCE_CAP), 4)
+
+
+def support(conn: sqlite3.Connection, memory_id: int, now: datetime, *, source: str,
+            conversation_id: int | None = None) -> bool:
+    """Record that `source` stated `memory_id` again, citing a conversation or not, and
+    raise its confidence. Returns whether it counted: a conversation the memory already
+    came from or was confirmed by doesn't, nor does the same source again within a day."""
+    if conversation_id is not None:
+        if repo.get_conversation(conn, conversation_id) is None or conn.execute(
+            "SELECT 1 FROM memory_links WHERE from_memory = ? AND to_conversation = ? "
+            "AND type IN ('derived_from', 'supports')", (memory_id, conversation_id)).fetchone():
+            return False
+    else:
+        since = repo.to_iso(datetime.fromtimestamp(now.timestamp() - SAME_SOURCE_WINDOW_S, now.tzinfo))
+        memory = repo.get_memory(conn, memory_id)
+        if memory is None or memory.source_client == source and memory.created_at.timestamp() > now.timestamp() - SAME_SOURCE_WINDOW_S:
+            return False  # the source restating what it just saved
+        if conn.execute(
+            "SELECT 1 FROM memory_links WHERE from_memory = ? AND type = 'supports' AND to_conversation IS NULL "
+            "AND to_memory = ? AND source = ? AND created_at > ?", (memory_id, memory_id, source, since)).fetchone():
+            return False
+    memory = repo.get_memory(conn, memory_id)
+    if memory is None:
+        return False
+    if conversation_id is not None:
+        _add(conn, "supports", memory_id, now, source, to_conversation=conversation_id)
+    else:
+        _add(conn, "supports", memory_id, now, source, to_memory=memory_id)  # a confirmation with no conversation
+    conn.execute("UPDATE memories SET confidence = ? WHERE id = ?", (confirmed(memory.confidence), memory_id))
+    return True
 
 
 def links(conn: sqlite3.Connection, memory_id: int, type_: LinkType | None = None) -> list[Link]:

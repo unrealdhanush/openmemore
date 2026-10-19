@@ -373,6 +373,8 @@ class Rejection(BaseModel):
 class SaveMemoriesResult(BaseModel):
     saved: list[int] = Field(default_factory=list)
     skipped_duplicates: int = 0
+    confirmed: list[int] = Field(default_factory=list)
+    """Memories already stored that this call stated again: their confidence went up."""
     possible_duplicates: list[PossibleDuplicate] = Field(default_factory=list)
     rejected: list[Rejection] = Field(default_factory=list)
 
@@ -421,6 +423,8 @@ class SearchHit(BaseModel):
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     """For memories: when it was true; valid_to None while it still is."""
+    confidence: float | None = None
+    """For memories: how sure (0.6 when stated once; confirmations raise it)."""
     """A recap of earlier conversations, ranked below them: prefer the original it points to."""
 
 
@@ -438,6 +442,8 @@ class ProfileItem(BaseModel):
     project: str | None = None
     source: str
     updated_at: datetime
+    confidence: float | None = None
+    """How sure: stated once is 0.6; each independent confirmation raises it."""
 
 
 class Profile(ReadResult):
@@ -618,6 +624,8 @@ class ProposeResult(BaseModel):
     proposed: list[int] = Field(default_factory=list)
     skipped_duplicates: int = 0
     """Already a memory, or already proposed or rejected, in that scope."""
+    confirmed: list[int] = Field(default_factory=list)
+    """Memories already stored that new conversations confirmed: their confidence went up."""
     similar_to_memories: list[ProposedSimilar] = Field(default_factory=list)
     rejected: list[Rejection] = Field(default_factory=list)
     conversations_done: int = 0

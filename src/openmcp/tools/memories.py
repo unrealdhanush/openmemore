@@ -86,8 +86,10 @@ def save_memories(
     with db.transaction(conn):
         for (index, item), vector in zip(accepted, vectors):
             digest = content_hash(item.content)
-            if repo.find_active_duplicate(conn, scope, digest):
+            if existing := repo.find_active_duplicate(conn, scope, digest):
                 result.skipped_duplicates += 1
+                if relations.support(conn, existing.id, now, source=caller.client):
+                    result.confirmed.append(existing.id)
                 continue
             # Near-duplicates are saved anyway and reported, so the calling model can follow
             # up with update_memory or forget. Earlier items in this call count too.

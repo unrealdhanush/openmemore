@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.models import (
     BATCH_CHARS,
     CONVERSATION_BATCH_CHARS,
@@ -145,8 +145,15 @@ def propose_memories(
     with db.transaction(conn):
         for (index, item, scope), vector in zip(accepted, vectors):
             digest = content_hash(item.content)
+            # A statement already stored is confirmed by the conversations it was found in again.
+            if existing := repo.find_active_duplicate(conn, scope, digest):
+                result.skipped_duplicates += 1
+                if any([relations.support(conn, existing.id, now, source=caller.client, conversation_id=cid)
+                        for cid in item.conversation_ids]):
+                    result.confirmed.append(existing.id)
+                continue
             # Earlier items in this call count too: they're pending by now.
-            if repo.find_active_duplicate(conn, scope, digest) or repo.proposed_or_rejected(conn, scope, digest):
+            if repo.proposed_or_rejected(conn, scope, digest):
                 result.skipped_duplicates += 1
                 continue
             similar = _similar_memory(conn, scope, item.kind, vector) if vector is not None else None

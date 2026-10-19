@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from openmcp import repo
+from openmcp import relations, repo
 from openmcp.models import ACTIVE_PROJECT_DAYS, PROFILE_GROUP_CAP, Kind, Memory, Profile, ProfileItem
 from openmcp.safety.wrap import wrap
 from openmcp.tools import Caller
@@ -19,6 +19,7 @@ def _item(m: Memory) -> ProfileItem:
         project=m.project,
         source=m.source_client,
         updated_at=m.updated_at,
+        confidence=m.confidence if m.confidence is not None else relations.DEFAULT_CONFIDENCE,
     )
 
 
