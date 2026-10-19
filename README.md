@@ -6,7 +6,7 @@ One shared memory for all your AI assistants, kept on your own machine.
 
 Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMCP is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
 
-**Status:** pre-release (v1 is milestones M0 to M4 of [SPEC.md](SPEC.md); M5, consolidation and review, is in progress). The repository is private, and there's no published package yet.
+**Status:** pre-release. v1 is milestones M0 to M4 of [SPEC.md](SPEC.md), and M5 (consolidation and review) is done; the milestone map in SPEC.md Section 11 lists what's next. The repository is private, and there's no published package yet.
 
 ## How it works
 
