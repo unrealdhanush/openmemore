@@ -10,11 +10,13 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.models import Kind, Label, Memory, MemoryText, NewMemory, NewProposal, Proposal
 from openmcp.tools.memories import NEAR_DUPLICATE_SIMILARITY, content_hash, embed_texts, secret_in
 
 DUPLICATE_FINDER = "openmcp"
+REVIEW = "review"
+"""Source of links made by approving: the user's decision on the review page."""
 """source_client of merge proposals: found by comparing vectors, not by a model."""
 
 
@@ -97,17 +99,14 @@ def approve(conn: sqlite3.Connection, proposal_id: int, edits: Approval | None =
             source_client=proposal.source_client,
             confidence=proposal.confidence,
             content_hash=digest,
-            metadata={
-                "proposal": proposal.id,
-                **({"conversations": proposal.conversation_ids} if proposal.conversation_ids else {}),
-                **({"replaced": [m.id for m in replaced]} if replaced else {}),
-            },
+            metadata={"proposal": proposal.id},
             created_at=now,
             updated_at=now,
         ))
         for old in replaced:
-            repo.mark_superseded(conn, old.id, memory_id, now,
-                                 valid_until=None if proposal.action == "merge" else valid_from or now)
+            relations.supersede(conn, memory_id, old.id, now, source=REVIEW,
+                                valid_until=None if proposal.action == "merge" else valid_from or now)
+        relations.derived_from(conn, memory_id, proposal.conversation_ids, now, source=proposal.source_client)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(memory_id, vector)])
         repo.decide_proposal(conn, proposal.id, "approved", now, memory_id)

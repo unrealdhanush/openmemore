@@ -270,6 +270,8 @@ class ParsedMemory(BaseModel):
 
     valid_from: AwareDatetime | None = None
     valid_to: AwareDatetime | None = None
+    derived_from: list[tuple[str, str]] = Field(default_factory=list)
+    """The conversations it came from, as (provider, external id)."""
 
     kind: Kind
     content: MemoryText

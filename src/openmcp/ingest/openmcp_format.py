@@ -10,7 +10,8 @@ small converter from any export (Gemini via Google Takeout, Perplexity, ...) to 
         {"id": 3, "kind": "preference", "content": "...", "subject": null, "project": null,
          "scope": "personal", "source": "claude-ai", "confidence": null, "metadata": {},
          "created_at": "...", "updated_at": "...", "superseded_by": null,
-         "valid_from": "...", "valid_to": null, "superseded_at": null}  // when it was true (optional)
+         "valid_from": "...", "valid_to": null, "superseded_at": null,  // when it was true (optional)
+         "derived_from": [{"provider": "...", "id": "..."}]}          // its source conversations (optional)
       ],
       "conversations": [
         {
@@ -89,6 +90,7 @@ class Memory(BaseModel):
     superseded_by: int | None = None
     valid_from: AwareDatetime | None = None
     valid_to: AwareDatetime | None = None
+    derived_from: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def matches(doc: Any) -> bool:
@@ -125,6 +127,8 @@ def memories(doc: Any) -> tuple[list[ParsedMemory], list[str]]:
                 source_client=m.source, confidence=m.confidence, metadata=m.metadata,
                 created_at=m.created_at, updated_at=m.updated_at,
                 valid_from=m.valid_from, valid_to=m.valid_to,
+                derived_from=[(str(d["provider"]), str(d["id"])) for d in m.derived_from
+                              if isinstance(d, dict) and d.get("provider") and d.get("id")],
             ))
         except ValidationError as e:
             errors.append(f"memory {n}: {e.errors()[0]['loc']}: {e.errors()[0]['msg']}")

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.ingest import store_conversation
 from openmcp.ingest.detect import Export, load
 from openmcp.models import IngestJob, NewMemory
@@ -147,12 +147,16 @@ def _import_memories(conn: sqlite3.Connection, export: Export, scope: str, keep_
             if repo.find_active_duplicate(conn, target, digest):
                 report.memories_present += 1
                 continue
-            repo.insert_memory(conn, NewMemory(
+            memory_id = repo.insert_memory(conn, NewMemory(
                 kind=m.kind, content=m.content, subject=m.subject, project=m.project, scope=target,
                 source_client=m.source_client, confidence=m.confidence, content_hash=digest, metadata=m.metadata,
                 created_at=m.created_at, updated_at=m.updated_at,
                 valid_from=m.valid_from, valid_to=m.valid_to,
             ))
+            relations.derived_from(conn, memory_id, [
+                cid for provider, external_id in m.derived_from
+                if (cid := repo.find_conversation(conn, provider, external_id)) is not None
+            ], datetime.now(UTC), source="import")
             report.memories += 1
 
 

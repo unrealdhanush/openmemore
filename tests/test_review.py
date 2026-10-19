@@ -7,7 +7,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from conftest import caller, connect
-from openmcp import db, repo
+from openmcp import db, relations, repo
 from openmcp.cli import initialize
 from openmcp.models import MemoryInput, ProposalInput
 from openmcp.proposals import Approval, ProposalError, approve, find_duplicates, reject
@@ -49,7 +49,7 @@ def test_approving_as_a_replacement_for_the_similar_memory(conn, fake_embedder):
     [proposal_id] = propose(conn, "prefers green tea in the morning daily")
     new = approve(conn, proposal_id, Approval(replace_similar=True))
     assert repo.get_memory(conn, old).superseded_by == new
-    assert repo.get_memory(conn, new).metadata["replaced"] == [old]
+    assert [(l.type, l.to_memory) for l in relations.links(conn, new)] == [("supersedes", old)]
     assert [m.id for m in repo.memory_chain(conn, new)] == [old, new]
 
 
@@ -240,7 +240,7 @@ def test_approving_a_proposal_that_updates_a_memory_replaces_it(conn):
                 for c in ("Picked idea 2.", "Picked idea 1."))
     new = approve(conn, p1)
     assert repo.get_memory(conn, old).superseded_by == new
-    assert repo.get_memory(conn, new).metadata["replaced"] == [old]
+    assert [(l.type, l.to_memory) for l in relations.links(conn, new)] == [("supersedes", old)]
     with pytest.raises(ProposalError, match="changed since"):  # the other one named the same, now-replaced memory
         approve(conn, p2)
     kept = approve(conn, p2, Approval(keep_replaced=True))
@@ -253,7 +253,7 @@ def test_keeping_both(conn):
     old = insert(conn, "Likes tea.", kind="preference")
     [proposal_id] = propose_memories(conn, ME, [ProposalInput(kind="preference", content="Likes coffee.", replaces=old)], []).proposed
     new = approve(conn, proposal_id, Approval(keep_replaced=True))
-    assert repo.get_memory(conn, old).active and "replaced" not in repo.get_memory(conn, new).metadata
+    assert repo.get_memory(conn, old).active and relations.links(conn, new) == []
 
 
 def test_the_page_shows_what_a_proposal_updates(page, home):

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from openmcp import db, embed, repo
+from openmcp import db, embed, relations, repo
 from openmcp.models import (
     ForgetResult,
     Kind,
@@ -147,7 +147,7 @@ def update_memory(
             valid_from=valid_from or now,
         )
         new_id = repo.insert_memory(conn, new)
-        repo.mark_superseded(conn, old.id, new_id, now, valid_until=valid_from or now)
+        relations.supersede(conn, new_id, old.id, now, valid_until=valid_from or now, source=caller.client)
         if vector is not None:
             repo.store_vectors(conn, "memories", [(new_id, vector)])
     return UpdateMemoryResult(new_id=new_id, previous_id=old.id)

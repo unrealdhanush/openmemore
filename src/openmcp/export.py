@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from openmcp import repo
+from openmcp import relations, repo
 from openmcp.ingest.openmcp_format import FORMAT, VERSION
 
 EVERYTHING = 1_000_000_000
@@ -39,6 +39,8 @@ def export_document(conn: sqlite3.Connection, scopes: Sequence[str] | None = Non
                 "scope": m.scope, "source": m.source_client, "confidence": m.confidence, "metadata": m.metadata,
                 "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at), "superseded_by": m.superseded_by,
                 "valid_from": _iso(m.valid_from), "valid_to": _iso(m.valid_to), "superseded_at": _iso(m.superseded_at),
+                "derived_from": [{"provider": c.provider, "id": c.external_id}
+                                 for cid in relations.sources(conn, m.id) if (c := repo.get_conversation(conn, cid))],
             }
             for m in memories
         ],
