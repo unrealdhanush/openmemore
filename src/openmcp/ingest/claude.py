@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from openmcp.ingest.registry import Importer
 from openmcp.models import ParsedConversation, ParsedMessage
 
 PROVIDER = "claude"
@@ -81,3 +82,17 @@ def conversation(raw: Any) -> ParsedConversation | None:
         metadata={"capture": "import"},
         messages=messages,
     )
+
+
+def _identity(raw: Any) -> tuple[str, str] | None:
+    conv_id = external_id(raw)
+    return (PROVIDER, conv_id) if conv_id else None
+
+
+# Lambdas look the functions up at call time, so tests can replace them.
+IMPORTER = Importer(
+    name=PROVIDER, display="Claude",
+    matches=lambda doc: isinstance(doc, list) and any(isinstance(c, dict) and "chat_messages" in c for c in doc),
+    items=lambda doc: doc, updated=lambda raw: updated(raw), identity=lambda raw: _identity(raw),
+    conversation=lambda raw: conversation(raw),
+)

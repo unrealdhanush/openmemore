@@ -72,13 +72,18 @@ def init() -> None:
 
 @app.command()
 def serve(
-    client: str = typer.Option(..., "--client", help="Name of the MCP client launching this server, e.g. claude-desktop."),
+    client: str | None = typer.Option(
+        None, "--client",
+        help="Client name, e.g. claude-desktop. Optional: by default the server names the client from what it "
+        "reports when it connects.",
+    ),
 ) -> None:
     """Run the MCP server over stdio for one client."""
     # stdout carries the MCP protocol: nothing else may be printed to it.
     from openmcp.server import build_server
 
-    client = _client_name(client, "--client")
+    if client is not None:
+        client = _client_name(client, "--client")
     base = config.home()
     initialize(base)
     build_server(client, base).run(transport="stdio")
@@ -95,18 +100,24 @@ def _client_name(value: str, option: str) -> str:
 
 @app.command()
 def setup(
-    client: str = typer.Argument(
-        ..., help="claude-desktop, vscode-copilot, or claude-code (others get printed instructions)."
+    client: str | None = typer.Argument(
+        None,
+        help="The client: vscode-copilot, cursor, or claude-code use the app's own install command; "
+        "any other name (or none) gets the snippet that works in every MCP client.",
+    ),
+    config_file: Path | None = typer.Option(
+        None, "--config", help="Merge the server into this JSON config file (its mcpServers; keeps a .bak copy)."
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the steps without changing anything."),
     dev: bool = typer.Option(
         False, "--dev", help="Register this development checkout itself: the app then runs whatever branch is checked out."
     ),
 ) -> None:
-    """Connect an AI assistant to OpenMCP and install the standing instruction it needs."""
+    """Connect an MCP client to OpenMCP and put the standing instruction on your clipboard."""
     from openmcp import setup as client_setup
 
-    client = _client_name(client, "CLIENT")
+    if client is not None:
+        client = _client_name(client, "CLIENT")
     checkout = client_setup.development_checkout()
     if checkout is not None and not dev:
         # Registering this checkout would make the app run whatever branch is checked out,
@@ -125,7 +136,8 @@ def setup(
             f"{installed[0]} instead, so the app and your data don't follow your branches. "
             "(--dev registers the checkout.)"
         )
-        args = [*installed, "setup", client, *(["--dry-run"] if dry_run else [])]
+        args = [*installed, "setup", *([client] if client else []),
+                *(["--config", str(config_file)] if config_file else []), *(["--dry-run"] if dry_run else [])]
         raise typer.Exit(subprocess.run(args).returncode)
     base = config.home()
     initialize(base)
@@ -133,7 +145,7 @@ def setup(
         base=base, user_home=Path.home(), platform=sys.platform, command=client_setup.openmcp_command()
     )
     incomplete = False
-    for number, step in enumerate(client_setup.plan(client, ctx), start=1):
+    for number, step in enumerate(client_setup.plan(client, ctx, config_file), start=1):
         console.print(f"[bold]{number}. {step.description}[/bold]")
         if step.apply is not None:
             if dry_run:
@@ -156,6 +168,34 @@ def setup(
             _run_embed()
     if incomplete:
         raise typer.Exit(1)
+
+
+@app.command("clients")
+def clients_command() -> None:
+    """List the MCP clients that have connected, and the scopes each one gets."""
+    from openmcp.capture import captured_source
+
+    cfg = config.load_config(config.config_path(config.home()))
+    with _db() as conn:
+        seen = repo.seen_clients(conn)
+    if not seen:
+        console.print("No MCP client has connected yet. `openmcp setup` connects one; any MCP client works.")
+        return
+    table = Table(box=None, header_style="bold")
+    for column in ("client", "application", "reads", "writes", "capture", "calls", "last seen"):
+        table.add_column(column, no_wrap=column != "application")
+    for client, app, calls, last in seen:
+        scopes = config.resolve_client(cfg, client)
+        source = captured_source(client, app, cfg.capture.sources)
+        table.add_row(
+            client, Text(app or "(unknown)"), ", ".join(scopes.read_scopes), scopes.write_scope,
+            f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
+        )
+    console.print(table)
+    console.print(
+        "\nA client's name is what its application reports, unless config pins another: app = \"...\" under "
+        "[clients.<name>]. Give a client scopes with read_scopes and write_scope there."
+    )
 
 
 # --- helpers -------------------------------------------------------------------------
@@ -417,7 +457,11 @@ def capture_command(
 
 # --- import ---------------------------------------------------------------------------
 
-PROVIDER_NAMES = {"chatgpt": "ChatGPT", "claude": "Claude"}
+def _format_name(importer_name: str) -> str:
+    from openmcp.ingest.registry import importer_named
+
+    importer = importer_named(importer_name)
+    return importer.display if importer else importer_name
 
 
 @app.command("import")
@@ -425,7 +469,7 @@ def import_command(
     path: Path = typer.Argument(..., help="The export: the .zip you downloaded, its conversations.json, or an unpacked folder."),
     scope: str | None = typer.Option(None, "--scope", "-s", help="Scope to store it in (default: config's default write scope)."),
 ) -> None:
-    """Import a ChatGPT or Claude data export, newest conversations first.
+    """Import a ChatGPT or Claude data export (or the OpenMCP format), newest conversations first.
 
     Safe to interrupt: running the same command again resumes where it stopped, and
     importing a file again does nothing once it's done."""
@@ -466,7 +510,7 @@ def import_command(
             )
             raise typer.Exit(130) from None
 
-    name = PROVIDER_NAMES[report.provider]
+    name = _format_name(report.provider)
     if report.already_done:
         console.print(f"Already imported: this {name} export ({report.total} conversations) was imported before.")
         return
@@ -494,7 +538,7 @@ def status_command() -> None:
         for j in jobs:
             status = j.status if not j.error else f"{j.status}: {j.error}"
             table.add_row(
-                str(j.id), PROVIDER_NAMES[j.provider], Text(Path(j.file_path).name), Text(status),
+                str(j.id), _format_name(j.provider), Text(Path(j.file_path).name), Text(status),
                 f"{j.processed}/{j.total if j.total is not None else '?'}",
                 _when(j.started_at) if j.started_at else "", _when(j.finished_at) if j.finished_at else "",
             )

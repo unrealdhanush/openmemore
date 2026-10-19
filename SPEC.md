@@ -144,6 +144,7 @@ openmcp/
     server.py           # FastMCP server, tool + prompt registration
     instructions.py     # server instructions + the standing instruction for each client
     setup.py            # `openmcp setup <client>`: register the server, install the standing instruction
+    clients.py          # naming clients from what they report (M3.5); no table of clients
     tools/
       memories.py       # save, update, forget
       conversations.py  # record_exchange, recent_conversations
@@ -162,7 +163,9 @@ openmcp/
       jobs.py           # job table, resumable runner (store, then embed newest first)
       chatgpt.py        # ChatGPT export parser
       claude.py         # Claude export parser
-      detect.py         # open a zip/json/folder, auto-detect the provider from its contents
+      detect.py         # open a zip/json/folder, recognize the format from its contents
+      registry.py       # the importer registry (M3.5): built-in importers plus register()
+      openmcp_format.py # OpenMCP's own conversation format: a way in for any provider via a converter
     audit.py
   scripts/
     benchmark.py        # performance budget check (Section 4.3)
@@ -457,8 +460,8 @@ read_scopes = ["work"]
 write_scope = "work"
 ```
 
-- The client name comes from `openmcp serve --client <name>`.
-- Unknown clients fall back to `[defaults]`.
+- The client name comes from `openmcp serve --client <name>` or, without `--client` (M3.5), from the name the application reports when it connects (MCP `clientInfo`): the `app` pins in config first, otherwise a name made from the application's own (`Some Editor 2` → `some-editor-2`). `ping` says which (`identified_by`).
+- Clients without a `[clients.<name>]` table fall back to `[defaults]`.
 - Scopes are free-form strings; `personal` and `work` are just the starting set.
 - With these defaults, Cursor can't read what Claude Desktop writes (`personal`). That's the isolation working as designed. For the cross-assistant tests (M1, v1), use a client that reads `personal` (e.g. Gemini CLI, which falls back to `[defaults]`) or add `personal` to Cursor's `read_scopes`.
 
@@ -476,19 +479,21 @@ Captured conversations take the source client's `write_scope`.
 
 - **Run from a development checkout** (an editable install, e.g. `uv run openmcp setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmcp` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
 - **VS Code** can also start MCP servers configured for other apps (`chat.mcp.discovery.enabled`). It started Claude Desktop's openmcp entry, so Copilot ran as `claude-desktop` with that client's scopes and tools. `setup vscode-copilot` turns that off (only Claude Desktop's, where the setting is per application).
-- **Client identity check.** The client name comes from `--client` in whatever config launched the server, so it can be wrong. Every audit row records the application on the other end (MCP `clientInfo.name`). Which application a name is for comes from config, `app` under `[clients.<name>]`, never from which app connected first (that made the outcome depend on startup order). `setup` writes it where the name is confirmed: `claude-ai` for `claude-desktop` (seen in the audit log), `Visual Studio Code` for `vscode-copilot` (VS Code sends its `product.json` `nameLong`), `claude-code` for `claude-code`. A warning (in `ping`, the audit summary, and stderr) goes to an application that:
+- **Client identity check.** The client name comes from `--client` in whatever config launched the server, so it can be wrong. Every audit row records the application on the other end (MCP `clientInfo.name`). Which application a name is for comes from config, `app` under `[clients.<name>]`, never from which app connected first (that made the outcome depend on startup order). Since M3.5 these pins are the user's alone (setup writes none), and without `--client` each app is named by what it reports, so this check matters only for a shared `--client`. A warning (in `ping`, the audit summary, and stderr) goes to an application that:
   - uses a name pinned to a different application;
   - is pinned to a different client name (VS Code as `claude-desktop`);
   - shares an unpinned name with other unexplained applications: all of them are flagged as ambiguous, with the `app` line to add.
 
   App names aren't authenticated, so this catches misconfiguration, not attacks.
 
-| Client | Registers the server | Standing instruction | Capture |
-|---|---|---|---|
-| `claude-desktop` | `claude_desktop_config.json` (top-level `mcpServers`) | printed, to paste into Settings → Profile | `record_exchange` |
-| `vscode-copilot` | `settings.json` `mcp.servers` (or `mcp.json` on VS Code 1.102+) | `github.copilot.chat.codeGeneration.instructions` | transcripts |
-| `claude-code` | `claude mcp add --scope user` | marked block in `~/.claude/CLAUDE.md` | transcripts |
-| others | printed snippet | printed | `record_exchange` |
+`openmcp setup [client]` connects a client (M3.5). It never edits another app's files: it uses the vendor's own mechanism where there is one, and otherwise prints the snippet that works in every MCP client (`--config <path>` merges it into a JSON file you name). The standing instruction is the pointer, put on the clipboard.
+
+| Client | How setup adds the server | Capture |
+|---|---|---|
+| `vscode-copilot` | `code --add-mcp <json>` (VS Code's CLI; checked on 1.99.3) | transcripts |
+| `cursor` | Cursor's install link, then its own review prompt | `record_exchange` |
+| `claude-code` | `claude mcp add --scope user` | transcripts |
+| anything else, Claude Desktop included | the generic snippet, printed (or merged with `--config`) | `record_exchange` |
 
 Example Claude Desktop config (README should include one per supported client):
 
@@ -576,24 +581,23 @@ Capture that doesn't depend on the model calling a tool, for clients that save t
 - **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates. Both are tested: after the first batch, a second connection finds the newest conversation and not the oldest; an import killed after 150 conversations resumes at 150 and ends with exactly 500 conversations and 2,000 messages. Still to do by hand: check the parsers against a real export of each provider (kept out of the repo), since the formats are undocumented.
 
 ### M3.5 — Any MCP client
-**Goal: OpenMCP works with every MCP client and every assistant provider, not a fixed list.** Claude Desktop, VS Code, and Claude Code are the first entries in a registry, not the design. Setup so far is code per client (config file, instruction location, transcript format), which works for three clients and not for the hundreds that speak MCP. Only capture really needs per-client code. Three tiers:
-- **Tier 0, any MCP client, no client-specific code.** One identical server snippet, server instructions and tool descriptions to drive the model, `record_exchange` for capture. The long tail lives here, so it must work fully, not as a degraded mode.
-- **Tier 1, popular clients, configured automatically** from a declarative registry rather than a function per client: config path per OS, the key the server entry goes under (`mcpServers`, `servers`, ...), the entry's shape, where the standing instruction goes (a file or setting setup can write, or paste via clipboard), and the client's MCP `clientInfo.name`. An entry is marked supported only after it's checked on a real install. Candidates: Claude Desktop, VS Code, Claude Code, Cursor, Windsurf, Gemini CLI, Zed, Cline.
-- **Tier 2, a few top clients, transcript capture** through the existing adapter interface (a file finder plus a parser), documented so adapters can be contributed.
+**Goal: OpenMCP works with every MCP client and every assistant provider, not a fixed list.**
 
-History from any provider, not just ChatGPT and Claude, works the same way: export importers (M3) and transcript readers (M1.5) become registries of adapters that all produce `ParsedConversation`, with detection by contents. Adding a provider (Gemini via Google Takeout, Cursor, Perplexity, Copilot, ...) means adding an adapter and synthetic fixtures modeled on a real export or transcript, not changing the core.
-
-Work:
-- **Client identity from `clientInfo`.** `--client` becomes optional: the server names the client from what the application reports when the session starts (`claude-ai` → `claude-desktop`, `Visual Studio Code` → `vscode-copilot`, unknown apps by their own name), and `[clients.<name>]` scopes apply to that. This is what lets one snippet work everywhere, and it removes the failure where one app's config entry is started by another (VS Code discovery). `--client` remains an explicit override.
-- **Registry-driven `openmcp setup`**, with the generic snippet plus the pointer instruction (copied to the clipboard) for any client not in the registry.
-- **One-click installs** where a client offers them (e.g. installable extension bundles, install links), each verified on a current version before relying on it.
+**Principle: the core needs no per-client knowledge.** A first version kept a registry of clients (config file locations, entry shapes, instruction locations, `clientInfo` names). Every fact in it belonged to another vendor and could change without notice; Cursor showed it, reporting `cursor-vscode` where its code suggested `Cursor`. So anything client-specific is optional, isolated so that when it breaks nothing else does, and delegated to interfaces the vendor maintains:
+- **Naming:** a client is named by what its application reports when the session starts (MCP `clientInfo`): `Some Editor 2` becomes `some-editor-2`, and `[clients.some-editor-2]` gives it scopes. Config pins (`app = "..."` under `[clients.<name>]`) rename; `--client` still overrides, for configs written before. No table of client names.
+- **Connecting:** one snippet, identical for every client: `openmcp serve`. Setup never edits another app's files. Where a vendor provides a way to add an MCP server, setup uses it, detected when it runs rather than assumed from a version table: VS Code's `code --add-mcp <json>`, Cursor's install link (`cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64>`, which opens Cursor's own review prompt), and `claude mcp add`. Everywhere else, Claude Desktop included, it prints the snippet; `--config <path>` merges it into a JSON file the user names. (Cursor's CLI also accepts `--add-mcp`, a leftover from VS Code that writes a settings file Cursor's agent doesn't read; checked, and not used.)
+- **Instructions:** the pointer instruction, on the clipboard, pasted wherever the client reads the user's own instructions. A variant for captured clients says not to call `record_exchange`.
+- **Capture:** transcript readers are the only client-specific code that's hard to avoid: there's no standard for transcripts. They're optional (`record_exchange` covers every client) and isolated (a reader that fails is reported and skipped). Each declares the application it reads, as that application reports itself, so a captured client connecting without `--client` still isn't recorded twice: its `record_exchange` calls are skipped.
+- **`openmcp clients`** lists the applications that have actually connected (from the audit log), with the scopes each gets.
+- **History from any provider:** importers are a registry (`openmcp.ingest.registry`) with `register()`; OpenMCP's own conversation format is the third importer, a provider-neutral way in through a converter.
 - Web-only assistants (ChatGPT, claude.ai, Gemini on the web) can't start a local server: they're reachable through exports (M3) or remote access (Section 12). Documented, not hidden.
-- **Done when:** a client with no registry entry and no `--client` (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; at least four registry clients, Cursor among them, are set up automatically and verified; importers and transcript readers are registries, with a third provider's importer added through the registry alone; existing setups keep working.
+- **Done when:** a client with no special support and no `--client` (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; the vendor install paths are each checked against a real install; a provider's importer can be added through the registry alone; existing setups keep working.
+- **Status (2026-10-18):** all built and tested. Real installs: Cursor 3.25.9 (connected from a config setup wrote, reported `cursor-vscode`, followed the pointer: `get_profile`, `record_exchange` reusing the conversation, topic search, lookups not recorded); VS Code 1.99.3's `--add-mcp` (writes its own settings and replaces an earlier entry, checked against a throwaway profile); Cursor's install link (used for real: Cursor's prompt wrote `openmcp serve` with no `--client` into its own `~/.cursor/mcp.json`; its server then reported `cursor-vscode`, was named `cursor` through the config pin, and answered from a `personal` memory); `claude mcp add` (its help output; the old registry-era run used the same command). Open: one-click bundles (e.g. for Claude Desktop); plug-in transcript readers in `[capture] sources`.
 
 ### M4 — Scopes and ownership
 - Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
 - `openmcp export` dumps all memories and conversations to JSON.
-- README: install, client setup (from the M3.5 registry, plus the generic path), the safety model, honest limitations.
+- README: install, client setup (the generic snippet, and the vendor installers setup uses), the safety model, honest limitations.
 - **Done when:** a `cursor` client scoped to `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 
 ### v1 success test
@@ -607,6 +611,12 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - **Drift detection**: notice when recent behavior contradicts stored preferences, lower confidence, and ask instead of assuming.
 - **Remote access**: opt-in tunnel plus strong auth so web and mobile clients (claude.ai connectors, ChatGPT) can reach the local server. Works only while the device is awake.
 - **Review UI**: small local web page to browse, edit, and approve memories.
+- **A standard for conversation transcripts**, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMCP's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
+  1. **An MCP extension**: a server declares it wants conversation turns, and a client that supports it sends each user and assistant turn to the servers the user approved. It replaces both `record_exchange` (model-dependent) and transcript readers (undocumented formats), and the client owns consent. Needs proposing through MCP's own process.
+  2. **A published file schema** clients write to disk: simpler, but needs every vendor to adopt it without a protocol pulling them.
+  3. **OpenTelemetry's GenAI semantic conventions**, a standard that already exists: some clients export telemetry, and OpenMCP could receive it like any backend (an OTLP receiver). Depends on what each client actually sends (see Section 14).
+
+  Meanwhile transcript readers stay optional adapters into the schema, deleted as clients produce it natively.
 - **More importers and capture sources** beyond the M3.5 registries' first entries, each checked against a real export or install; client hooks where they exist, for capture without waiting for the next read.
 - **Vector compression**, when stores grow well past 100k chunks (the exact scan is ~60ms there). sqlite-vec stores only float32, int8, and bit vectors, so TurboQuant or PolarQuant as published would need a custom scan outside SQLite; their core idea (a fixed random rotation, so one calibrated quantizer fits every coordinate) can be applied to sqlite-vec's int8 storage. Its built-in `vec_quantize_int8(v, 'unit')` wastes most of the range on bge vectors (coordinates ≈ ±0.05) and kept only 82% of the true top 10 in a test.
 - **A stronger embedding model**, if bge-small's misses matter in practice (Section 14).
@@ -629,4 +639,10 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 - ~~Should imported chats ever be readable by default, or opt-in per scope?~~ They go to the default write scope, or `--scope`; which clients can read them follows that scope's config like everything else.
 - ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
 - Recaps recorded through `record_exchange` despite the instructions aren't marked (Section 7.2). Telling a recap from new content by what it says (does the answer mostly restate what the lookup returned?) may work where timing didn't. The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
+- Do clients' OpenTelemetry exports carry whole conversations, and can OpenMCP use them instead of transcript readers? **Experiment (2026-10-18)**, a local OTLP/HTTP receiver:
+  - **Claude Code 2.1** (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOG_USER_PROMPTS=1`) sends `user_prompt` (the prompt text) and `assistant_response` (the answer text) log events, linked by `prompt.id`, with `message.uuid` and `session.id`. That's enough to rebuild conversations live. The transport is standard (OTLP); the event names are Claude Code's own, not OpenTelemetry's GenAI conventions, so it's still a small mapping, but against a documented export instead of an undocumented file.
+  - **Cursor 3.25** uses GenAI attributes only for request details (model, tokens), with no message text and no user-configurable export.
+  - **Copilot Chat 0.26.7**: inconclusive (it bundles the OpenTelemetry libraries, apparently for internal telemetry).
+  - Trade-off for Claude Code: a receiver must be running whenever Claude Code runs, and can't backfill, where the transcript reader needs no setup and backfills. Worth building as an alternative once there's a background service, and as evidence of what an MCP extension would carry (Section 12).
+- Should OpenMCP propose an MCP extension for clients to share conversation turns with servers the user approves (Section 12)? Its usage would make the case.
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

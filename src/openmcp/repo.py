@@ -74,6 +74,16 @@ def list_audit(conn: sqlite3.Connection, f: AuditFilter) -> list[AuditEntry]:
     return [AuditEntry.model_validate(dict(r)) for r in rows]
 
 
+def seen_clients(conn: sqlite3.Connection) -> list[tuple[str, str | None, int, datetime]]:
+    """Every (client, application) that has called a tool, with how many calls and the
+    last one, most recent first. The CLI's own entries are left out."""
+    rows = conn.execute(
+        "SELECT client, app, COUNT(*), MAX(ts) FROM audit_log WHERE client != 'cli' "
+        "GROUP BY client, app ORDER BY MAX(ts) DESC"
+    )
+    return [(c, a, n, datetime.fromisoformat(t.replace("Z", "+00:00"))) for c, a, n, t in rows]
+
+
 def apps_for(conn: sqlite3.Connection, client: str) -> list[str]:
     """Every application recorded calling as `client`, in order of first appearance."""
     rows = conn.execute(
@@ -568,13 +578,12 @@ def pending_embeddings(
     return [(r[0], r[1], r[2]) for r in conn.execute(sql, (limit,))]
 
 
-def conversation_ids(conn: sqlite3.Connection, provider: str, external_ids: Sequence[str]) -> list[int]:
-    """Stored ids for these external ids, in the order given (missing ones left out)."""
+def conversation_id_map(conn: sqlite3.Connection, provider: str, external_ids: Sequence[str]) -> dict[str, int]:
+    """{external id: stored id} for the ones stored."""
     if not external_ids:
-        return []
+        return {}
     clause, params = _in("external_id", list(external_ids))
-    found = dict(conn.execute(f"SELECT external_id, id FROM conversations WHERE provider = ? AND {clause}", [provider, *params]))
-    return [found[e] for e in external_ids if e in found]
+    return dict(conn.execute(f"SELECT external_id, id FROM conversations WHERE provider = ? AND {clause}", [provider, *params]))
 
 
 def pending_chunks_in(conn: sqlite3.Connection, conversation_ids: Sequence[int]) -> list[tuple[int, str]]:

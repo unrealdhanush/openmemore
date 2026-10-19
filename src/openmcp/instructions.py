@@ -20,16 +20,20 @@ STANDING_PREFIX = "Use the openmcp tools"
 """First words of every standing instruction, used to find and replace an earlier copy."""
 
 
-def pointer_instruction() -> str:
-    """The standing instruction for clients where the user pastes it by hand. Stable on
-    purpose: everything that may change lives in server_instructions()."""
-    return (
+def pointer_instruction(captured: bool = False) -> str:
+    """The standing instruction the user pastes into a client. Stable on purpose:
+    everything that may change lives in server_instructions(). A client whose
+    transcripts are captured is told not to record exchanges as well."""
+    record = "" if captured else "record_exchange after every answer, "
+    text = (
         f"{STANDING_PREFIX} (my memory, shared with all my AI assistants) as the openmcp server's "
-        "instructions describe. In particular: call get_profile at the start of each conversation, "
-        "record_exchange after every answer, save_memories when I make a decision or state a preference, "
-        "and recent_conversations or search_context before saying you don't know about something I "
-        "discussed earlier."
+        f"instructions describe. In particular: call get_profile at the start of each conversation, {record}"
+        "save_memories when I make a decision or state a preference, and recent_conversations or "
+        "search_context before saying you don't know about something I discussed earlier."
     )
+    if captured:
+        text += " Don't call record_exchange: conversations here are captured automatically."
+    return text
 
 
 def standing_instruction(captured: bool) -> str:
