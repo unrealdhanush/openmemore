@@ -165,3 +165,13 @@ def test_app_pins_are_gone(tmp_path):
     with pytest.raises(ValidationError, match="app"):
         config.load_config(path)
 
+
+
+def test_ignore_scopes_resolves_every_client_to_all_scopes(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('ignore_scopes = true\n[clients.x]\nread_scopes = ["work"]\nwrite_scope = "work"\n')
+    cfg = config.load_config(path)
+    assert resolve_client(cfg, "x") == ClientScopes(read_scopes=None, write_scope="work")
+    assert resolve_client(cfg, "anyone").read_scopes is None
+    config.write_default_config(tmp_path / "fresh.toml")
+    assert "ignore_scopes = false" in (tmp_path / "fresh.toml").read_text()  # off unless asked

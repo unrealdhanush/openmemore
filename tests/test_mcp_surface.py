@@ -265,3 +265,32 @@ async def test_server_instructions_ask_models_to_record_and_recall(server):
     async with server() as client:
         instructions = client.instructions
     assert "record_exchange" in instructions and "recent_conversations" in instructions
+
+
+@pytest.mark.anyio
+async def test_ignore_scopes_shares_everything_with_every_client(server, home):
+    """With ignore_scopes = true, a client configured to read only 'work' sees and can
+    change 'personal' items; new items still get its write scope as their label."""
+    async with server("claude-desktop") as desktop:  # writes 'personal'
+        saved = (await desktop.call_tool("save_memories", {"items": [{"kind": "fact", "content": "Has a cat named Miso."}]})).structured_content
+        await desktop.call_tool("record_exchange", {"question": "Cat food brands?", "answer_summary": "Try a few."})
+    [memory_id] = saved["saved"]
+
+    async with server("cursor") as cursor:  # reads only 'work'
+        assert (await cursor.call_tool("search_context", {"query": "cat"})).structured_content["results"] == []
+
+    path = home / "config.toml"
+    cfg = config.load_config(path)
+    cfg.ignore_scopes = True
+    config.save_config(path, cfg)
+
+    async with server("cursor") as cursor:
+        ping = (await cursor.call_tool("ping", {})).structured_content
+        hits = (await cursor.call_tool("search_context", {"query": "cat"})).structured_content["results"]
+        updated = await cursor.call_tool("update_memory", {"id": memory_id, "content": "Has two cats, Miso and Tofu."})
+        new = (await cursor.call_tool("save_memories", {"items": [{"kind": "fact", "content": "Uses Go at work."}]})).structured_content
+    assert (ping["read_scopes"], ping["write_scope"]) == (None, "work")
+    assert {h["type"] for h in hits} == {"memory", "chat"}
+    assert not updated.is_error
+    rows = dict(db.connect(home / "openmcp.db").execute("SELECT content, scope FROM memories WHERE superseded_by IS NULL"))
+    assert rows == {"Has two cats, Miso and Tofu.": "personal", "Uses Go at work.": "work"}  # labels kept

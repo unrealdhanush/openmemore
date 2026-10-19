@@ -271,7 +271,8 @@ class PingResult(BaseModel):
     version: str
     client: str
     """The name this client gets its scopes under: what its application reports, made config-friendly."""
-    read_scopes: list[str]
+    read_scopes: list[str] | None
+    """None: every scope (ignore_scopes is on)."""
     write_scope: str
     schema_version: int
     semantic_search: str

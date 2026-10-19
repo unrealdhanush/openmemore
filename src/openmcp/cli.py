@@ -181,7 +181,8 @@ def clients_command() -> None:
         scopes = config.resolve_client(cfg, client)
         source = captured_source(app, cfg.capture.sources)
         table.add_row(
-            client, Text(app or "(unknown)"), ", ".join(scopes.read_scopes), scopes.write_scope,
+            client, Text(app or "(unknown)"),
+            "all (ignore_scopes)" if scopes.read_scopes is None else ", ".join(scopes.read_scopes), scopes.write_scope,
             f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
         )
     console.print(table)

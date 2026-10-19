@@ -149,7 +149,7 @@ def build_server(base: Path) -> MCPServer:
                 ok=True,
                 version=__version__,
                 client=caller.client,
-                read_scopes=list(caller.scopes.read_scopes),
+                read_scopes=None if caller.scopes.read_scopes is None else list(caller.scopes.read_scopes),
                 write_scope=caller.scopes.write_scope,
                 schema_version=db.schema_version(conn),
                 semantic_search=embed.status(),
