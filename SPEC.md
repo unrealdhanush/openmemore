@@ -641,7 +641,14 @@ The proposal queue doesn't depend on what wrote a proposal, so a local-model or 
 - a near-duplicate pair can be merged into one memory with history;
 - the page refuses requests without the token or with a foreign `Host`;
 - tested, including scopes: a client can't consolidate or propose from conversations it can't read.
-- **Status (2026-10-19):** built and tested (`tests/test_consolidation.py`, `tests/test_review.py`). The page's script was run against real API responses with a stand-in DOM, and the server was probed with curl: no token, a foreign `Host`, and a change without the header are all refused. **Remaining:** a run with real clients.
+- **Status (2026-10-19):** built and tested (`tests/test_consolidation.py`, `tests/test_review.py`). The page's script was run against real API responses with a stand-in DOM, and the server was probed with curl: no token, a foreign `Host`, and a change without the header are all refused.
+  - **Verified with real clients (2026-10-19):**
+    - **First run:** Cursor read two chats, from Claude Desktop and from Cursor itself, and proposed two memories citing both. One was approved and one rejected on the page; both decisions were audited as `review`.
+    - **Gaps it found, now fixed:**
+      - a proposal couldn't name the memory it updates (the `replaces` field);
+      - the page's counts went stale while it was open.
+    - **Second run:** a chat grew in Claude Desktop. Consolidation returned only its new messages, and Cursor proposed a project update with `replaces` naming the older project memory. Approving it made the older memory history (`superseded_by`), with provenance in the new memory's metadata.
+    - **Not yet seen on real data:** merging near-duplicates, which is tested.
 
 ---
 
