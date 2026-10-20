@@ -621,6 +621,17 @@ def search_chunks(
     return [ChunkMatch.model_validate(dict(r)) for r in rows]
 
 
+def distances(conn: sqlite3.Connection, table: VectorTable, query: bytes, ids: Sequence[int]) -> dict[int, float]:
+    """{id: cosine distance from `query`} for the given memories or chunks; ones not
+    embedded yet are left out."""
+    if not ids:
+        return {}
+    clause, params = _in("rowid", list(ids))
+    rows = conn.execute(f"SELECT rowid, vec_distance_cosine(embedding, ?) FROM {table}_vec WHERE {clause}",
+                        [query, *params])
+    return {row[0]: row[1] for row in rows}
+
+
 def knn_chunks(conn: sqlite3.Connection, query: bytes, *, k: int, scopes: Sequence[str] | None) -> list[ChunkMatch]:
     """The `k` chunks nearest to `query` (an embedding), restricted to `scopes`, nearest
     first; `rank` is the cosine distance."""
