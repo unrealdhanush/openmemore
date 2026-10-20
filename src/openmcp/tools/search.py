@@ -44,6 +44,14 @@ RRF_K = 60
 # ~1 unrelated item per query, 2 hits across the 8 unrelated queries. SPEC.md Section 14.
 SIMILARITY_FLOOR = 0.55
 SIMILARITY_WINDOW = 0.08
+OFF_TOPIC_WEIGHT = 0.5
+"""Memory keyword hits that meaning search judged too far from the query share a word but
+maybe not the topic ('Cursor' in a memory about another project). The memory list is short,
+so such a memory would be rank 1 of its own list, level with the best chat, plus its boosts.
+They're taken out of the keyword list and ranked in one list of their own, by meaning, with
+this weight and no boosts: below the chats and memories that match, without hiding exact
+matches for rare names and codes. Chat keyword hits keep their rank: the same rule for
+chats lowered evidence recall on LongMemEval and LoCoMo (bench/RESULTS.md, 2026-10-20)."""
 VECTOR_CANDIDATES_PER_RESULT = 4
 """Nearest neighbors fetched per requested result, before scope and kind filters."""
 
@@ -153,18 +161,23 @@ def _chat_hit(c: ChunkMatch, score: float) -> SearchHit:
     )
 
 
-def similar_enough(
-    memories: list[tuple[Memory, float]], chunks: list[ChunkMatch]
-) -> tuple[list[tuple[Memory, float]], list[ChunkMatch]]:
-    """Drop vector hits that are too far from the query, judged against the best hit in
-    either list (distances are cosine distances). Recall chunks don't set the bar: a recap
-    of "the pet question I asked Copilot" matches that query far better than the original
-    chat does, and would push the original out before ranking could put it first."""
+def similarity_cutoff(memories: list[tuple[Memory, float]], chunks: list[ChunkMatch]) -> float | None:
+    """How similar to the query an item must be to count as about it, judged against the
+    best vector hit in either list (distances are cosine distances); None if there are
+    none. Recall chunks don't set the bar: a recap of "the pet question I asked Copilot"
+    matches that query far better than the original chat does, and would push the
+    original out before ranking could put it first."""
     sims = [embed.similarity(d) for _, d in memories] + [embed.similarity(c.rank) for c in chunks if not c.recall]
     sims = sims or [embed.similarity(c.rank) for c in chunks]
-    if not sims:
+    return max(SIMILARITY_FLOOR, max(sims) - SIMILARITY_WINDOW) if sims else None
+
+
+def similar_enough(
+    memories: list[tuple[Memory, float]], chunks: list[ChunkMatch], cutoff: float | None
+) -> tuple[list[tuple[Memory, float]], list[ChunkMatch]]:
+    """Drop vector hits below the cutoff."""
+    if cutoff is None:
         return [], []
-    cutoff = max(SIMILARITY_FLOOR, max(sims) - SIMILARITY_WINDOW)
     return (
         [(m, d) for m, d in memories if embed.similarity(d) >= cutoff],
         [c for c in chunks if embed.similarity(c.rank) >= cutoff],
@@ -271,30 +284,42 @@ def search_context(
         if include_chats and (chunk_match := chunk_keyword_query(conn, words)):
             chunk_lists.append(("chat_keyword", later_turns_first(
                 repo.search_chunks(conn, chunk_match, scopes=read, limit=limit))))
+    off_topic: dict[tuple[str, int], float] = {}
     if vector is not None:
         k = limit * VECTOR_CANDIDATES_PER_RESULT
-        near_memories, near_chunks = similar_enough(
-            repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project, history=history,
-                              as_of=as_of),
-            repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else [],
-        )
+        all_memories = repo.knn_memories(conn, vector, k=k, scopes=read, kinds=kinds, project=project,
+                                         history=history, as_of=as_of)
+        all_chunks = repo.knn_chunks(conn, vector, k=k, scopes=read) if include_chats else []
+        cutoff = similarity_cutoff(all_memories, all_chunks)
+        near_memories, near_chunks = similar_enough(all_memories, all_chunks, cutoff)
         memory_lists.append(("memory_meaning", [m for m, _ in near_memories[:limit]]))
         if include_chats:
             chunk_lists.append(("chat_meaning", later_turns_first(near_chunks[:limit])))
+        off_topic = off_topic_memories(conn, vector, cutoff, memory_lists)
+
+    lists: list[tuple[str, list[Memory | ChunkMatch]]] = [
+        (label, [item for item in ranked if _key(item) not in off_topic])
+        for label, ranked in [*memory_lists, *chunk_lists]
+    ]
+    if off_topic:
+        items = {_key(item): item for _, ranked in memory_lists for item in ranked}
+        lists.append(("off_topic", [items[key] for key in sorted(off_topic, key=off_topic.__getitem__, reverse=True)]))
 
     # Each list contributes 1 / (RRF_K + rank) to every item in it.
     fused: dict[tuple[str, int], _Fused] = {}
-    for kind_order, lists in ((0, memory_lists), (1, chunk_lists)):
-        for label, ranked in lists:
-            for rank, item in enumerate(ranked, start=1):
-                key = ("memory", item.id) if isinstance(item, Memory) else ("chat", item.chunk_id)
-                entry = fused.setdefault(key, _Fused(0.0, kind_order, rank, item))
-                entry.score += 1 / (RRF_K + rank)
-                entry.best_rank = min(entry.best_rank, rank)
-                entry.signals[f"{label}_rank"] = rank
-    for entry in fused.values():
+    for label, ranked in lists:
+        for rank, item in enumerate(ranked, start=1):
+            entry = fused.setdefault(_key(item), _Fused(0.0, 0 if isinstance(item, Memory) else 1, rank, item))
+            entry.score += 1 / (RRF_K + rank)
+            entry.best_rank = min(entry.best_rank, rank)
+            entry.signals[f"{label}_rank"] = rank
+    for key, entry in fused.items():
         item = entry.item
         entry.signals["fusion"] = entry.score
+        if key in off_topic:
+            entry.score *= OFF_TOPIC_WEIGHT
+            entry.signals["off_topic_weight"] = OFF_TOPIC_WEIGHT
+            continue
         memory = isinstance(item, Memory)
         entry.signals["activation"] = activation_boost(
             item.updated_at if memory else item.created_at, item.presented, item.last_presented_at, now,
@@ -328,6 +353,23 @@ def search_context(
             "candidates": {label: len(items) for label, items in [*memory_lists, *chunk_lists]},
         } if explain else None,
     )
+
+
+def _key(item: Memory | ChunkMatch) -> tuple[str, int]:
+    return ("memory", item.id) if isinstance(item, Memory) else ("chat", item.chunk_id)
+
+
+def off_topic_memories(
+    conn: sqlite3.Connection, vector: bytes, cutoff: float | None, memory_lists: list[tuple[str, list[Memory]]],
+) -> dict[tuple[str, int], float]:
+    """{key: similarity} for memory keyword hits below the meaning cutoff, by their own
+    vectors. Memories not embedded yet get the benefit of the doubt."""
+    if cutoff is None:
+        return {}
+    found = {m.id for label, items in memory_lists if label == "memory_meaning" for m in items}
+    ids = [m.id for label, items in memory_lists if label == "memory_keyword" for m in items if m.id not in found]
+    return {("memory", id_): similarity for id_, distance in repo.distances(conn, "memories", vector, ids).items()
+            if (similarity := embed.similarity(distance)) < cutoff}
 
 
 def presented(conn: sqlite3.Connection, result: SearchResult | Profile) -> None:
