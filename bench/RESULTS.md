@@ -80,3 +80,46 @@ Embedder: BAAI/bge-small-en-v1.5. 10 histories, 1986 questions. Ingest 0.12 s pe
 | open-domain | 96 | 0.511 | 0.663 | 0.461 | 0.277 | 0.640 | 0.772 | 0.509 | 0.335 |
 | single-hop | 841 | 0.921 | 0.921 | 0.816 | 0.645 | 0.970 | 0.970 | 0.834 | 0.731 |
 | temporal | 321 | 0.835 | 0.854 | 0.737 | 0.645 | 0.901 | 0.916 | 0.763 | 0.713 |
+
+## 2026-10-20 longmemeval-s (limit 100) at 7b01af2
+
+Embedder: BAAI/bge-small-en-v1.5. 100 histories, 100 questions. Ingest 0.258 s per history; query p50 3.8 ms, p95 6.6 ms.
+
+| type | n | session_recall@5 | any_hit@5 | ndcg@5 | turn_recall@5 | session_recall@10 | any_hit@10 | ndcg@10 | turn_recall@10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| all | 100 | 0.907 | 0.971 | 0.885 | 0.610 | 0.979 | 1.000 | 0.924 | 0.733 |
+| knowledge-update | 12 | 0.958 | 1.000 | 0.942 | 0.458 | 1.000 | 1.000 | 0.975 | 0.708 |
+| knowledge-update-abstention | 6 | – | – | – | – | – | – | – | – |
+| multi-session | 12 | 0.792 | 1.000 | 0.837 | 0.569 | 0.931 | 1.000 | 0.939 | 0.819 |
+| multi-session-abstention | 12 | – | – | – | – | – | – | – | – |
+| single-session-assistant | 12 | 1.000 | 1.000 | 0.969 | 0.750 | 1.000 | 1.000 | 0.969 | 0.833 |
+| single-session-preference | 12 | 0.833 | 0.833 | 0.680 | 0.375 | 1.000 | 1.000 | 0.742 | 0.403 |
+| single-session-user | 11 | 1.000 | 1.000 | 1.000 | 0.909 | 1.000 | 1.000 | 1.000 | 0.909 |
+| single-session-user-abstention | 6 | – | – | – | – | – | – | – | – |
+| temporal-reasoning | 11 | 0.864 | 1.000 | 0.890 | 0.621 | 0.939 | 1.000 | 0.930 | 0.742 |
+| temporal-reasoning-abstention | 6 | – | – | – | – | – | – | – | – |
+
+## 2026-10-20 locomo at 7b01af2
+
+Embedder: BAAI/bge-small-en-v1.5. 10 histories, 1986 questions. Ingest 0.124 s per history; query p50 2.7 ms, p95 3.5 ms.
+
+| type | n | session_recall@5 | any_hit@5 | ndcg@5 | turn_recall@5 | session_recall@10 | any_hit@10 | ndcg@10 | turn_recall@10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| all | 1986 | 0.839 | 0.892 | 0.746 | 0.567 | 0.905 | 0.949 | 0.772 | 0.655 |
+| adversarial | 446 | 0.946 | 0.946 | 0.833 | 0.603 | 0.975 | 0.975 | 0.843 | 0.712 |
+| multi-hop | 282 | 0.533 | 0.837 | 0.501 | 0.281 | 0.693 | 0.940 | 0.575 | 0.376 |
+| open-domain | 96 | 0.511 | 0.663 | 0.461 | 0.277 | 0.640 | 0.772 | 0.509 | 0.335 |
+| single-hop | 841 | 0.921 | 0.921 | 0.816 | 0.645 | 0.970 | 0.970 | 0.834 | 0.731 |
+| temporal | 321 | 0.835 | 0.854 | 0.737 | 0.645 | 0.901 | 0.916 | 0.763 | 0.713 |
+
+## 2026-10-20 off-topic keyword sweep at 7b01af2 (uncommitted variant)
+
+Keyword hits below the meaning cutoff moved to a list of their own, ranked by similarity, for memories and chats alike. Weights 0 to 0.75 rank them identically (always below the rest):
+
+| weight | LME recall@5 | LME ndcg@5 | LME recall@10 | LoCoMo recall@5 | LoCoMo ndcg@5 | LoCoMo recall@10 |
+|---:|---:|---:|---:|---:|---:|---:|
+| unchanged (main) | 0.907 | 0.885 | 0.979 | 0.839 | 0.746 | 0.905 |
+| 1.0 (reordered by meaning only) | 0.893 | 0.890 | 0.967 | 0.826 | 0.728 | 0.902 |
+| 0–0.75 (below everything else) | 0.895 | 0.885 | 0.952 | 0.812 | 0.721 | 0.878 |
+
+Chat keyword hits that meaning search rejects are often the evidence, so chats keep their keyword rank. Shipped for memories only, which the benchmarks don't contain: the numbers above at 7b01af2 equal main's.

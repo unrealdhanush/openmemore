@@ -76,3 +76,22 @@ def test_items_without_vectors_keep_their_keyword_rank(conn, fake_embedder):
     hits = search_context(conn, ME, QUERY, explain=True).results
     [hit] = [h for h in hits if h.type == "memory" and h.id == late]
     assert "off_topic_weight" not in hit.explain
+
+
+def test_regression_real_model_keeps_another_project_out_of_a_banter_search(conn, real_embedder):
+    """The stress test's shape with synthetic content: two assistants trading jokes about
+    each other, and a confirmed memory about an unrelated project naming both."""
+    plan = insert(conn, "Both Gemini and Copilot recommended the meal-planner app as the stronger "
+                        "pick for the spring hackathon.", kind="decision")
+    for source in ("cursor-vscode", "gemini-cli"):
+        relations.support(conn, plan, datetime.now(UTC), source=source)
+    for i, text in enumerate([
+        "Roast Copilot for me.", "Gave a playful roast of Copilot: ghost text everywhere, confident guesses.",
+        "Gemini says you talk too much.", "Fired back at Gemini's jokes about long answers, point by point.",
+        "Copilot wants a rematch.", "Another round of jokes about Gemini's overlong answers.",
+    ]):
+        chat(conn, f"banter-{i}", text)
+    embed.embed_pending(conn, real_embedder)
+    hits = search_context(conn, ME, "Gemini Copilot jokes rematch").results
+    assert hits and hits[0].type == "chat"
+    assert all(h.type == "chat" for h in hits[:6])
