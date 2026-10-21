@@ -836,7 +836,7 @@ Every public surface documented in `docs/`, written for someone who has never se
 
 ### M9: Public release
 - **Pre-flight (Section 13):** employer approval, a final name, a license (all done 2026-10-21).
-- **New repository:** publish only the clean `main`, because GitHub keeps old PR refs.
+- **New repository:** publish only the clean `main`, because GitHub keeps old PR refs. The private development repository took the name `unrealdhanush/openmemore` on 2026-10-21, so rename it first (e.g. `openmemore-dev`), then create the public `openmemore`.
 - **A package on PyPI** (`uv tool install <name>`).
 - **A README** for people who've never seen the project, linking the documentation (M8.5).
 - **The OpenMemore format** published as JSON Schema.
