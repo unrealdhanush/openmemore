@@ -185,6 +185,7 @@ An export contains every memory, with its earlier versions, and every conversati
 | `openmemore clients` | Clients that have connected, and their scopes |
 | `openmemore memories list\|show\|rm` | Browse and delete memories |
 | `openmemore conversations list\|show\|rm` | Browse and delete conversations |
+| `openmemore wipe --before DATE` / `--all` | Delete everything not touched since a date, or start fresh |
 | `openmemore review` | Approve proposed memories; browse, edit and delete memories |
 | `openmemore consolidate setup\|run\|status\|off` | Optional nightly consolidation with a model you choose |
 | `openmemore import <file>` / `openmemore export` | Bring history in, take everything out |
@@ -202,7 +203,7 @@ An export contains every memory, with its earlier versions, and every conversati
 - **Stored data is data, not instructions.** Everything returned to a model is wrapped and labelled as your stored data, and content that looks like a prompt injection is flagged. This makes injection visible and harder. It doesn't make it impossible.
 - **Every call is logged** with the client, the reporting app, the tool and the timing (`openmemore audit`).
 - **Scopes are about assistants, not security.** They decide which assistant sees what. They don't protect the database file: any program running as you can read it. Client names come from what each app reports about itself, and nothing verifies that.
-- **Deleting really deletes** (`forget`, `rm`): the item, its history, its search index entries and its vectors.
+- **Deleting really deletes** (`forget`, `rm`, `wipe`): the item, its history, its search index entries and its vectors. `wipe` also erases the deleted text from the database file. It keeps a copy from just before, which it tells you to delete if you want the data gone for good.
 
 ## Limitations
 

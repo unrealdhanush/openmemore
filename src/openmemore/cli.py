@@ -588,6 +588,67 @@ def export_command(
     )
 
 
+def _local_moment(value: str) -> datetime:
+    """'2026-10-20' (midnight, local time) or a full ISO time; without a zone, local time."""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        raise typer.BadParameter("use a date like 2026-10-20 or a time like 2026-10-20T09:30",
+                                 param_hint="--before") from None
+    return moment if moment.tzinfo else moment.astimezone()
+
+
+@app.command("wipe")
+def wipe_command(
+    before: str | None = typer.Option(
+        None, "--before", help="Delete what wasn't touched since this date (local time), e.g. 2026-10-20."
+    ),
+    everything: bool = typer.Option(False, "--all", help="Delete everything stored: a fresh start."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask for confirmation."),
+    no_backup: bool = typer.Option(False, "--no-backup", help="Don't keep a copy of the database first."),
+) -> None:
+    """Delete in bulk: everything not touched since a date (--before), or everything (--all).
+
+    Whole conversations and memories go, with their versions, proposals, the audit log
+    and finished import and consolidation records from that time. Deleted conversations
+    stay deleted: capture won't bring them back. Config, the embedding model and the
+    daemon are untouched. The deleted text is then erased from the database file.
+    """
+    from openmemore import wipe
+
+    if (before is None) == (not everything):
+        console.print("[red]Choose one: --before DATE, or --all.[/red]")
+        raise typer.Exit(2)
+    cutoff = _local_moment(before) if before is not None else None
+    with _db() as conn:
+        p = wipe.plan(conn, cutoff)
+        what = f"not touched since {_when(cutoff)}" if cutoff else "everything"
+        if p.empty:
+            console.print(f"Nothing to delete ({what}).")
+            return
+        console.print(f"[bold]This deletes {what}:[/bold]")
+        for count, label in [(len(p.memory_ids), "memories, counting earlier versions"),
+                             (len(p.conversation_ids), f"conversations ({p.messages} messages)"),
+                             (p.proposals, "proposals"), (p.audit_entries, "audit log entries"),
+                             (p.consolidation_runs, "consolidation runs"), (p.import_jobs, "finished imports")]:
+            if count:
+                console.print(f"  {count:>6}  {label}")
+        if not yes and typer.prompt("It can't be undone. Type 'wipe' to continue", default="") != "wipe":
+            console.print("Nothing deleted.")
+            raise typer.Exit(1)
+        copy = None
+        if not no_backup:
+            path = config.db_path(config.home())
+            copy = wipe.backup(conn, path.with_name(f"{path.name}.before-wipe-{datetime.now():%Y%m%d-%H%M%S}"))
+        with audit.audited(conn, CLI_CLIENT, "wipe") as call:
+            call.summary = f"before {repo.to_iso(cutoff)}" if cutoff else "all"
+            wipe.apply(conn, p)
+            call.result_count = len(p.memory_ids) + len(p.conversation_ids)
+    console.print(f"Deleted {len(p.memory_ids)} memories and {len(p.conversation_ids)} conversations.")
+    if copy:
+        console.print(f"A copy from before the wipe is at {copy}. Delete it too to erase the data for good.")
+
+
 @app.command("status")
 def status_command() -> None:
     """Show import jobs and what's stored."""
