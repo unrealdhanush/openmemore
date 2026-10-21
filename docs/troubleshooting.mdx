@@ -67,6 +67,9 @@ openmemore audit      # every call each assistant made
     - The nightly run needs the [daemon](/guides/background). `openmemore consolidate run` runs it now, without the daemon.
     - If setup's test request failed, the settings were saved but consolidation stayed off. Run `openmemore consolidate setup` again once the endpoint answers.
   </Accordion>
+  <Accordion title="wipe refuses, or doesn't ask for a password">
+    `openmemore wipe` checks your login password through `sudo`, so it needs an account that can use `sudo`: on macOS, an administrator. A standard account, or a Linux user not in sudoers, can delete items one at a time with `openmemore memories rm` and `openmemore conversations rm` instead. If `sudo` isn't installed, wipe says so and deletes nothing. If your sudoers entry doesn't require a password, no password is asked. On Windows, only the typed `wipe` is asked.
+  </Accordion>
   <Accordion title="A wrong memory keeps coming back">
     Correct it instead of deleting it: ask the assistant to update it, or edit it on the [review page](/guides/consolidation#review). If it came from consolidation, rejecting the proposal stops it from being proposed again.
   </Accordion>
