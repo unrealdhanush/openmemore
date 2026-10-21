@@ -1,4 +1,4 @@
--- Capture through OpenTelemetry (SPEC.md M6). A Claude Code turn arrives as a user_prompt
+-- Capture through OpenTelemetry. A Claude Code turn arrives as a user_prompt
 -- event and, seconds later, one assistant_response event per model call, all linked by
 -- prompt.id. These rows link the later events to the conversation and message they
 -- belong to, and keep the answer's parts so it can be rebuilt as they arrive. Deleting

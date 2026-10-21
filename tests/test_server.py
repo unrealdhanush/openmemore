@@ -70,7 +70,7 @@ async def test_every_tool_call_is_audited(home):
 
 
 def test_startup_under_budget(home):
-    """SPEC 4.3: `openmemore serve` answers its first request in under 500ms.
+    """Performance budget: `openmemore serve` answers its first request in under 500ms.
 
     Best of 3, so a one-off cold start (bytecode compile, disk cache) doesn't fail the build.
     CI sets OPENMEMORE_STARTUP_BUDGET_MS higher: shared runners start processes far slower

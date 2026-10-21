@@ -1,4 +1,4 @@
-"""SPEC.md M6: `openmemore daemon`. The receiver only takes its own token, on its own host,
+"""`openmemore daemon`. The receiver only takes its own token, on its own host,
 as JSON; the capture loop stores changed transcripts without a client reading; the
 service definitions run the daemon at login on each OS."""
 

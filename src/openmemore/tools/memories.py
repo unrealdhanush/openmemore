@@ -25,7 +25,7 @@ from openmemore.safety.wrap import wrap
 from openmemore.tools import Caller, require_writable
 
 NEAR_DUPLICATE_SIMILARITY = 0.92
-"""SPEC.md Section 7.1: this similar and the same kind is reported as a possible duplicate."""
+"""This similar and the same kind is reported as a possible duplicate."""
 NEAR_DUPLICATE_CANDIDATES = 10
 
 

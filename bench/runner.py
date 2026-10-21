@@ -1,4 +1,4 @@
-"""Run OpenMemore's retrieval against a benchmark (SPEC.md M7.6).
+"""Run OpenMemore's retrieval against a benchmark.
 
 Each history is stored the way capture stores conversations (one conversation per
 session, one message per turn, with its date), embedded, and searched with

@@ -1,4 +1,4 @@
-"""Naming clients (SPEC.md Section 9).
+"""Naming clients.
 
 A client is named by what its application reports when the session starts (MCP
 clientInfo), so any MCP client works without OpenMemore knowing about it: 'Some Editor 2'

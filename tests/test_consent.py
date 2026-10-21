@@ -1,4 +1,4 @@
-"""SPEC.md M6: OpenMemore asks before running in the background, in a native dialog when
+"""OpenMemore asks before running in the background, in a native dialog when
 there's a desktop session, else in the terminal; the default is no. The dialogs are
 faked here: tests never show one."""
 

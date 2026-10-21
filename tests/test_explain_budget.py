@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 6: explanations and token budgets."""
+"""Explanations and token budgets."""
 
 import pytest
 

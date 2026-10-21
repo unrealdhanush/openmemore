@@ -125,7 +125,7 @@ def test_metadata_columns_default_and_require_valid_json(tmp_path):
 
 
 def test_upgrade_from_version_1_keeps_rows(tmp_path, monkeypatch):
-    """A DB created by the original M0 (migration 001 only) upgrades cleanly."""
+    """A DB created by the first version (migration 001 only) upgrades cleanly."""
     path = tmp_path / "t.db"
     all_migrations = db.migrations()
     monkeypatch.setattr(db, "migrations", lambda: all_migrations[:1])

@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 2: relations between memories, applied through openmemore.relations
+"""Relations between memories, applied through openmemore.relations
 in the same transaction as their effect."""
 
 import json

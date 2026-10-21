@@ -1,4 +1,4 @@
-"""Relations between memories (SPEC.md M7.7), after LongMemory's executable edges: a link
+"""Relations between memories, after LongMemory's executable edges: a link
 isn't a passive label that some other code interprets later. Adding one is the state
 change, done here and only here, inside the caller's transaction:
 

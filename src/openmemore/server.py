@@ -88,7 +88,7 @@ def app_name(ctx: Context | None) -> str | None:
 
 
 class ClientSession:
-    """Which client this server process serves, and with what scopes (SPEC.md Section 9).
+    """Which client this server process serves, and with what scopes.
 
     A client is named by what its application reports when the session starts (MCP
     clientInfo): 'Some Editor 2' is the client 'some-editor-2', with the scopes under

@@ -1,4 +1,4 @@
--- Core tables (SPEC.md Section 6). FTS5 and sqlite-vec tables arrive in later migrations.
+-- Core tables. FTS5 and sqlite-vec tables arrive in later migrations.
 
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 

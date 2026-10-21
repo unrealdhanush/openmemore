@@ -1,4 +1,4 @@
-"""Long-term memory benchmarks (SPEC.md M7.6), read into one shape.
+"""Long-term memory benchmarks, read into one shape.
 
 - LongMemEval (Wu et al., MIT; github.com/xiaowu0162/LongMemEval): each question has its
   own history ("haystack") of sessions, with the sessions and turns holding the answer

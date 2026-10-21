@@ -1,4 +1,4 @@
-"""Installing `openmemore daemon` as a per-user service (SPEC.md M6), so it starts at login
+"""Installing `openmemore daemon` as a per-user service, so it starts at login
 and restarts if it stops: a launchd agent on macOS, a systemd user unit on Linux, a
 logon task on Windows. Only OpenMemore's own service definition is written; nothing of
 another application's is touched.

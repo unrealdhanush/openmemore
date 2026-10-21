@@ -1,4 +1,4 @@
--- metadata JSON columns for provider-specific / experimental fields (SPEC.md Section 4.2),
+-- metadata JSON columns for provider-specific / experimental fields,
 -- and per-call timing for the performance budget (Section 4.3).
 
 ALTER TABLE conversations ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata));

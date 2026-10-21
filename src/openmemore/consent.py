@@ -1,4 +1,4 @@
-"""Asking the user before OpenMemore runs in the background (SPEC.md M6).
+"""Asking the user before OpenMemore runs in the background.
 
 No OS asks for a per-user background task the way it does for, say, the camera: macOS
 shows a "Background Items Added" notice afterwards, Windows and Linux nothing. So

@@ -1,4 +1,4 @@
-"""ChatGPT data export: conversations.json, a list of conversations (SPEC.md Section 10).
+"""ChatGPT data export: conversations.json, a list of conversations.
 
 Each conversation stores its messages as a tree in `mapping` (node id -> {message,
 parent, children}): editing a message or regenerating an answer starts a new branch.

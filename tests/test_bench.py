@@ -1,4 +1,4 @@
-"""SPEC.md M7.6: the evaluation harness, on synthetic datasets in both formats."""
+"""The evaluation harness, on synthetic datasets in both formats."""
 
 import json
 from datetime import UTC, datetime

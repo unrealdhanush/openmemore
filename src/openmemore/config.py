@@ -65,7 +65,7 @@ class ClientOverride(BaseModel):
 
 
 class CaptureConfig(BaseModel):
-    """[capture]: which clients' transcripts are read from disk (SPEC.md M1.5). Off until
+    """[capture]: which clients' transcripts are read from disk. Off until
     the user enables a source, normally through `openmemore setup <client>`."""
 
     model_config = ConfigDict(extra="forbid")
@@ -83,7 +83,7 @@ DEFAULT_DAEMON_PORT = 47318
 
 
 class DaemonConfig(BaseModel):
-    """[daemon]: the background service (SPEC.md M6)."""
+    """[daemon]: the background service."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -96,8 +96,8 @@ class DaemonConfig(BaseModel):
 
 
 class ConsolidationConfig(BaseModel):
-    """[consolidation]: automatic consolidation with a model OpenMemore calls itself
-    (SPEC.md M7). Off until the user sets it up with `openmemore consolidate setup`."""
+    """[consolidation]: automatic consolidation with a model OpenMemore calls itself.
+    Off until the user sets it up with `openmemore consolidate setup`."""
 
     model_config = ConfigDict(extra="forbid")
 

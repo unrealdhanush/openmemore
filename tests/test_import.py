@@ -1,4 +1,4 @@
-"""SPEC.md M3: importing ChatGPT and Claude data exports (synthetic fixtures only)."""
+"""Importing ChatGPT and Claude data exports (synthetic fixtures only)."""
 
 import json
 import shutil
@@ -180,7 +180,7 @@ def test_a_malformed_conversation_is_reported_not_fatal(conn, tmp_path, monkeypa
     assert report.conversations == 2 and len(report.errors) == 1 and "TypeError" in report.errors[0]
 
 
-# --- SPEC M3 done-when -----------------------------------------------------------------
+# --- end to end -----------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -188,7 +188,7 @@ def big_export(tmp_path):
     return write_zip(tmp_path / "chatgpt-export.zip", chatgpt_export(500))
 
 
-def test_m3_done_when_the_newest_50_are_searchable_before_the_job_finishes(tmp_path, big_export):
+def test_the_newest_50_are_searchable_before_the_job_finishes(tmp_path, big_export):
     """Checked from a second connection (as a server would) after the first batch."""
     path = tmp_path / "store.db"
     importer, server = db.open_db(path), db.connect(path)
@@ -205,7 +205,7 @@ def test_m3_done_when_the_newest_50_are_searchable_before_the_job_finishes(tmp_p
     assert search_context(server, READER, "topic0").results  # all there once it's done
 
 
-def test_m3_done_when_killing_and_rerunning_resumes_without_duplicates(conn, big_export):
+def test_killing_and_rerunning_resumes_without_duplicates(conn, big_export):
     def die_after_three_batches(done, total):
         if done == 3 * BATCH:
             raise KeyboardInterrupt

@@ -1,4 +1,4 @@
-"""`uv run python -m bench <dataset>`: measure OpenMemore's retrieval (SPEC.md M7.6).
+"""`uv run python -m bench <dataset>`: measure OpenMemore's retrieval.
 
     uv run python -m bench longmemeval-s --limit 100      # an even spread over question types
     uv run python -m bench locomo

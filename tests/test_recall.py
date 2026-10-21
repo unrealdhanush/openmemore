@@ -129,7 +129,7 @@ def test_without_better_matches_recaps_are_still_returned(conn):
 
 
 @pytest.mark.real_model
-def test_m2_regression_real_model_puts_the_original_first(conn, real_embedder):
+def test_regression_real_model_puts_the_original_first(conn, real_embedder):
     """The exact query Claude Desktop sent in the manual test."""
     original = store_case(conn)
     hits = search_context(conn, DESKTOP, "pet question asked Copilot").results

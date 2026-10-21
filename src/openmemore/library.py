@@ -1,4 +1,4 @@
-"""OpenMemore as a library (SPEC.md M7.5): the user's own agents and programs share memory
+"""OpenMemore as a library: the user's own agents and programs share memory
 with their assistants, in-process, with no server.
 
     from openmemore import Memory
@@ -11,7 +11,7 @@ with their assistants, in-process, with no server.
 
 It calls the same tool functions as the MCP server (openmemore.tools), as a client named
 like any other, so scopes, the secret filter, wrapping, embeddings, and the audit log
-all apply. Experimental until the first public release (SPEC.md M9).
+all apply. Experimental until the first public release.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class Hit:
     text: str
     """The stored text, for program logic."""
     wrapped: str
-    """The same text labelled as stored data (SPEC.md Section 8), for putting in a prompt."""
+    """The same text labelled as stored data, for putting in a prompt."""
     source: str
     score: float
     kind: str | None = None

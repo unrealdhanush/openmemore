@@ -39,7 +39,7 @@ def percentile(values: list[float], p: float) -> float:
 
 
 def stats(durations: dict[str, list[float]]) -> list[ToolStats]:
-    """p50/p95 per tool, for checking the SPEC.md Section 4.3 performance budget."""
+    """p50/p95 per tool, for checking the performance budget (scripts/benchmark.py)."""
     return [
         ToolStats(tool, len(ms), percentile(ms, 50), percentile(ms, 95), max(ms))
         for tool, ms in sorted(durations.items())

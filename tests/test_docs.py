@@ -1,4 +1,4 @@
-"""The documentation site (docs/, a Mintlify site), kept current by tests (SPEC.md M8.5):
+"""The documentation site (docs/, a Mintlify site), kept current by tests:
 every CLI command and option, config key, and MCP tool, prompt and resource has a
 reference entry, and pages that quote the code match it. Also: every page is in the
 navigation, internal links resolve, and pages are valid MDX as far as plain text can tell."""

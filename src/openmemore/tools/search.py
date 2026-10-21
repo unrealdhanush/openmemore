@@ -1,4 +1,4 @@
-"""search_context: hybrid search over memories and conversation chunks (SPEC.md 7.2).
+"""search_context: hybrid search over memories and conversation chunks.
 
 Up to four ranked lists (keyword (FTS5, BM25) and vector (sqlite-vec, cosine) for
 memories and for chunks) are merged with reciprocal rank fusion, plus a mild recency
@@ -41,7 +41,7 @@ RRF_K = 60
 # Vector search always returns the nearest items, related or not, so vector hits must
 # clear a similarity floor and be close to the best one. Calibrated for bge-small on a
 # synthetic set (20 paraphrased questions, 8 unrelated ones): 18/20 paraphrases found,
-# ~1 unrelated item per query, 2 hits across the 8 unrelated queries. SPEC.md Section 14.
+# ~1 unrelated item per query, 2 hits across the 8 unrelated queries.
 SIMILARITY_FLOOR = 0.55
 SIMILARITY_WINDOW = 0.08
 OFF_TOPIC_WEIGHT = 0.5
@@ -65,7 +65,7 @@ found on its own merits (a hit in both lists scores ≈ 0.033) without hiding it
 
 MAX_CHUNK_KEYWORD_MATCHES = 8000
 """Ranking costs ~1.6ms per thousand matching chunks, so a common word in a large
-history ('code' in 40k chunks) would blow the search budget (SPEC.md 4.3) while
+history ('code' in 40k chunks) would blow the search budget while
 adding almost nothing: BM25 gives such words little weight anyway."""
 
 
@@ -191,7 +191,7 @@ MEMORY_ACTIVATION_WEIGHT = 0.0005
 and confirmation. Which version is current is decided by the timelines, not by this. Not
 measured: the benchmarks have no memories and no usage."""
 CHAT_ACTIVATION_WEIGHT = 0.0
-"""For conversation messages: none. Tuned with M7.6 (bench/RESULTS.md, 2026-10-19): any
+"""For conversation messages: none. Tuned on the benchmarks (bench/RESULTS.md, 2026-10-19): any
 age weighting lowered evidence recall on LongMemEval and LoCoMo, more so the stronger it
 was, since questions often ask about older conversations."""
 MIN_AGE_DAYS = 1 / 24
@@ -373,7 +373,7 @@ def off_topic_memories(
 
 
 def presented(conn: sqlite3.Connection, result: SearchResult | Profile) -> None:
-    """Count what a client was shown, for activation (SPEC.md M7.7): the MCP tools and the
+    """Count what a client was shown, for activation: the MCP tools and the
     library call this. Evaluation calls search_context directly, so benchmark questions
     don't reinforce each other."""
     if isinstance(result, SearchResult):

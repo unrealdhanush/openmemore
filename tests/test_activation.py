@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 7: activation (ACT-R base-level learning) instead of a fixed recency
+"""Activation (ACT-R base-level learning) instead of a fixed recency
 half-life: recent and frequently presented items rank a little higher."""
 
 import math

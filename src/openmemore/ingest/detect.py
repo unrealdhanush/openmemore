@@ -1,4 +1,4 @@
-"""Opening an export (SPEC.md Section 10): the .zip a provider sends, the
+"""Opening an export: the .zip a provider sends, the
 conversations.json inside it, an unpacked folder, or any JSON file in a registered
 format. The format is recognized from the contents by the importer registry, never from
 the file name."""

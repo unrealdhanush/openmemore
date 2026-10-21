@@ -1,4 +1,4 @@
-"""`openmemore daemon` (SPEC.md M6): capture in the background, without waiting for a
+"""`openmemore daemon`: capture in the background, without waiting for a
 client to read.
 
 One process, normally run by the OS as a per-user service (openmemore.service):
@@ -164,7 +164,7 @@ def tick(base: Path) -> TickReport:
 
 def consolidation_due(base: Path) -> Any:
     """The model to run today's automatic consolidation with, if it's set up, allowed,
-    and due (SPEC.md M7); else None."""
+    and due; else None."""
     from openmemore import consolidate
 
     cfg = config.load_config(config.config_path(base))

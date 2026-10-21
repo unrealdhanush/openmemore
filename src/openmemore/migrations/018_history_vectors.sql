@@ -1,4 +1,4 @@
--- History is searchable by meaning (SPEC.md M7.7): a replaced memory keeps its vector, so
+-- History is searchable by meaning: a replaced memory keeps its vector, so
 -- search_context(mode="history") finds old versions as well as current ones. Versions
 -- replaced before this lost theirs, so they're queued to be embedded again.
 DROP TRIGGER memories_vec_superseded;
