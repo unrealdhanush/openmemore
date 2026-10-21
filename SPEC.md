@@ -290,6 +290,10 @@ Rules:
 - "Active" memories are those with `superseded_by IS NULL`.
 - `update_memory` never overwrites. It inserts a new row and points the old one at it.
 - `forget` is a **hard delete** of the row, its history chain, and its vectors. The user owns their data.
+- **`openmemore wipe`** deletes in bulk: with `--before DATE`, everything not touched since that date; with `--all`, everything.
+  - **Whole items only:** a conversation goes when its last activity is before the date, and a memory goes with all its versions when its current version is. Splitting a conversation still being captured would bring its older messages back when its transcript changed.
+  - **What else goes:** proposals, audit entries, and finished import and consolidation records from that time. Deleted conversations stay deleted (tombstones). Config, the model and the daemon are untouched.
+  - **Safety and erasure:** it shows the counts and asks for the word `wipe` (`--yes` skips this), and saves a 0600 copy first (`--no-backup` skips it). Then it optimizes the full-text indexes and runs `VACUUM` with `secure_delete` on, and truncates the WAL, so deleted text is gone from the file.
 - `metadata` is for fields that vary by provider or are still experimental. Pydantic models expose it as `dict[str, Any]`. Never put fields there that tools filter on routinely; those get real columns.
 
 ---
@@ -832,7 +836,7 @@ Every public surface documented in `docs/`, written for someone who has never se
 
 ### M9: Public release
 - **Pre-flight (Section 13):** employer approval, a final name, a license (all done 2026-10-21).
-- **New repository:** publish only the clean `main`, because GitHub keeps old PR refs.
+- **New repository:** publish only the clean `main`, because GitHub keeps old PR refs. The private development repository took the name `unrealdhanush/openmemore` on 2026-10-21, so rename it first (e.g. `openmemore-dev`), then create the public `openmemore`.
 - **A package on PyPI** (`uv tool install <name>`).
 - **A README** for people who've never seen the project, linking the documentation (M8.5).
 - **The OpenMemore format** published as JSON Schema.
