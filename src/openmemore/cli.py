@@ -650,7 +650,7 @@ def wipe_command(
                              (p.consolidation_runs, "consolidation runs"), (p.import_jobs, "finished imports")]:
             if count:
                 console.print(f"  {count:>6}  {label}")
-        typed = yes or typer.prompt("It can't be undone. Type 'wipe' to continue", default="") == "wipe"
+        typed = yes or typer.prompt("It can't be undone. Type 'wipe' to continue", default="", show_default=False) == "wipe"
         if not typed or not _password_ok():
             console.print("Nothing deleted.")
             raise typer.Exit(1)
