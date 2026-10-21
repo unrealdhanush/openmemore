@@ -1,0 +1,72 @@
+---
+title: "Capture in the background"
+description: "Run OpenMemore's daemon, so conversations are stored as they happen and apps can send them over OpenTelemetry."
+icon: "server"
+---
+
+Without the daemon, captured chats are stored when an assistant next looks something up. With it, OpenMemore captures in the background:
+- **Transcripts:** every few seconds it reads the transcripts of [capture-enabled apps](/guides/capture) and embeds what's new. Another assistant can find a conversation moments after it happens.
+- **OpenTelemetry:** it's an endpoint for any app or library that records its conversations with OpenTelemetry's GenAI conventions. See [OpenTelemetry](/reference/opentelemetry).
+
+## Install it
+
+```sh
+openmemore daemon install
+openmemore daemon status
+```
+
+<Note>
+Nothing runs in the background without your permission. `openmemore daemon install` first asks in a dialog (Allow / Don't Allow), or in the terminal when there's no desktop, such as over SSH. The default is no, and your answer is recorded in the audit log. Scripts can pass `--yes`.
+</Note>
+
+`openmemore setup` offers it when there's something to capture. `--dry-run` shows what would be installed without changing anything.
+
+It's installed as a per-user service that starts when you log in and restarts if it stops:
+
+| OS | Service |
+|---|---|
+| macOS | A launchd agent, `~/Library/LaunchAgents/dev.openmemore.daemon.plist`. It appears under System Settings → General → Login Items, where you can also switch it off |
+| Linux | A systemd user unit, `openmemore.service`. To keep it running while you're logged out, run `loginctl enable-linger` |
+| Windows | A scheduled task, "OpenMemore daemon", that runs at logon |
+
+Only OpenMemore's own service definition is written. Nothing of another application's is touched.
+
+## Check on it
+
+```sh
+openmemore daemon status    # whether it's installed and running
+openmemore status           # also says whether it's running, with what's stored
+```
+
+Its output goes to `~/.openmemore/logs/daemon.log`.
+
+## Remove it
+
+```sh
+openmemore daemon uninstall
+```
+
+It stops the daemon and removes the service. Your data is untouched.
+
+## Settings
+
+The daemon listens on `127.0.0.1` only. Its settings are under `[daemon]` in `config.toml`:
+
+```toml
+[daemon]
+port = 47318        # where it listens, for OpenTelemetry exports and health checks
+interval = 3.0      # seconds between checks for changed transcripts
+# token = "..."     # created on first use; OpenTelemetry exporters must send it
+```
+
+See the [configuration reference](/reference/config). The daemon reads them when it starts, so restart it after a change: `openmemore daemon uninstall`, then `openmemore daemon install`.
+
+## Send conversations over OpenTelemetry
+
+```sh
+openmemore daemon telemetry
+```
+
+This prints the standard settings to give an app, `OTEL_EXPORTER_OTLP_ENDPOINT` and a token header, plus the switches most instrumentation needs before it includes message content. That covers agents built with LangChain, LlamaIndex, or the OpenAI and Anthropic SDKs with OpenTelemetry instrumentation. What's accepted and what's kept is in the [OpenTelemetry reference](/reference/opentelemetry).
+
+Most desktop assistants don't export their conversations this way. For them, transcript capture and `record_exchange` remain the way in.

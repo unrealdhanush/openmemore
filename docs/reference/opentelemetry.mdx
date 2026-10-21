@@ -1,0 +1,85 @@
+---
+title: "OpenTelemetry endpoint"
+description: "What the daemon's OTLP/HTTP endpoint accepts, which GenAI conventions it reads, and what it keeps."
+icon: "satellite-dish"
+---
+
+The [daemon](/guides/background) is an OTLP/HTTP endpoint for any app or library that records its conversations following OpenTelemetry's [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). There's no app-specific code: if an app's instrumentation follows the conventions, its conversations are captured.
+
+## Settings for the app
+
+```sh
+openmemore daemon telemetry
+```
+
+prints the settings to give the app, as standard OpenTelemetry environment variables:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:47318
+OTEL_EXPORTER_OTLP_HEADERS=x-openmemore-token=<your token>
+OTEL_SERVICE_NAME=trip-planner        # the client name its conversations are filed under
+```
+
+Most instrumentation leaves message content out until you opt in. In OpenTelemetry's own GenAI instrumentations, that's:
+
+```sh
+OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY
+```
+
+<Note>
+If the app already sends telemetry elsewhere, these settings replace that destination.
+</Note>
+
+## Endpoints
+
+| Method and path | Does |
+|---|---|
+| `POST /v1/logs` | Accepts OTLP logs |
+| `POST /v1/traces` | Accepts OTLP traces |
+| `POST /v1/metrics` | Accepts metrics and drops them, so an exporter sharing the endpoint doesn't report errors |
+| `GET /health` | `{"ok": true, "version": ..., "pid": ...}` |
+
+## Requests
+
+- **Address:** `127.0.0.1`, on `[daemon] port` (47318 by default). The `Host` header must be `127.0.0.1:<port>` or `localhost:<port>`.
+- **Token:** an `x-openmemore-token` header with `[daemon] token` from `config.toml`. It's created the first time it's needed.
+- **Content type:** `application/json` (OTLP/JSON) or `application/x-protobuf` (OTLP protobuf, as in opentelemetry-proto v1.11.1).
+- **Compression:** `Content-Encoding: gzip` is accepted.
+- **Size:** at most 16MB, after decompression.
+
+A web page can't send either content type to another origin without a CORS preflight, which the daemon never grants. So a site you visit can't write into your conversations.
+
+| Status | Meaning |
+|---|---|
+| 200 | Accepted. JSON requests get `{"partialSuccess": {}}`, protobuf requests an empty protobuf body |
+| 400 | Not an OTLP export request, or a bad gzip body |
+| 401 | The token header is missing or wrong |
+| 403 | The `Host` header names another host |
+| 413 | Over 16MB |
+| 415 | Another content type |
+
+## What's read
+
+A model call, which the conventions call an inference operation, is a span, or a `gen_ai.client.inference.operation.details` event, carrying:
+
+| Attribute | Used as |
+|---|---|
+| `gen_ai.input.messages` | The history sent to the model, oldest first |
+| `gen_ai.output.messages` | What the model returned, one message per choice |
+| `gen_ai.conversation.id` | The conversation it belongs to, when the library has one |
+| `service.name` (resource) | The app: the client name its conversations are filed under, and scoped by |
+
+Messages are `{role, parts}`, and text is the parts of type `text`.
+
+The earlier version of the conventions, which released instrumentation still emits, is read too. That version sends one log event per message (`gen_ai.system.message`, `gen_ai.user.message`, `gen_ai.assistant.message`, `gen_ai.tool.message`, and `gen_ai.choice` for the answer), with the content in the body, tied to its call by its span id.
+
+## What's kept
+
+- **Only the messages' text** is stored. System instructions, tool output and every other attribute are dropped.
+- **Repeats change nothing:** every call re-sends the history, so a message is identified by its role and text, and the same message arriving again isn't stored twice.
+- **Conversations:** without a `gen_ai.conversation.id`, a conversation is identified by its opening message.
+- **Recaps:** a turn that called one of OpenMemore's recall tools, as a standard `tool_call` part, is marked as a recap.
+- **Scope:** conversations go to the write scope of the client named by `service.name`. Give it scopes under `[clients.<name>]`, like any client.
+- **Secrets** are replaced with `[REDACTED]`, as for every captured conversation.
+- **Audit:** each request that stores messages is recorded in the audit log.

@@ -1,0 +1,266 @@
+---
+title: "CLI"
+description: "Every openmemore command and option."
+icon: "terminal"
+---
+
+Every command works on the data directory, `~/.openmemore`, or `OPENMEMORE_HOME` if it's set. Every command takes `--help`.
+
+| Environment variable | What it does |
+|---|---|
+| `OPENMEMORE_HOME` | The data directory, instead of `~/.openmemore` |
+| `OPENMEMORE_MODEL_DIR` | Where the embedding model is kept, instead of `<data directory>/models` |
+| `OPENMEMORE_MODEL_API_KEY` | The consolidation model's API key, for a manual run. It takes precedence over the saved key |
+
+## Setting up
+
+### `openmemore init`
+
+Create the data directory, database, and default config. Safe to run again: it applies any new database migrations and keeps an existing config.
+
+### `openmemore setup`
+
+```sh
+openmemore setup [CLIENT] [--config FILE] [--dry-run] [--dev]
+```
+
+Connect an MCP client to OpenMemore and put the standing instruction on your clipboard. For a client with transcript capture, it also turns capture on and reads its existing chats. Then it offers the background service. See [Connect your assistants](/connect).
+
+| Argument or option | Description |
+|---|---|
+| `CLIENT` | `vscode-copilot`, `cursor` or `claude-code` use the app's own install command. Any other name, or none, gets the snippet that works in every MCP client |
+| `--config FILE` | Merge the server into this JSON config file, under its `mcpServers`, keeping a `.bak` copy |
+| `--dry-run` | Show the steps without changing anything |
+| `--dev` | Register this development checkout itself. The app then runs whatever branch is checked out |
+
+### `openmemore clients`
+
+List the MCP clients that have connected, the application each one reported, the scopes it gets, how its chats are captured, and when it was last seen.
+
+| Option | Description |
+|---|---|
+| `--all`, `-a` | Also list names from earlier versions' audit history |
+
+### `openmemore embed`
+
+Download the embedding model, once, and embed memories and conversations that don't have embeddings yet, so search can match by meaning. Servers never download the model themselves.
+
+### `openmemore serve`
+
+Run the MCP server over stdio, for whichever MCP client starts it. You don't run this yourself: each client runs it, and the server names the client from what it reports when it connects.
+
+## Memories and conversations
+
+### `openmemore memories list`
+
+List memories, newest first.
+
+| Option | Default | Description |
+|---|---|---|
+| `--kind`, `-k` | all | Only these kinds: `fact`, `preference`, `project`, `decision`, `note`. Repeatable |
+| `--project`, `-p` | | Only memories tagged with this project |
+| `--scope`, `-s` | all | Only these scopes. Repeatable |
+| `--all`, `-a` | off | Include replaced, older versions |
+| `--limit`, `-n` | 50 | Maximum number of memories to show |
+
+### `openmemore memories show`
+
+```sh
+openmemore memories show MEMORY_ID
+```
+
+Show one memory in full, with its version history.
+
+| Argument | Description |
+|---|---|
+| `MEMORY_ID` | The memory's id, from `openmemore memories list` |
+
+### `openmemore memories rm`
+
+```sh
+openmemore memories rm MEMORY_ID [--yes]
+```
+
+Permanently delete a memory and all of its versions.
+
+| Argument or option | Description |
+|---|---|
+| `MEMORY_ID` | The memory's id, from `openmemore memories list` |
+| `--yes`, `-y` | Don't ask for confirmation |
+
+### `openmemore conversations list`
+
+List conversations, most recently active first.
+
+| Option | Default | Description |
+|---|---|---|
+| `--source` | all | Only this assistant or provider. Partial names match |
+| `--scope`, `-s` | all | Only these scopes. Repeatable |
+| `--limit`, `-n` | 50 | Maximum number of conversations to show |
+
+### `openmemore conversations show`
+
+```sh
+openmemore conversations show CONVERSATION_ID
+```
+
+Show a conversation's messages in full.
+
+| Argument | Description |
+|---|---|
+| `CONVERSATION_ID` | The conversation's id, from `openmemore conversations list` |
+
+### `openmemore conversations rm`
+
+```sh
+openmemore conversations rm CONVERSATION_ID [--yes]
+```
+
+Permanently delete a conversation and all of its messages. It stays deleted: capture and imports won't bring it back.
+
+| Argument or option | Description |
+|---|---|
+| `CONVERSATION_ID` | The conversation's id, from `openmemore conversations list` |
+| `--yes`, `-y` | Don't ask for confirmation |
+
+### `openmemore wipe`
+
+```sh
+openmemore wipe --before DATE
+openmemore wipe --all
+```
+
+Delete in bulk: everything not touched since a date, or everything. Whole conversations and memories go, with their versions, proposals, the audit log, and finished import and consolidation records from that time. Deleted conversations stay deleted. Config, the embedding model and the daemon are untouched. The deleted text is then erased from the database file. See [Deleting things](/guides/deleting).
+
+| Option | Description |
+|---|---|
+| `--before DATE` | Delete what wasn't touched since this date, in local time, such as `2026-10-20` or `2026-10-20T09:30` |
+| `--all` | Delete everything stored: a fresh start |
+| `--yes`, `-y` | Don't ask for confirmation |
+| `--no-backup` | Don't keep a copy of the database first |
+
+Pass exactly one of `--before` and `--all`.
+
+### `openmemore import`
+
+```sh
+openmemore import PATH [--scope SCOPE]
+```
+
+Import a ChatGPT or Claude data export, or an OpenMemore export, newest conversations first. It's safe to interrupt: running the same command again resumes where it stopped, and importing a file again does nothing once it's done. See [Import and export](/guides/import-export).
+
+| Argument or option | Description |
+|---|---|
+| `PATH` | The export: the `.zip` you downloaded, its `conversations.json`, or an unpacked folder |
+| `--scope`, `-s` | The scope to store everything in. By default, an OpenMemore export keeps its own scopes, and others go to `[defaults] write_scope` |
+
+### `openmemore export`
+
+Export every memory and conversation, in the format `openmemore import` reads back. The file is readable only by you.
+
+| Option | Default | Description |
+|---|---|---|
+| `--output`, `-o` | `openmemore-export-<date>.json` here | The file to write, or `-` for stdout |
+| `--scope`, `-s` | everything | Only these scopes. Repeatable |
+
+### `openmemore status`
+
+Show import jobs and what's stored: memories, conversations by source, items waiting for embeddings, proposals waiting for review, conversations not yet consolidated, conflicts to settle, the daemon, and automatic consolidation.
+
+### `openmemore audit`
+
+Show the log of every tool call made by every client.
+
+| Option | Default | Description |
+|---|---|---|
+| `--client`, `-c` | all | Only calls from this client |
+| `--tool`, `-t` | all | Only calls to this tool |
+| `--limit`, `-n` | 50 | Maximum number of entries to show |
+| `--stats` | off | Show call counts and p50/p95 latency per tool instead |
+
+## Capture
+
+### `openmemore capture`
+
+Store new conversations from the transcripts of clients with capture turned on. Servers already do this before each search; run it to catch up on older history. See [Capture conversations](/guides/capture).
+
+| Option | Default | Description |
+|---|---|---|
+| `--source` | every enabled source | Only this source: `claude-code` or `vscode-copilot`. Repeatable |
+| `--days` | `[capture] days` | Read transcripts changed in this many days |
+
+### `openmemore daemon install`
+
+Run OpenMemore in the background, starting at login, once you allow it. See [Capture in the background](/guides/background).
+
+| Option | Description |
+|---|---|
+| `--yes`, `-y` | Don't ask: you allow it to run in the background |
+| `--dry-run` | Show what would be installed without changing anything |
+| `--dev` | Run this development checkout as the service |
+
+### `openmemore daemon status`
+
+Whether the daemon is installed and running.
+
+### `openmemore daemon uninstall`
+
+Stop the daemon and remove its service.
+
+### `openmemore daemon telemetry`
+
+Print the OpenTelemetry settings that send an app's conversations to the daemon: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` with the token, and the switches that make instrumentation include message content. See [OpenTelemetry](/reference/opentelemetry).
+
+### `openmemore daemon run`
+
+Run the daemon in the foreground. The installed service runs this.
+
+| Option | Default | Description |
+|---|---|---|
+| `--home` | `$OPENMEMORE_HOME` or `~/.openmemore` | Data directory |
+| `--log-file` | the terminal | Append output here instead |
+
+## Consolidation and review
+
+### `openmemore review`
+
+Review proposed memories, and browse, edit and delete memories, in your browser. It first looks for new groups of near-duplicate memories to merge. See [Consolidate and review](/guides/consolidation).
+
+| Option | Default | Description |
+|---|---|---|
+| `--no-browser` | off | Print the link instead of opening a browser |
+| `--port` | any free port | Port to listen on |
+
+### `openmemore consolidate setup`
+
+Set up automatic consolidation, which is off until you do: which model to use, and when.
+
+| Option | Default | Description |
+|---|---|---|
+| `--endpoint` | | Base URL of an Open Responses or Chat Completions endpoint, such as `http://127.0.0.1:11434/v1` or `https://api.openai.com/v1` |
+| `--model` | | The model's name at that endpoint |
+| `--api` | `responses` | `responses` (Open Responses) or `chat-completions` |
+| `--schedule` | `03:00` | Local time of the daily run, as `HH:MM` |
+| `--key` | off | Prompt for an API key, kept in a file only you can read |
+| `--check`, `--no-check` | `--check` | Send a one-line test request first |
+| `--yes`, `-y` | off | Don't ask before allowing a non-local endpoint |
+
+### `openmemore consolidate run`
+
+Consolidate now, instead of waiting for the daily run.
+
+| Option | Default | Description |
+|---|---|---|
+| `--limit`, `-n` | `[consolidation] max_conversations` | At most this many conversations |
+
+### `openmemore consolidate status`
+
+Whether automatic consolidation is on, and how the last run went.
+
+### `openmemore consolidate off`
+
+Turn automatic consolidation off.
+
+| Option | Description |
+|---|---|
+| `--forget` | Also delete the saved API key and the allowed host |

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "OpenMemore",
+  "description": "One shared memory for all your AI assistants, kept on your own machine.",
+  "colors": {
+    "primary": "#0F766E",
+    "light": "#2DD4BF",
+    "dark": "#0F766E"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/unrealdhanush/openmemore"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["index", "quickstart", "connect"]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/scopes",
+              "guides/capture",
+              "guides/background",
+              "guides/memory-over-time",
+              "guides/consolidation",
+              "guides/import-export",
+              "guides/deleting",
+              "guides/library"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": ["security", "limitations", "troubleshooting"]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/cli",
+              "reference/config",
+              "reference/mcp",
+              "reference/export-format",
+              "reference/opentelemetry",
+              "reference/consolidation-endpoint"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/unrealdhanush/openmemore"
+    }
+  }
+}

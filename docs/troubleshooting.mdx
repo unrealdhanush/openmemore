@@ -1,0 +1,75 @@
+---
+title: "Troubleshooting"
+description: "What to check when an assistant doesn't connect, doesn't remember, or can't find something."
+icon: "wrench"
+---
+
+Start with these three commands. Together they show most problems:
+
+```sh
+openmemore status     # what's stored, embeddings, proposals, the daemon, consolidation
+openmemore clients    # which assistants have connected, with what scopes
+openmemore audit      # every call each assistant made
+```
+
+<AccordionGroup>
+  <Accordion title="An assistant doesn't show up in openmemore clients">
+    A client appears after its first tool call, not when it's configured.
+    - **Restart it:** each assistant starts the server when it launches.
+    - **Check the app's MCP settings:** the `openmemore` server should be listed and running. If setup said "Not done automatically", follow the steps it printed. For VS Code, that usually means putting `code` on your PATH (in VS Code: "Shell Command: Install 'code' command in PATH").
+    - **Ask it to call `ping`:** "call the openmemore ping tool". The answer shows the name it connected as and its scopes.
+    - **Check the path:** the server entry runs the `openmemore` that setup found. If you reinstalled or moved it, run setup again.
+  </Accordion>
+  <Accordion title="An assistant is connected but doesn't save or recall anything">
+    Assistants don't reliably use tools just because they're available.
+    - **Paste the standing instruction:** `openmemore setup <client>` copies it to your clipboard. See [The standing instruction](/connect#the-standing-instruction).
+    - **Look at what it called:** `openmemore audit --client <name>` shows each call. No `get_profile` at the start of chats means it isn't following the instruction.
+    - **For VS Code Copilot and Claude Code,** turn on [transcript capture](/guides/capture), so recording doesn't depend on the model.
+  </Accordion>
+  <Accordion title="One assistant can't find what another one saved">
+    - **Scopes:** the reader must read the scope the writer writes to. `openmemore clients` shows both. See [Scopes](/guides/scopes).
+    - **Was it stored?** `openmemore memories list` and `openmemore conversations list` show what's there, and `openmemore audit --client <name>` shows whether the writer called anything.
+    - **Search by topic:** "cat names" works better than "the pet question I asked Copilot". To narrow by assistant, use `recent_conversations` with a source.
+  </Accordion>
+  <Accordion title="Search only matches exact words">
+    The embedding model isn't downloaded, or some items aren't embedded yet. `ping` reports `semantic_search` as unavailable, and `openmemore status` counts what's waiting for embeddings. Run:
+    ```sh
+    openmemore embed
+    ```
+    Servers never download the model themselves, since a download is far too slow for a tool call.
+  </Accordion>
+  <Accordion title="Captured chats are missing or late">
+    - **Is capture on?** `[capture] sources` in `config.toml` should list the app. `openmemore setup vscode-copilot` or `openmemore setup claude-code` adds it.
+    - **Folders:** `include_folders` and `exclude_folders` may be leaving it out. With `include_folders` set, chats with no folder aren't captured.
+    - **Older chats:** only transcripts changed in the last 30 days (`[capture] days`) are read. `openmemore capture --days 365` goes further back.
+    - **Timing:** without the daemon, chats are captured when an assistant next looks something up. [Install the daemon](/guides/background) to capture as they happen.
+    - **A reader broke:** an app update can change its transcript format. Errors are printed by `openmemore capture`, and in the daemon's log.
+  </Accordion>
+  <Accordion title="The daemon isn't running">
+    `openmemore daemon status` says whether it's installed and running. If it's installed but not running, its log is at `~/.openmemore/logs/daemon.log`.
+    - **Port in use:** another program may have port 47318. Pick another with `[daemon] port` in `config.toml`, then reinstall: `openmemore daemon uninstall`, then `openmemore daemon install`.
+    - **Linux, after logging out:** user services stop at logout unless you run `loginctl enable-linger`.
+  </Accordion>
+  <Accordion title="An OpenTelemetry exporter's requests are refused">
+    The daemon's answer says why:
+    - **401:** the `x-openmemore-token` header is missing or wrong. `openmemore daemon telemetry` prints the right one.
+    - **403:** the request named another host. Send it to `127.0.0.1` or `localhost`, on the daemon's port.
+    - **415:** the content type must be `application/json` or `application/x-protobuf`.
+    - **413:** the request is over 16MB.
+
+    Requests that are accepted but store nothing usually lack message content: most instrumentation leaves it out until you opt in. See [OpenTelemetry](/reference/opentelemetry).
+  </Accordion>
+  <Accordion title="OpenMemore says config.toml is invalid">
+    Unknown keys are rejected, so a typo such as `read_scope` doesn't pass silently. The error names the key. Check it against the [configuration reference](/reference/config).
+  </Accordion>
+  <Accordion title="Automatic consolidation doesn't run">
+    - `openmemore consolidate status` says whether it's on and how the last run went.
+    - The nightly run needs the [daemon](/guides/background). `openmemore consolidate run` runs it now, without the daemon.
+    - If setup's test request failed, the settings were saved but consolidation stayed off. Run `openmemore consolidate setup` again once the endpoint answers.
+  </Accordion>
+  <Accordion title="A wrong memory keeps coming back">
+    Correct it instead of deleting it: ask the assistant to update it, or edit it on the [review page](/guides/consolidation#review). If it came from consolidation, rejecting the proposal stops it from being proposed again.
+  </Accordion>
+</AccordionGroup>
+
+Still stuck? Open an issue on [GitHub](https://github.com/unrealdhanush/openmemore/issues) with the output of `openmemore status` and the steps that led there. Leave out anything private.

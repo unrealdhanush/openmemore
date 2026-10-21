@@ -144,7 +144,7 @@ openmemore consolidate run      # now, instead of at 03:00
 openmemore consolidate off
 ```
 
-What OpenMemore sends and expects is in [docs/consolidation-endpoint.md](docs/consolidation-endpoint.md). A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
+What OpenMemore sends and expects is in [docs/reference/consolidation-endpoint.mdx](docs/reference/consolidation-endpoint.mdx). A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
 
 A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmemore review` prints.
 
@@ -162,7 +162,7 @@ memory = Memory("trip-planner")       # a client name, scoped like any app
 def plan(request: str, context: str = "") -> str: ...
 ```
 
-See [docs/library.md](docs/library.md).
+See [docs/guides/library.mdx](docs/guides/library.mdx).
 
 ## Import and export
 
@@ -222,5 +222,7 @@ uv run pytest                        # real-model tests download ~70MB once to ~
 uv run python scripts/benchmark.py   # performance budget: 10k memories, 100k chunks (SPEC.md 4.3)
 uv run python -m bench locomo           # retrieval quality on LongMemEval / LoCoMo (SPEC.md M7.6; results in bench/RESULTS.md)
 ```
+
+The documentation is a [Mintlify](https://mintlify.com) site in `docs/` (`docs.json` and MDX pages). To preview it, run `npx mint dev` in `docs/`, which needs Node.js. `tests/test_docs.py` fails when a CLI command or option, a config key, or an MCP tool, prompt or resource has no reference entry, and when a page is missing from the navigation, links to a page that doesn't exist, or isn't valid MDX.
 
 Running `openmemore setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that. See [SPEC.md](SPEC.md) for the design, milestones and open questions.

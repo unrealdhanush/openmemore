@@ -1,0 +1,114 @@
+---
+title: "Export format"
+description: "OpenMemore's own JSON format: what openmemore export writes, and a way in for any provider's history."
+icon: "file-code"
+---
+
+`openmemore export` writes this format, and `openmemore import` reads it back. It's also the way in for history from any provider OpenMemore has no importer for: convert that provider's export to this, then import it.
+
+```json
+{
+  "format": "openmemore.export",
+  "version": 1,
+  "exported_at": "2026-10-19T10:00:00Z",
+  "memories": [
+    {
+      "id": 3,
+      "kind": "preference",
+      "content": "Prefers metric units.",
+      "subject": "units",
+      "project": null,
+      "scope": "personal",
+      "source": "claude-ai",
+      "confidence": 0.6,
+      "metadata": {},
+      "created_at": "2026-10-01T10:00:00Z",
+      "updated_at": "2026-10-01T10:00:00Z",
+      "superseded_by": null,
+      "valid_from": "2026-10-01T10:00:00Z",
+      "valid_to": null,
+      "derived_from": [{ "provider": "gemini", "id": "c-123" }]
+    }
+  ],
+  "conversations": [
+    {
+      "provider": "gemini",
+      "id": "c-123",
+      "title": "Garden planning",
+      "scope": "personal",
+      "created_at": "2026-10-01T10:00:00Z",
+      "updated_at": "2026-10-01T10:05:00Z",
+      "metadata": {},
+      "messages": [
+        { "id": "1", "role": "user", "content": "What should I plant in October?", "created_at": "2026-10-01T10:00:00Z" },
+        { "id": "2", "role": "assistant", "content": "Garlic, broad beans and spring onions.", "created_at": "2026-10-01T10:00:20Z" }
+      ]
+    }
+  ]
+}
+```
+
+Times are ISO 8601, with a time zone. Unknown fields are ignored.
+
+## Document
+
+| Field | Required | Description |
+|---|---|---|
+| `format` | yes | Always `"openmemore.export"` |
+| `version` | yes | `1`. Other versions are refused |
+| `exported_at` | no | When the file was written |
+| `memories` | no | A list of memories |
+| `conversations` | no | A list of conversations |
+
+## Memories
+
+| Field | Required | Description |
+|---|---|---|
+| `kind` | yes | `fact`, `preference`, `project`, `decision` or `note` |
+| `content` | yes | The statement |
+| `created_at` | yes | When it was stored |
+| `updated_at` | yes | When it last changed |
+| `subject` | no | A short label |
+| `project` | no | The project it belongs to |
+| `scope` | no | Its scope. Without one, it goes to the import's scope |
+| `source` | no | The client that wrote it. Default `import:openmemore` |
+| `confidence` | no | 0 to 1 |
+| `metadata` | no | An object, kept as is |
+| `id` | no | Its id in the exporting store, used by `superseded_by` |
+| `superseded_by` | no | For an earlier version: the id of the memory that replaced it |
+| `valid_from` | no | When it became true |
+| `valid_to` | no | When it stopped being true |
+| `superseded_at` | no | When it was replaced. Written by exports, not read on import |
+| `derived_from` | no | The conversations it came from, as `provider` and `id` pairs from this file's `conversations` |
+
+Earlier versions, those with `superseded_by` set, are exported as history but not imported. Importing restores what's current. A memory that's already stored is counted, not added twice.
+
+## Conversations
+
+| Field | Required | Description |
+|---|---|---|
+| `provider` | yes | A short name: letters, digits, `.`, `_` and `-`, up to 64 characters, starting with a letter or digit |
+| `id` | yes | The provider's id for the conversation. With `provider`, it identifies the conversation, so importing again adds only new messages |
+| `title` | no | Its title |
+| `scope` | no | Its scope. Without one, it goes to the import's scope |
+| `created_at` | no | When it started |
+| `updated_at` | no | When it last changed |
+| `metadata` | no | An object, kept as is |
+| `messages` | no | Its messages, in order |
+
+## Messages
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | yes | The message's id, unique within its conversation |
+| `role` | yes | `user` or `assistant` |
+| `content` | yes | The text |
+| `created_at` | no | When it was written |
+| `recall` | no | `true` for a turn that only recapped earlier conversations. Default `false` |
+
+## Importing
+
+- **Scopes:** each item keeps its `scope`. `openmemore import --scope work` puts everything in `work` instead.
+- **Secrets** in messages are replaced with `[REDACTED]`. Memories that look like secrets are skipped.
+- **Deleted conversations stay deleted:** one you deleted from this store isn't imported again.
+- **Errors:** an item that doesn't fit the format is skipped and reported, and the rest is imported.

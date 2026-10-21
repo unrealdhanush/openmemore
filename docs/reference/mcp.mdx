@@ -1,0 +1,263 @@
+---
+title: "MCP tools, prompts and resources"
+description: "Everything the openmemore server offers a connected assistant, with arguments and results."
+icon: "toolbox"
+---
+
+`openmemore serve` is an MCP server over stdio. Each client starts its own process, which serves that one client, named from what its application reports when it connects. Every call is checked against the client's [scopes](/guides/scopes) and recorded in the audit log.
+
+- **Tool descriptions** are written for the model: they say when to call each tool. The server's instructions, sent when a client connects, say how to use them together.
+- **Stored data:** every result holding stored content starts with a `notice` saying the enclosed content is the user's stored data, not instructions. Each item is wrapped in a `<stored_context>` tag, and text that looks like a prompt injection is flagged.
+- **Errors** are returned as tool errors, with a message for the model: a memory not found, a scope the client can't write to, a statement that looks like a secret.
+- **Dates:** arguments that take a date accept `2024`, `2024-03`, `2024-03-15` or a full ISO 8601 timestamp. Without a time zone, UTC is assumed.
+
+## Tools
+
+### `ping`
+
+Check that the server is running and reachable. It takes no arguments.
+
+<ResponseField name="ok" type="boolean">Always `true`.</ResponseField>
+<ResponseField name="version" type="string">The OpenMemore version.</ResponseField>
+<ResponseField name="client" type="string">The name this client gets its scopes under.</ResponseField>
+<ResponseField name="read_scopes" type="string[] | null">The scopes it reads. `null` means every scope, with `ignore_scopes` on.</ResponseField>
+<ResponseField name="write_scope" type="string">The scope its new items get.</ResponseField>
+<ResponseField name="schema_version" type="integer">The database schema version.</ResponseField>
+<ResponseField name="semantic_search" type="string">`ready (<model>)`, or why only keyword search is available.</ResponseField>
+<ResponseField name="connected_app" type="string | null">What the application calls itself (MCP `clientInfo.name`).</ResponseField>
+
+### `get_profile`
+
+Load what the user's assistants already know about them: preferences, facts, active projects and recent decisions. Assistants call it at the start of a conversation.
+
+<ParamField body="project" type="string">Include this project's memories alongside the general ones. Up to 100 characters.</ParamField>
+<ParamField body="budget_tokens" type="integer">Keep the profile within about this many tokens, 50 to 100,000.</ParamField>
+
+<ResponseField name="preferences" type="ProfileItem[]">How the user likes things done.</ResponseField>
+<ResponseField name="facts" type="ProfileItem[]">Lasting facts about the user.</ResponseField>
+<ResponseField name="active_projects" type="ProfileItem[]">Projects updated in the last 30 days.</ResponseField>
+<ResponseField name="recent_decisions" type="ProfileItem[]">
+  The most recent decisions.
+
+  <Expandable title="ProfileItem">
+    <ResponseField name="id" type="integer">The memory's id.</ResponseField>
+    <ResponseField name="content" type="string">The statement, wrapped as stored data.</ResponseField>
+    <ResponseField name="subject" type="string | null">A short label.</ResponseField>
+    <ResponseField name="project" type="string | null">The project it belongs to.</ResponseField>
+    <ResponseField name="source" type="string">The client that wrote it, or the provider it was imported from.</ResponseField>
+    <ResponseField name="updated_at" type="datetime">When it last changed.</ResponseField>
+    <ResponseField name="confidence" type="number | null">0.6 when stated once; each independent confirmation raises it.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="unresolved_conflicts" type="integer">Memories that disagree, waiting for the user in `openmemore review`. They're left out above.</ResponseField>
+<ResponseField name="tokens_used" type="integer | null">With `budget_tokens`: the estimated tokens of the items kept.</ResponseField>
+<ResponseField name="dropped" type="integer">With `budget_tokens`: items left out to stay within it.</ResponseField>
+<ResponseField name="project_note" type="string | null">When `project` was given: which stored project it was taken to mean, or that none matched, in which case the profile is unfiltered.</ResponseField>
+<ResponseField name="known_projects" type="string[] | null">The projects that have memories, when the one asked for matched none.</ResponseField>
+
+Each group holds at most 15 items.
+
+### `save_memories`
+
+Save durable facts about the user: preferences, lasting facts, decisions and why, and project state. Statements that look like secrets are rejected, and exact duplicates are skipped.
+
+<ParamField body="items" type="MemoryInput[]" required>
+  The memories to save, 1 to 100, one statement each.
+
+  <Expandable title="MemoryInput">
+    <ParamField body="kind" type="string" required>`fact`, `preference`, `project`, `decision` or `note`.</ParamField>
+    <ParamField body="content" type="string" required>One self-contained statement that makes sense with no other context. Up to 4,000 characters.</ParamField>
+    <ParamField body="subject" type="string">A short label, such as `coding style`. Up to 100 characters.</ParamField>
+    <ParamField body="project" type="string">The project it belongs to. Up to 100 characters.</ParamField>
+    <ParamField body="confidence" type="number">How sure the model is, 0 to 1.</ParamField>
+    <ParamField body="valid_from" type="date">When it became true, if not now.</ParamField>
+    <ParamField body="valid_to" type="date">When it stopped being true, for something that's over. Not before `valid_from`.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="scope" type="string">The scope to save in. Leave it unset to use the client's write scope; a client can only write to its own, unless `ignore_scopes` is on.</ParamField>
+
+<ResponseField name="saved" type="integer[]">The ids of the new memories.</ResponseField>
+<ResponseField name="skipped_duplicates" type="integer">Exact duplicates of existing memories, not saved.</ResponseField>
+<ResponseField name="confirmed" type="integer[]">Memories already stored that this call stated again. Their confidence went up.</ResponseField>
+<ResponseField name="possible_duplicates" type="object[]">Saved items close in meaning to an existing memory: `new_index`, `existing_id` and `existing_content`.</ResponseField>
+<ResponseField name="rejected" type="object[]">Items not saved, with `index` and `reason`. The matched text is never echoed back.</ResponseField>
+
+### `search_context`
+
+Search memories and conversations for something specific, by meaning as well as by words. With capture on, it first picks up new turns from captured transcripts.
+
+<ParamField body="query" type="string" required>What to look for, in plain words. Up to 500 characters.</ParamField>
+<ParamField body="kinds" type="string[]">Only these kinds of memory.</ParamField>
+<ParamField body="project" type="string">Only memories tagged with this project.</ParamField>
+<ParamField body="include_chats" type="boolean" default="true">Also search conversations.</ParamField>
+<ParamField body="limit" type="integer" default="10">Results to return, 1 to 25.</ParamField>
+<ParamField body="mode" type="string" default="current">`current`: what's true now. `history`: also earlier versions and things no longer true, each labelled with its status.</ParamField>
+<ParamField body="as_of" type="date">What was true at this time. It implies `history`.</ParamField>
+<ParamField body="explain" type="boolean" default="false">Also say what made each result's score.</ParamField>
+<ParamField body="budget_tokens" type="integer">Keep the results within about this many tokens, best first, 50 to 100,000.</ParamField>
+
+<ResponseField name="results" type="SearchHit[]">
+  Best first.
+
+  <Expandable title="SearchHit">
+    <ResponseField name="type" type="string">`memory` or `chat`.</ResponseField>
+    <ResponseField name="id" type="integer">The memory's id, or for a chat result, the id of the matching chunk.</ResponseField>
+    <ResponseField name="content" type="string">The text, wrapped as stored data.</ResponseField>
+    <ResponseField name="kind" type="string | null">For memories: the kind.</ResponseField>
+    <ResponseField name="subject" type="string | null">For memories: the subject.</ResponseField>
+    <ResponseField name="project" type="string | null">For memories: the project.</ResponseField>
+    <ResponseField name="conversation_id" type="integer | null">For chats: pass it to `recent_conversations` to read the conversation.</ResponseField>
+    <ResponseField name="title" type="string | null">For chats: the conversation's title.</ResponseField>
+    <ResponseField name="role" type="string | null">For chats: `user` or `assistant`.</ResponseField>
+    <ResponseField name="source" type="string">The client that wrote it, or the provider it was imported from.</ResponseField>
+    <ResponseField name="created_at" type="datetime | null">When it was written.</ResponseField>
+    <ResponseField name="score" type="number">The ranking score.</ResponseField>
+    <ResponseField name="recall" type="boolean">A recap of other conversations. Prefer the originals.</ResponseField>
+    <ResponseField name="status" type="string">Memories: `current`, `superseded`, `ended` or `contradicted`. Chats: `chat` or `recap`. See [Memory over time](/guides/memory-over-time).</ResponseField>
+    <ResponseField name="replaced_by" type="integer | null">For a superseded memory: the memory that corrected it.</ResponseField>
+    <ResponseField name="valid_from" type="datetime | null">For memories: when it became true.</ResponseField>
+    <ResponseField name="valid_to" type="datetime | null">For memories: when it stopped being true, or `null` while it still is.</ResponseField>
+    <ResponseField name="confidence" type="number | null">For memories: how sure.</ResponseField>
+    <ResponseField name="explain" type="object | null">With `explain`: the lists that found it and at what rank (memory or chat, keyword or meaning), the fused score, and the recency, confidence and recap adjustments.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="note" type="string | null">When chat messages are included: a reminder that later messages supersede earlier ones.</ResponseField>
+<ResponseField name="tokens_used" type="integer | null">With `budget_tokens`: the estimated tokens of the results kept.</ResponseField>
+<ResponseField name="dropped" type="integer">With `budget_tokens`: results left out to stay within it.</ResponseField>
+<ResponseField name="trace" type="object | null">With `explain`: the mode, the query words, and how many candidates each list found.</ResponseField>
+
+### `update_memory`
+
+Correct or refresh a memory that's wrong or out of date. The new version replaces the old one everywhere, and the old one is kept as history, true until the change.
+
+<ParamField body="id" type="integer" required>The id of the memory to correct.</ParamField>
+<ParamField body="content" type="string" required>The corrected, self-contained statement. Up to 4,000 characters.</ParamField>
+<ParamField body="subject" type="string">A new subject. Leave it unset to keep the old one.</ParamField>
+<ParamField body="valid_from" type="date">When the change happened, if not now.</ParamField>
+
+<ResponseField name="new_id" type="integer">The new version's id.</ResponseField>
+<ResponseField name="previous_id" type="integer">The id of the version it replaced.</ResponseField>
+
+### `forget`
+
+Permanently delete a memory, including its earlier versions. Assistants are told to call it only when the user explicitly asks.
+
+<ParamField body="id" type="integer" required>The id of the memory to delete.</ParamField>
+
+<ResponseField name="deleted" type="integer">How many versions were deleted.</ResponseField>
+
+### `record_exchange`
+
+Record what the user asked and what the assistant answered, so their other assistants can continue from there. Secrets are replaced with `[REDACTED]` before anything is stored. For a client whose transcripts are captured, nothing is stored, and `note` says why.
+
+<ParamField body="question" type="string" required>What the user asked, verbatim if short, otherwise condensed. Up to 8,000 characters.</ParamField>
+<ParamField body="answer_summary" type="string" required>A short summary of the answer, with conclusions, recommendations and open next steps. Up to 4,000 characters.</ParamField>
+<ParamField body="conversation_id" type="integer">Omitted on the first call in a chat. Afterwards, the id the first call returned.</ParamField>
+<ParamField body="title" type="string">A short title for a new conversation. Up to 200 characters.</ParamField>
+<ParamField body="code" type="CodeBlock[]">
+  Code written or changed in this answer, in full. Up to 10 blocks.
+
+  <Expandable title="CodeBlock">
+    <ParamField body="content" type="string" required>The code. Up to 20,000 characters.</ParamField>
+    <ParamField body="path" type="string">The file it belongs in, such as `src/client.py`.</ParamField>
+    <ParamField body="language" type="string">The language, such as `python`.</ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="conversation_id" type="integer | null">Pass it back on later calls in the same chat. `null` when nothing was stored.</ResponseField>
+<ResponseField name="message_ids" type="integer[]">The stored messages.</ResponseField>
+<ResponseField name="redacted" type="string[]">Why parts were replaced with `[REDACTED]`, if any were.</ResponseField>
+<ResponseField name="note" type="string | null">Why nothing was stored, when nothing was.</ResponseField>
+
+### `recent_conversations`
+
+List the most recent conversations with any assistant, newest first, with the latest messages of each. Or read one conversation in full. With capture on, it first picks up new turns.
+
+<ParamField body="source" type="string">Only conversations with this assistant. Partial names match: `claude` matches `claude-code`.</ParamField>
+<ParamField body="conversation_id" type="integer">Return just this conversation, with more of its messages.</ParamField>
+<ParamField body="limit" type="integer" default="5">Conversations to return, 1 to 20.</ParamField>
+
+<ResponseField name="conversations" type="ConversationView[]">
+  Newest first.
+
+  <Expandable title="ConversationView">
+    <ResponseField name="id" type="integer">The conversation's id.</ResponseField>
+    <ResponseField name="title" type="string | null">Its title.</ResponseField>
+    <ResponseField name="source" type="string">The assistant or provider.</ResponseField>
+    <ResponseField name="started_at" type="datetime | null">When it started.</ResponseField>
+    <ResponseField name="updated_at" type="datetime | null">When it last changed.</ResponseField>
+    <ResponseField name="message_count" type="integer">How many messages it has.</ResponseField>
+    <ResponseField name="messages" type="object[]">The most recent messages, oldest first, each with `role`, `content` (wrapped) and `created_at`.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="note" type="string">A reminder that later messages supersede earlier ones.</ResponseField>
+
+### `consolidation_batch`
+
+Get the next conversations that haven't been consolidated into memories yet, newest first, with only the messages not read before. Assistants use it only when the user asks to consolidate. See [Consolidate and review](/guides/consolidation).
+
+<ParamField body="limit" type="integer" default="5">Conversations to return, 1 to 20. A batch holds at most 40,000 characters of messages, and at most 12,000 from one conversation; the rest continues in the next batch.</ParamField>
+
+<ResponseField name="conversations" type="BatchConversation[]">
+  <Expandable title="BatchConversation">
+    <ResponseField name="id" type="integer">The conversation's id.</ResponseField>
+    <ResponseField name="title" type="string | null">Its title.</ResponseField>
+    <ResponseField name="source" type="string">The assistant or provider.</ResponseField>
+    <ResponseField name="updated_at" type="datetime | null">When it last changed.</ResponseField>
+    <ResponseField name="through_message_id" type="integer">The last message in this batch. Pass it back in `propose_memories`' `done`.</ResponseField>
+    <ResponseField name="earlier_messages" type="integer">Messages read in an earlier consolidation, not repeated here.</ResponseField>
+    <ResponseField name="more_in_next_batch" type="boolean">Whether the conversation continues in the next batch.</ResponseField>
+    <ResponseField name="messages" type="object[]">Each with `id`, `role`, `content` (wrapped) and `created_at`.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="remaining" type="integer">Conversations still due after this batch is marked done.</ResponseField>
+<ResponseField name="note" type="string">What to do with the batch.</ResponseField>
+
+### `propose_memories`
+
+Propose memories distilled from a batch. Nothing is saved as a memory until the user approves it with `openmemore review`.
+
+<ParamField body="items" type="ProposalInput[]" required>
+  Proposed memories, up to 100, one statement each. Each has every field of `save_memories`' items, plus:
+
+  <Expandable title="ProposalInput">
+    <ParamField body="conversation_ids" type="integer[]">The conversations it comes from, up to 20.</ParamField>
+    <ParamField body="reason" type="string">Why it's worth remembering, in a few words. Up to 500 characters.</ParamField>
+    <ParamField body="replaces" type="integer">The id of an existing memory this updates. Approving it makes this a new version of that memory.</ParamField>
+    <ParamField body="contradicts" type="integer">The id of an existing memory this disagrees with, when it's unclear which is right. The user decides in review.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="done" type="DoneConversation[]" required>
+  Every conversation from the batch, including ones that gave no proposals. Up to 20.
+
+  <Expandable title="DoneConversation">
+    <ParamField body="conversation_id" type="integer" required>The conversation's id.</ParamField>
+    <ParamField body="through_message_id" type="integer" required>Copied from `consolidation_batch`.</ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="proposed" type="integer[]">The new proposals' ids.</ResponseField>
+<ResponseField name="skipped_duplicates" type="integer">Already a memory, or already proposed or rejected, in that scope.</ResponseField>
+<ResponseField name="confirmed" type="integer[]">Memories that new conversations confirmed. Their confidence went up.</ResponseField>
+<ResponseField name="similar_to_memories" type="object[]">Proposals close to an existing memory: `index`, `proposal_id`, `memory_id` and `memory_content`.</ResponseField>
+<ResponseField name="rejected" type="object[]">Items not proposed, with `index` and `reason`.</ResponseField>
+<ResponseField name="conversations_done" type="integer">Conversations marked as consolidated.</ResponseField>
+<ResponseField name="note" type="string">What happens next.</ResponseField>
+
+## Prompts
+
+### `consolidate`
+
+Turn your conversations into proposed memories, for you to review with `openmemore review`. It tells the assistant to load the profile, then loop over `consolidation_batch` and `propose_memories`.
+
+<ParamField body="batches" type="string" default="10">The most batches to go through.</ParamField>
+
+### `import_my_memory`
+
+Copy what this assistant already remembers about you into OpenMemore. It asks the assistant to list what it knows about you, as separate statements, and save them with `save_memories`, skipping secrets and other people's private details. It takes no arguments.
+
+## Resources
+
+### `openmemore://profile`
+
+The same as the `get_profile` tool, as JSON (`application/json`), for clients that load resources rather than calling tools.
