@@ -838,6 +838,9 @@ Every public surface documented in `docs/`, written for someone who has never se
 - **Pre-flight (Section 13):** employer approval, a final name, a license (all done 2026-10-21).
 - **New repository:** publish only the clean `main`, because GitHub keeps old PR refs. The private development repository took the name `unrealdhanush/openmemore` on 2026-10-21, so rename it first (e.g. `openmemore-dev`), then create the public `openmemore`.
 - **A package on PyPI** (`uv tool install <name>`).
+- **Rulesets** from `.github/rulesets/`, applied once the public repository exists (a private repository on GitHub Free can't have them): `gh api -X POST repos/OWNER/openmemore/rulesets --input .github/rulesets/main.json`, and the same for `release-tags.json`.
+  - **`main`:** changes only through a pull request, merged with a merge commit once the three CI checks pass on a branch up to date with `main`, and with review threads resolved. No force-pushes and no deletion. No approval is required while there's one maintainer: GitHub doesn't let authors approve their own pull requests. The checks must come from GitHub Actions, so another app can't report them. Nobody can bypass the rules; the owner can still edit the ruleset.
+  - **Release tags (`v*`):** can't be moved or deleted once pushed, so a published version always points at the same commit.
 - **A README** for people who've never seen the project, linking the documentation (M8.5).
 - **The OpenMemore format** published as JSON Schema.
 - **Done when:** someone else, on a clean machine, installs it and connects two apps in under five minutes from the README alone.
