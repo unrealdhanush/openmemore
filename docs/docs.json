@@ -19,6 +19,9 @@
       "href": "https://github.com/unrealdhanush/openmemore"
     }
   },
+  "contextual": {
+    "options": ["copy", "view", "claude", "chatgpt", "perplexity"]
+  },
   "navigation": {
     "tabs": [
       {
