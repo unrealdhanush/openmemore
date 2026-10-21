@@ -1,4 +1,4 @@
--- Automatic consolidation runs (SPEC.md M7): when, with which model, what came of it.
+-- Automatic consolidation runs: when, with which model, what came of it.
 CREATE TABLE consolidation_runs (
   id             INTEGER PRIMARY KEY,
   trigger        TEXT NOT NULL CHECK (trigger IN ('schedule', 'manual')),

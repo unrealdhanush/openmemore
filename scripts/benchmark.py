@@ -1,4 +1,7 @@
-"""Check the SPEC.md Section 4.3 performance budget on a synthetic store.
+"""Check the performance budget on a synthetic store: search_context under 100ms p95,
+and save_memories with 20 items under 300ms p95, once warm, on 10k memories and 100k
+conversation chunks. (The third budget, `openmemore serve` ready in under 500ms, is
+tests/test_server.py's.)
 
     uv run python scripts/benchmark.py [--memories 10000] [--chunks 100000]
 

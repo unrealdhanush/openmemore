@@ -53,18 +53,18 @@ def _moment(value: Any) -> Any:
 
 
 Moment = Annotated[AwareDatetime, BeforeValidator(_moment)]
-"""A point in time on the timeline of when something was true (SPEC.md M7.7)."""
+"""A point in time on the timeline of when something was true."""
 
 Role = Literal["user", "assistant", "system", "tool"]
 
 VectorTable = Literal["memories", "chunks"]
-"""Tables whose rows get embeddings (SPEC.md M2); each has a `<table>_vec` companion."""
+"""Tables whose rows get embeddings; each has a `<table>_vec` companion."""
 VECTOR_TABLES: tuple[VectorTable, ...] = ("memories", "chunks")
 
 JobStatus = Literal["queued", "running", "done", "failed"]
 
 CaptureSource = Literal["claude-code", "vscode-copilot"]
-"""Clients whose transcripts OpenMemore can read from disk (SPEC.md M1.5). Each name is
+"""Clients whose transcripts OpenMemore can read from disk. Each name is
 also the client name it connects with, and the `provider` of what it captures."""
 CAPTURE_SOURCES: tuple[CaptureSource, ...] = ("claude-code", "vscode-copilot")
 
@@ -135,7 +135,7 @@ class Memory(NewMemory):
     superseded_at: AwareDatetime | None = None
     """When OpenMemore learned it had been corrected (recorded time)."""
     presented: int = 0
-    """Times a client was shown it, or it was confirmed (activation, SPEC.md M7.7)."""
+    """Times a client was shown it, or it was confirmed (activation)."""
     last_presented_at: AwareDatetime | None = None
 
     @property
@@ -165,7 +165,7 @@ class Conversation(NewConversation):
 
     id: int
     consolidated_through: int | None = None
-    """The last message read for consolidation (SPEC.md M5)."""
+    """The last message read for consolidation."""
 
 
 class NewMessage(BaseModel):
@@ -178,7 +178,7 @@ class NewMessage(BaseModel):
     """The source's id for this message (captured transcripts), so re-reading a growing
     transcript updates the message instead of adding another copy."""
     recall: bool = False
-    """Part of a turn that only looked up earlier conversations (SPEC.md 7.2)."""
+    """Part of a turn that only looked up earlier conversations."""
 
 
 class Message(NewMessage):
@@ -202,7 +202,7 @@ class ChunkMatch(BaseModel):
     provider: str
     rank: float
     presented: int = 0
-    """Times a client was shown it (activation, SPEC.md M7.7)."""
+    """Times a client was shown it (activation)."""
     last_presented_at: datetime | None = None
     """Lower is better: bm25 for keyword matches, cosine distance for vector matches."""
 
@@ -409,7 +409,7 @@ class SearchHit(BaseModel):
     id: int
     """Memory id, or chunk id for chat results."""
     content: str
-    """Wrapped per SPEC.md Section 8."""
+    """Wrapped as stored data (openmemore.safety.wrap)."""
     kind: Kind | None = None
     subject: str | None = None
     project: str | None = None
@@ -452,7 +452,7 @@ class SearchResult(ReadResult):
 class ProfileItem(BaseModel):
     id: int
     content: str
-    """Wrapped per SPEC.md Section 8."""
+    """Wrapped as stored data (openmemore.safety.wrap)."""
     subject: str | None = None
     project: str | None = None
     source: str
@@ -482,7 +482,7 @@ class Profile(ReadResult):
 class ConversationMessage(BaseModel):
     role: Role
     content: str
-    """Wrapped per SPEC.md Section 8."""
+    """Wrapped as stored data (openmemore.safety.wrap)."""
     created_at: datetime | None
 
 
@@ -554,7 +554,7 @@ class CaptureRequest(BaseModel):
     days: int | None = Field(default=None, ge=1, le=3650)
 
 
-# --- Consolidation and review (SPEC.md M5) -------------------------------------------
+# --- Consolidation and review -------------------------------------------
 
 MAX_BATCH_CONVERSATIONS = 20
 BATCH_CHARS = 40_000
@@ -607,7 +607,7 @@ class BatchMessage(BaseModel):
     id: int
     role: Role
     content: str
-    """Wrapped per SPEC.md Section 8."""
+    """Wrapped as stored data (openmemore.safety.wrap)."""
     created_at: datetime | None
 
 
@@ -636,7 +636,7 @@ class ProposedSimilar(BaseModel):
     proposal_id: int
     memory_id: int
     memory_content: str
-    """Wrapped per SPEC.md Section 8."""
+    """Wrapped as stored data (openmemore.safety.wrap)."""
 
 
 class ProposeResult(BaseModel):

@@ -1,4 +1,4 @@
-"""Transcript capture (SPEC.md M1.5), against synthetic transcripts modeled on real ones."""
+"""Transcript capture, against synthetic transcripts modeled on real ones."""
 
 import json
 import os

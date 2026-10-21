@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 1: two timelines on memories. When something was true in the user's
+"""Two timelines on memories. When something was true in the user's
 life (valid_from / valid_to) is kept apart from when OpenMemore learned it, and learned
 otherwise (created_at / superseded_at)."""
 

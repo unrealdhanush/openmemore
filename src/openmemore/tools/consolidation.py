@@ -1,4 +1,4 @@
-"""consolidation_batch, propose_memories (SPEC.md M5): the connected assistant reads
+"""consolidation_batch, propose_memories: the connected assistant reads
 conversations not yet consolidated and proposes memories from them. Nothing becomes a
 memory until the user approves it with `openmemore review`."""
 

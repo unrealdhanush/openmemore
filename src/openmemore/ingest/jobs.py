@@ -1,4 +1,4 @@
-"""`openmemore import`: a resumable job per export file (SPEC.md Section 10).
+"""`openmemore import`: a resumable job per export file.
 
 Two phases. First every conversation is stored, newest first, 50 per transaction, with
 the job's cursor advancing in the same transaction as the batch it covers: storing is

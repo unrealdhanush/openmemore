@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 3: recall modes and labels. Current answers stay current; history
+"""Recall modes and labels. Current answers stay current; history
 and as_of answer questions about the past, with every memory labelled."""
 
 from datetime import UTC, datetime

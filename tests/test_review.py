@@ -1,4 +1,4 @@
-"""SPEC.md M5: approving and rejecting proposals, merging near-duplicates, and the
+"""Approving and rejecting proposals, merging near-duplicates, and the
 `openmemore review` page, which only answers its own token, on its own host."""
 
 from contextlib import closing

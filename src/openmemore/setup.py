@@ -1,4 +1,4 @@
-"""`openmemore setup [client]`: connect an MCP client to OpenMemore (SPEC.md M3.5).
+"""`openmemore setup [client]`: connect an MCP client to OpenMemore.
 
 Any MCP client works from one generic snippet: `openmemore serve`, with no client name,
 since the server names the client from what it reports when it connects. Setup never

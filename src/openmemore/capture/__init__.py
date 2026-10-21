@@ -1,4 +1,4 @@
-"""Transcript capture (SPEC.md M1.5): store the conversations that clients already save
+"""Transcript capture: store the conversations that clients already save
 on the user's disk, so capture doesn't depend on the model calling record_exchange.
 
 Each enabled source lists its transcript files and parses one file at a time. Files

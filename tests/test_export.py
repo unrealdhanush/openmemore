@@ -1,4 +1,4 @@
-"""SPEC.md M4: `openmemore export` dumps every memory and conversation, and `openmemore import`
+"""`openmemore export` dumps every memory and conversation, and `openmemore import`
 reads it back: into an empty store, everything current returns with its scopes; into the
 same store, nothing is added."""
 

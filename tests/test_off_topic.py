@@ -55,8 +55,8 @@ def test_off_topic_memories_are_ranked_by_meaning_not_by_keyword_rank(conn, fake
 
 
 def test_chat_keyword_hits_keep_their_rank(conn, fake_embedder):
-    """Chats that share words but not meaning are often the evidence (M7.6: demoting them
-    lowered recall on both benchmarks)."""
+    """Chats that share words but not meaning are often the evidence (demoting them lowered
+    recall on both benchmarks, bench/RESULTS.md)."""
     store(conn, fake_embedder)
     hits = search_context(conn, ME, QUERY, explain=True).results
     assert "chat_keyword_rank" in hits[1].explain and "off_topic_weight" not in hits[1].explain

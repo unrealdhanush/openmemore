@@ -1,4 +1,4 @@
-"""SPEC.md M4: every tool honors scopes. One application writes 'personal' data through
+"""Every tool honors scopes. One application writes 'personal' data through
 every write path; a client configured to read only 'work' tries every read and write
 path and sees or changes none of it, and can't tell its ids from ids that don't exist."""
 
@@ -43,7 +43,7 @@ async def personal_data(home):
 
 
 @pytest.mark.anyio
-async def test_m4_done_when_a_work_only_client_cant_see_personal_data(scoped):
+async def test_a_work_only_client_cant_see_personal_data(scoped):
     memory_ids, conversation_id = await personal_data(scoped)
 
     async with connect(scoped, WORK_APP) as work:

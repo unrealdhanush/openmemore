@@ -1,4 +1,4 @@
-"""`openmemore review` (SPEC.md M5): a local page to approve, edit, and reject proposed
+"""`openmemore review`: a local page to approve, edit, and reject proposed
 memories, and to browse, edit, and delete memories.
 
 It listens on 127.0.0.1 only. A random token, generated for each run and given in the

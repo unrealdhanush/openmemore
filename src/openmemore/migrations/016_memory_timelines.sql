@@ -1,4 +1,4 @@
--- Two timelines for memories (SPEC.md M7.7, after LongMemory's bitemporal model):
+-- Two timelines for memories (after LongMemory's bitemporal model):
 -- valid_from / valid_to say when a memory was true in the user's life; created_at and
 -- superseded_at say when OpenMemore learned it and when it learned otherwise. A correction
 -- closes the old memory's validity where the new one starts; a memory whose validity has

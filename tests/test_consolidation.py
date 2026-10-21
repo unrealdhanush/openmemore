@@ -1,4 +1,4 @@
-"""SPEC.md M5: consolidation_batch and propose_memories. A client reads conversations not
+"""consolidation_batch and propose_memories. A client reads conversations not
 yet consolidated and proposes memories, which wait for the user's review; it can't read,
 propose from, or mark conversations outside its scopes."""
 

@@ -1,4 +1,4 @@
-"""SPEC.md M7: automatic consolidation with a model OpenMemore calls itself, through the open
+"""Automatic consolidation with a model OpenMemore calls itself, through the open
 standard for LLM APIs (Open Responses, or Chat Completions). Off by default; a local
 endpoint sends nothing off the machine; a remote one needs permission first."""
 

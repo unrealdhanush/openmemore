@@ -1,5 +1,5 @@
-"""Automatic consolidation (SPEC.md M7): the same work an assistant does with
-consolidation_batch and propose_memories (M5), done by a model OpenMemore calls itself
+"""Automatic consolidation: the same work an assistant does with
+consolidation_batch and propose_memories, done by a model OpenMemore calls itself
 (openmemore.llm), on the daemon's schedule or with `openmemore consolidate`.
 
 One conversation per model call: its new messages, and the user's memories most
