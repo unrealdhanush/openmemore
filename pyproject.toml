@@ -24,6 +24,7 @@ openmemore = "openmemore.cli:app"
 dev = [
     "pytest",
     "opentelemetry-proto>=1.30",  # tests only: encodes OTLP protobuf the official way, to check our reader
+    "jsonschema",  # tests only: checks exports against the published JSON Schema
 ]
 
 [build-system]

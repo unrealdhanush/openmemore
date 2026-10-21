@@ -8,6 +8,7 @@ import stat
 from contextlib import closing
 from pathlib import Path
 
+import jsonschema
 import pytest
 from typer.testing import CliRunner
 
@@ -76,6 +77,11 @@ def test_export_holds_everything_with_history_and_scopes(source):
     assert captured["messages"][2]["recall"] is True
     recorded = next(c for c in doc["conversations"] if c["provider"] == "claude-ai")
     assert all(m["id"].startswith("sha256:") for m in recorded["messages"])
+
+
+def test_an_export_fits_the_published_json_schema(source):
+    schema = json.loads((Path(__file__).parent.parent / "schema" / "openmemore-export.schema.json").read_text())
+    jsonschema.validate(export_document(source), schema)  # raises if it doesn't
 
 
 def test_a_round_trip_restores_everything_current(source, tmp_path):

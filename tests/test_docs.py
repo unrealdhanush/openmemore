@@ -87,6 +87,14 @@ def test_the_consolidation_endpoint_page_matches_the_code():
     assert consolidate.KEY_ENV in text and consolidate.KEY_FILE in text
 
 
+def test_the_published_json_schema_matches_the_code():
+    """Regenerate with: uv run python -c "import json; from openmemore.ingest.openmemore_format import json_schema;
+    print(json.dumps(json_schema(), indent=2))" > schema/openmemore-export.schema.json"""
+    from openmemore.ingest.openmemore_format import json_schema
+
+    assert json.loads((DOCS.parent / "schema" / "openmemore-export.schema.json").read_text(encoding="utf-8")) == json_schema()
+
+
 # --- reference coverage -----------------------------------------------------------------
 
 
@@ -115,6 +123,32 @@ def test_every_cli_command_and_option_is_documented(path, command):
                 assert f"`{param.opts[0]}" in section, f"{path}: {param.opts[0]} isn't documented"
         else:
             assert f"`{param.name.upper()}`" in section, f"{path}: {param.name.upper()} isn't documented"
+
+
+def example_commands() -> list[tuple[str, str]]:
+    """(page, line) for every openmemore command in the pages' shell examples, except
+    templates with placeholders (<client>, MEMORY_ID, [--yes])."""
+    found = []
+    for name in nav_pages():
+        for block in re.findall(r"```(?:sh|bash)\b[^\n]*\n(.*?)```", page(name), re.DOTALL):
+            for line in block.splitlines():
+                line = re.sub(r"\s+#.*$", "", line.strip())
+                if line.startswith("openmemore ") and not re.search(r"[<\[]|\b[A-Z][A-Z_]{2,}\b", line):
+                    found.append((name, line))
+    return found
+
+
+@pytest.mark.parametrize(("name", "line"), example_commands())
+def test_example_commands_parse(name, line):
+    """Each example names a real command, with options it takes, each given a valid value."""
+    import shlex
+
+    cmd = typer.main.get_command(app)
+    ctx = cmd.make_context("openmemore", shlex.split(line)[1:])
+    while hasattr(cmd, "resolve_command"):
+        rest = [*getattr(ctx, "_protected_args", getattr(ctx, "protected_args", [])), *ctx.args]
+        sub, cmd, rest = cmd.resolve_command(ctx, rest)
+        ctx = cmd.make_context(sub, rest, parent=ctx)
 
 
 def config_sections() -> list[tuple[str, str]]:

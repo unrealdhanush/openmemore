@@ -33,3 +33,20 @@ jobs:
           key: embedding-model-bge-small-en-v1.5
       - run: uv sync --frozen
       - run: uv run pytest -q
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    env:
+      MINTLIFY_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Pinned: the CLI publishes several releases a day.
+      - run: npx --yes mint@4.2.988 validate
+      - run: npx --yes mint@4.2.988 broken-links

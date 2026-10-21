@@ -77,6 +77,8 @@ class Conversation(BaseModel):
 class Memory(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    id: int | None = None
+    """Its id in the exporting store, which `superseded_by` refers to."""
     kind: Kind
     content: Text
     subject: str | None = None
@@ -90,7 +92,30 @@ class Memory(BaseModel):
     superseded_by: int | None = None
     valid_from: AwareDatetime | None = None
     valid_to: AwareDatetime | None = None
+    superseded_at: AwareDatetime | None = None
+    """Written by exports; importing restores only current memories, so it isn't read."""
     derived_from: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class Export(BaseModel):
+    """The whole document, for its JSON Schema (schema/openmemore-export.schema.json).
+    Imports read it piece by piece instead (items, memories), so one bad item doesn't
+    stop the rest."""
+
+    model_config = ConfigDict(extra="ignore", title="OpenMemore export", json_schema_extra={
+        "description": "What `openmemore export` writes and `openmemore import` reads back: memories, with their "
+        "earlier versions, and conversations. Unknown fields are ignored."})
+
+    format: Literal["openmemore.export"]
+    version: Literal[1]
+    exported_at: AwareDatetime | None = None
+    memories: list[Memory] = Field(default_factory=list)
+    conversations: list[Conversation] = Field(default_factory=list)
+
+
+def json_schema() -> dict[str, Any]:
+    """The format as JSON Schema (draft 2020-12), as published in schema/."""
+    return {"$schema": "https://json-schema.org/draft/2020-12/schema", **Export.model_json_schema()}
 
 
 def matches(doc: Any) -> bool:
