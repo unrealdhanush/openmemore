@@ -1,6 +1,8 @@
 """`openmemore wipe`: bulk deletion by date or of everything, whole items only, with a
 backup and the deleted text erased from the file."""
 
+import os
+import stat
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
@@ -103,7 +105,9 @@ def test_the_command_asks_backs_up_and_records_itself(store, home):
     code, out = run("wipe", "--all", input="wipe\n")
     assert code == 0 and "Deleted 6 memories and 3 conversations" in out
     [backup] = home.glob("openmemore.db.before-wipe-*")
-    assert backup.stat().st_mode & 0o777 == 0o600 and str(backup) in out.replace("\n", "")
+    if os.name != "nt":  # Windows has no Unix file modes
+        assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+    assert str(backup) in out.replace("\n", "")
     with closing(db.connect(backup)) as copy:
         assert len(ids(copy, "memories")) == 6
     assert [r[0] for r in conn.execute("SELECT tool FROM audit_log")] == ["wipe"]
