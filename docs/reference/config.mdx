@@ -1,0 +1,106 @@
+---
+title: "Configuration"
+description: "Every key in config.toml."
+icon: "sliders"
+---
+
+The configuration is `~/.openmemore/config.toml`, or `config.toml` in `OPENMEMORE_HOME`. `openmemore init` creates it with the defaults and a commented example.
+
+- **When changes apply:** each assistant reads the config when it starts its server, so restart assistants after changing it. Restart the [daemon](/guides/background) too, if it's installed.
+- **Typos fail loudly:** unknown keys are rejected, with the key named, so a typo such as `read_scope` doesn't pass silently.
+- **Some keys are written for you:** `openmemore setup`, `openmemore consolidate setup` and the daemon set some. You can still edit them by hand.
+
+```toml
+ignore_scopes = false
+
+[defaults]
+read_scopes = ["personal"]
+write_scope = "personal"
+
+[clients.cursor-vscode]
+read_scopes = ["work"]
+write_scope = "work"
+
+[capture]
+sources = ["claude-code", "vscode-copilot"]
+days = 30
+include_folders = ["~/projects"]
+exclude_folders = ["~/projects/client"]
+
+[daemon]
+port = 47318
+interval = 3.0
+
+[consolidation]
+enabled = true
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen2.5:7b"
+api = "responses"
+schedule = "03:00"
+max_conversations = 50
+```
+
+## Top level
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `ignore_scopes` | boolean | `false` | Share everything with every client. Scopes stay as labels on new items, but every client reads and changes items in any scope. See [Scopes](/guides/scopes) |
+
+## `[defaults]`
+
+The scopes of every client without its own `[clients.<name>]` table, and of any key such a table leaves out.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `read_scopes` | list of strings | `["personal"]` | The scopes clients read |
+| `write_scope` | string | `"personal"` | The scope new items get |
+
+## `[clients.<name>]`
+
+One table per client that needs its own scopes. `<name>` is the client's name as `openmemore clients` shows it, such as `cursor-vscode` or `claude-ai`. Any key left out falls back to `[defaults]`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `read_scopes` | list of strings | `[defaults] read_scopes` | The scopes this client reads |
+| `write_scope` | string | `[defaults] write_scope` | The scope this client's new items get |
+
+Scope names are 1 to 64 characters.
+
+## `[capture]`
+
+Which apps' transcripts are read from disk. See [Capture conversations](/guides/capture).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `sources` | list of strings | `[]` | The transcript readers in use: `claude-code`, `vscode-copilot`. `openmemore setup` adds them |
+| `days` | integer, 1 to 3650 | `30` | Only transcripts changed within this many days are read |
+| `include_folders` | list of strings | `[]` | If set, only conversations from these project folders, or inside them, are captured. Chats with no folder aren't |
+| `exclude_folders` | list of strings | `[]` | Conversations from these project folders, or inside them, are never captured. Exclusions win over inclusions |
+
+Folders can start with `~`.
+
+## `[daemon]`
+
+The background service. See [Capture in the background](/guides/background).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `port` | integer, 1024 to 65535 | `47318` | Where it listens on `127.0.0.1`, for OpenTelemetry exports and health checks |
+| `token` | string | created on first use | OpenTelemetry exporters must send it, in an `x-openmemore-token` header. `openmemore daemon telemetry` prints it |
+| `interval` | number, 0.5 to 3600 | `3.0` | Seconds between checks for changed transcripts |
+
+## `[consolidation]`
+
+Automatic consolidation, with a model OpenMemore calls itself. It's off until you run `openmemore consolidate setup`. See [Consolidate and review](/guides/consolidation) and [the consolidation endpoint](/reference/consolidation-endpoint).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether the daemon runs it each day |
+| `endpoint` | string | `""` | Base URL of an Open Responses or Chat Completions endpoint, such as `http://127.0.0.1:11434/v1` |
+| `model` | string | `""` | The model's name at that endpoint |
+| `api` | `"responses"` or `"chat-completions"` | `"responses"` | Which API the endpoint speaks |
+| `schedule` | string, `HH:MM` | `"03:00"` | Local time of day for the daemon's daily run |
+| `max_conversations` | integer, 1 to 10000 | `50` | Conversations per run. The rest wait for the next |
+| `allowed_host` | string | unset | The non-local host you allowed conversations to be sent to. Set when you're asked |
+
+The API key isn't in the config. It's in `~/.openmemore/consolidation.key`, readable only by you.

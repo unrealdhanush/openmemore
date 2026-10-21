@@ -763,7 +763,7 @@ memory.profile(); memory.recent(); memory.record(question, answer); memory.updat
   - scopes apply by client name;
   - sync and async both work;
   - a store failure doesn't break the function (tested).
-- **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmemore` loading nothing else. Documented in [docs/library.md](docs/library.md).
+- **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmemore` loading nothing else. Documented in [docs/guides/library.mdx](docs/guides/library.mdx).
 
 ### M7.6: Evaluation
 Measured retrieval quality, so changes to recall are judged by numbers rather than by feel, on public long-term memory benchmarks:
@@ -819,7 +819,7 @@ What OpenMemore doesn't take: automatic supersession from regular-expression cla
 - **Done when:** a week of real use needs no manual database fixes, and the report gives an evidence-based list of what to build next.
 
 ### M8.5: Documentation
-Every public surface documented in `docs/`, written for someone who has never seen the project, before the public release (M9). Pages can be written as features land; the first, [the model endpoint for consolidation](docs/consolidation-endpoint.md), came with M7.
+Every public surface documented in `docs/`, written for someone who has never seen the project, before the public release (M9). Pages can be written as features land; the first, [the model endpoint for consolidation](docs/reference/consolidation-endpoint.mdx), came with M7.
 - **Getting started:** install, connect each kind of app, the standing instruction, what to expect.
 - **Guides:** scopes, capture (transcripts, folders, the daemon, OpenTelemetry), consolidation and review, import and export, deleting things.
 - **Reference:**
@@ -833,6 +833,7 @@ Every public surface documented in `docs/`, written for someone who has never se
 - **Security and privacy:** what's stored where, what leaves the machine and when, permissions, the threat model, and its limits.
 - **Kept current by tests:** a test fails when a CLI command, config key or MCP tool has no reference entry, so the docs can't fall behind.
 - **Done when:** a reader can install, connect, configure and troubleshoot from `docs/` alone, and the coverage tests pass.
+- **Status (2026-10-20):** drafted as a Mintlify site (`docs/docs.json`, MDX pages): getting started, guides, every reference page above except the JSON Schema, security and privacy, limitations and troubleshooting. `tests/test_docs.py` covers CLI commands and options, config keys, and MCP tools with their arguments and results, prompts and resources, plus the navigation, internal links and MDX syntax. Still to do: the export format as JSON Schema (also an M9 item), a preview with Mintlify's own tooling, and a read-through by someone who's never seen the project.
 
 ### M9: Public release
 - **Pre-flight (Section 13):** employer approval, a final name, a license (all done 2026-10-21).

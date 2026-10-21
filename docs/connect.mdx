@@ -1,0 +1,103 @@
+---
+title: "Connect your assistants"
+description: "Add OpenMemore to VS Code Copilot, Cursor, Claude Code, Claude Desktop, or any other MCP client."
+icon: "plug"
+---
+
+Any MCP client works, with no client-specific support needed. The server is the same for every client:
+
+```json
+{ "mcpServers": { "openmemore": { "command": "/path/to/openmemore", "args": ["serve"] } } }
+```
+
+`openmemore setup` writes that for you, with the real path. It never edits another app's files: where the app has its own way to add an MCP server, setup uses it, and otherwise it prints the snippet.
+
+```sh
+openmemore setup <client>        # vscode-copilot, cursor, claude-code, or any other name
+openmemore setup <client> --dry-run
+```
+
+<Tabs>
+  <Tab title="VS Code (Copilot)">
+    ```sh
+    openmemore setup vscode-copilot
+    ```
+    - **Adds the server** with `code --add-mcp`. That needs `code` on your PATH: in VS Code, run "Shell Command: Install 'code' command in PATH". Without it, setup prints the command to run later.
+    - **Turns on transcript capture** for VS Code, so its chats are stored from the files VS Code saves, without the model's help. See [Capture conversations](/guides/capture).
+    - **Offers the background service**, which captures chats as they happen. See [Capture in the background](/guides/background).
+  </Tab>
+  <Tab title="Cursor">
+    ```sh
+    openmemore setup cursor
+    ```
+    Setup opens Cursor's install link, and Cursor asks you to review and confirm the server. If the link can't be opened, setup prints it, with the snippet for `~/.cursor/mcp.json`.
+
+    Cursor's chats are recorded by the model calling `record_exchange`, so the standing instruction matters here. Paste it into Cursor's User Rules.
+  </Tab>
+  <Tab title="Claude Code">
+    ```sh
+    openmemore setup claude-code
+    ```
+    - **Adds the server** with `claude mcp add --scope user`. Running setup again replaces the registration.
+    - **Turns on transcript capture**, reading the sessions Claude Code saves under `~/.claude/projects`.
+    - **Offers the background service**, as for VS Code.
+  </Tab>
+  <Tab title="Claude Desktop">
+    ```sh
+    openmemore setup claude-desktop
+    ```
+    Claude Desktop has no command for adding a server, so setup prints the snippet. Paste it into Settings → Developer → Edit Config, or have setup merge it in:
+    <CodeGroup>
+    ```sh macOS
+    openmemore setup claude-desktop --config ~/Library/Application\ Support/Claude/claude_desktop_config.json
+    ```
+    ```powershell Windows
+    openmemore setup claude-desktop --config "$env:APPDATA\Claude\claude_desktop_config.json"
+    ```
+    </CodeGroup>
+    `--config` keeps a `.bak` copy of the file first. Paste the standing instruction into Settings → Profile.
+  </Tab>
+  <Tab title="Any other client">
+    ```sh
+    openmemore setup my-client
+    openmemore setup my-client --config path/to/its/mcp.json
+    ```
+    Any name works. Setup prints the snippet, or merges it into the JSON file you name (into its `mcpServers`, keeping a `.bak` copy). A file with comments isn't changed; setup prints the snippet to add by hand instead.
+  </Tab>
+</Tabs>
+
+Restart the client after setup, so it starts the server.
+
+## The standing instruction
+
+Assistants don't reliably use tools just because they're available. In testing, they rarely recorded anything until told to. So setup copies a short instruction to your clipboard, to paste wherever the client reads your own instructions: custom instructions, user rules, or a file like `CLAUDE.md`.
+
+```text
+Use the openmemore tools (my memory, shared with all my AI assistants) as the openmemore server's instructions describe. In particular: call get_profile at the start of each conversation, record_exchange after every answer, save_memories when I make a decision or state a preference, and recent_conversations or search_context before saying you don't know about something I discussed earlier.
+```
+
+For VS Code Copilot and Claude Code, whose chats are captured from disk, it leaves out `record_exchange` and adds "Don't call record_exchange: conversations here are captured automatically."
+
+It's short on purpose. The details come from the server's own instructions, which update with OpenMemore, so you only paste it once. If you pasted an earlier one, replace it.
+
+## Client names
+
+A client is named by what its application reports when it connects, made config-friendly. Run `openmemore clients` to see the names of the clients that have connected, and the scopes each one gets:
+
+| App | Client name |
+|---|---|
+| Claude Desktop | `claude-ai` |
+| VS Code (Copilot) | `visual-studio-code` |
+| Cursor | `cursor-vscode` |
+| Claude Code | `claude-code` |
+| An app that reports "Some Editor 2" | `some-editor-2` |
+
+That's the name to use under `[clients.<name>]` in `config.toml` to give a client its own [scopes](/guides/scopes). A client shows up in `openmemore clients` after its first tool call.
+
+<Warning>
+Client names come from what each app reports about itself, and nothing verifies that. Scopes decide which assistant sees what; they aren't a security boundary. See [Security and privacy](/security).
+</Warning>
+
+## From a development checkout
+
+Running `openmemore setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch against your real data. `--dev` registers the checkout itself, on purpose.

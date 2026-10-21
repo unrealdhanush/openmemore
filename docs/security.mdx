@@ -1,0 +1,69 @@
+---
+title: "Security and privacy"
+description: "What's stored where, what leaves your machine and when, and what OpenMemore doesn't protect against."
+icon: "shield"
+---
+
+OpenMemore has no server and no account. Everything is in one directory on your machine, and nothing is sent anywhere unless you set up something that does.
+
+## What's stored where
+
+Everything is in `~/.openmemore`, or in `OPENMEMORE_HOME` if you set it:
+
+| Path | What it holds |
+|---|---|
+| `openmemore.db` (with `-wal` and `-shm` files while in use) | Memories and their history, conversations and messages, search indexes, vectors, proposals, and the audit log |
+| `config.toml` | Scopes, capture settings, and the daemon's token |
+| `models/` | The embedding model (`OPENMEMORE_MODEL_DIR` puts it elsewhere) |
+| `logs/daemon.log` | The background service's output |
+| `daemon.json` | The running daemon's state |
+| `consolidation.key` | The API key for a hosted consolidation model, if you set one. Readable only by you |
+| `openmemore.db.before-wipe-<time>` | The copy `openmemore wipe` keeps. Readable only by you |
+
+Exports from `openmemore export` go where you say, readable only by you.
+
+<Warning>
+The database isn't encrypted. Anyone who can read your files can read it, so rely on your disk encryption and your account's file permissions.
+</Warning>
+
+## What leaves your machine
+
+| When | What's sent, and where |
+|---|---|
+| `openmemore embed`, once | A download of the embedding model (about 70MB). Nothing of yours is sent |
+| Automatic consolidation, only if you set it up | Conversations and related memories, sent to the endpoint you chose. A local endpoint keeps them on your machine. A hosted one is used only after you allow that host in a dialog, and then it receives them each night |
+
+Nothing else goes out. Searching, capturing, importing and reviewing all run locally. The assistants you connect are a separate matter: what you say to a hosted assistant, and what it reads from OpenMemore to answer you, is sent to that assistant's provider, as any chat is.
+
+## What listens on the network
+
+Only two things, both on `127.0.0.1`, so other machines can't reach them:
+
+- **The daemon** (port 47318 by default), if you install it. Exports must carry the token from `config.toml` and name the daemon's own host. A web page you visit can't send it requests: the content types it accepts need a CORS preflight, which it never grants.
+- **The review page**, while `openmemore review` runs. It needs the token in the link that `openmemore review` prints.
+
+MCP clients talk to OpenMemore over stdio, through the `openmemore serve` process each one starts. That opens no port.
+
+## Protections
+
+- **Secrets:** memories that look like credentials (API keys, tokens, private keys, card numbers, passwords) are rejected. In recorded, captured and imported conversations, those parts are replaced with `[REDACTED]`. The filter uses patterns, so it will miss some secrets.
+- **Stored data is data, not instructions:** everything returned to a model is wrapped and labelled as your stored data. Content that looks like a prompt injection is flagged. This makes injection visible and harder. It doesn't make it impossible.
+- **Every call is logged** with the client, the reporting app, the tool and the timing. `openmemore audit` shows it.
+- **Deleting really deletes,** and `wipe` erases the deleted text from the file. See [Deleting things](/guides/deleting).
+- **Permission first:** nothing runs in the background, and nothing goes to a hosted model, until you allow it.
+
+## Threat model
+
+OpenMemore is built to keep your assistants' memory **on your machine and under your control**: visible, editable, exportable and deletable. It also guards against:
+- **Web pages** writing into your conversations through the daemon.
+- **Other machines** reaching any of it.
+- **Hidden instructions:** stored text being taken for instructions without the model being told otherwise.
+- **Accidental credential storage,** for common credential formats.
+
+It doesn't protect against:
+- **Programs running as you.** Any of them can read and change the database, the config and the daemon's token.
+- **A client claiming another name.** Client names come from what each app reports, and nothing verifies them. [Scopes](/guides/scopes) decide which assistant sees what. They aren't a security boundary.
+- **Someone with your disk.** The database isn't encrypted.
+- **A determined prompt injection.** Wrapping and flagging make it harder, not impossible. A connected assistant can also be talked into saving or forgetting things. The audit log shows what each one did.
+- **Secrets the patterns miss.** Don't rely on the filter to keep a credential out.
+- **Your providers.** What a hosted assistant or a hosted consolidation model receives is subject to that provider's terms.

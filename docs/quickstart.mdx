@@ -1,0 +1,76 @@
+---
+title: "Quickstart"
+description: "Install OpenMemore, connect two assistants, and see one remember what you told the other."
+icon: "rocket"
+---
+
+<Steps>
+  <Step title="Install uv">
+    OpenMemore installs with [uv](https://docs.astral.sh/uv/getting-started/installation/). uv provides Python 3.12, so you don't need your own. Some system Pythons can't load SQLite extensions, which OpenMemore needs.
+  </Step>
+  <Step title="Install OpenMemore">
+    ```sh
+    uv tool install --managed-python --python 3.12 "openmemore @ git+https://github.com/unrealdhanush/openmemore@main"
+    ```
+  </Step>
+  <Step title="Create the store">
+    ```sh
+    openmemore init
+    ```
+    This creates `~/.openmemore`, with the database and a `config.toml`. Set `OPENMEMORE_HOME` to put it somewhere else.
+  </Step>
+  <Step title="Download the embedding model">
+    ```sh
+    openmemore embed
+    ```
+    It downloads about 70MB once, so search can match by meaning. Without it, keyword search still works.
+  </Step>
+  <Step title="Connect your assistants">
+    ```sh
+    openmemore setup cursor          # or vscode-copilot, claude-code, or any other client's name
+    ```
+    Run it once per assistant. `openmemore setup --dry-run` shows what it would do first. See [Connect your assistants](/connect) for each app.
+  </Step>
+  <Step title="Paste the standing instruction">
+    Setup copies a short instruction to your clipboard. Paste it wherever the assistant reads your own instructions, such as Cursor's User Rules or Claude Desktop's Settings → Profile. Assistants don't reliably use tools just because they're available, and this is what makes them.
+  </Step>
+  <Step title="Restart the assistants and check">
+    Each assistant loads OpenMemore when it starts. After restarting them and opening a chat in each, run:
+    ```sh
+    openmemore clients
+    ```
+    Each one that has connected is listed under the name its app reports, with the scopes it gets.
+  </Step>
+</Steps>
+
+## Try it
+
+1. In one assistant, say something worth remembering: "I prefer metric units, and I'm planning a vegetable garden."
+2. In another assistant, ask: "What units do I prefer?" or "What was I planning?"
+
+The second assistant calls `get_profile` or `search_context` and finds what the first one stored. Run `openmemore memories list` to see what was saved, and `openmemore audit` to see every call each assistant made.
+
+## Upgrading
+
+```sh
+uv tool upgrade openmemore
+```
+
+Then restart your assistants, because each one runs its own copy of the server.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Scopes" icon="layer-group" href="/guides/scopes">
+    Keep an assistant away from part of your data.
+  </Card>
+  <Card title="Capture from disk" icon="file-lines" href="/guides/capture">
+    Store VS Code Copilot and Claude Code chats without relying on the model.
+  </Card>
+  <Card title="Import your history" icon="file-import" href="/guides/import-export">
+    Bring in ChatGPT and Claude data exports.
+  </Card>
+  <Card title="Consolidate and review" icon="list-check" href="/guides/consolidation">
+    Turn chats into memories you approve.
+  </Card>
+</CardGroup>

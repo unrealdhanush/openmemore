@@ -1,0 +1,55 @@
+---
+title: "Import and export"
+description: "Bring in your ChatGPT and Claude history, and take everything out in an open format."
+icon: "file-import"
+---
+
+## Import
+
+```sh
+openmemore import ~/Downloads/chatgpt-export.zip
+openmemore status                                  # import progress and what's stored
+```
+
+`openmemore import` reads:
+
+| Export | How to get it |
+|---|---|
+| ChatGPT | Settings → Data controls → Export data. You get a link to a `.zip` by email |
+| Claude | Settings → Privacy → Export data. You get a link to a `.zip` by email |
+| OpenMemore | `openmemore export`, from this or another machine |
+| Any other provider | Convert its export to [OpenMemore's format](/reference/export-format) first |
+
+You can pass the `.zip` itself, its `conversations.json`, or the unpacked folder.
+
+- **Order:** newest conversations first.
+- **Speed:** everything is searchable by keyword within seconds. Meaning-based search catches up as the import continues, and `openmemore embed` finishes it if you stop early.
+- **Interrupting is safe:** run the same command again to resume where it stopped.
+- **Importing twice adds nothing,** and conversations you deleted stay deleted.
+- **Scope:** ChatGPT and Claude exports go to your `[defaults] write_scope`. An OpenMemore export keeps each item's own scope. `--scope work` puts everything in `work` instead.
+- **Secrets** in imported conversations are replaced with `[REDACTED]`.
+
+<Warning>
+The ChatGPT and Claude formats are undocumented, and the parsers are tested on synthetic exports. A very large export is loaded into memory whole.
+</Warning>
+
+Imports bring in conversations, not memories. To turn them into memories, [consolidate them](/guides/consolidation).
+
+### What another assistant remembers
+
+Some assistants keep their own memory of you. To copy it into OpenMemore, use the `import_my_memory` prompt in that assistant, or ask it to "list everything you remember about me and save it with save_memories". It saves each item as a memory, skipping secrets and other people's private details.
+
+## Export
+
+```sh
+openmemore export                        # everything, to openmemore-export-<date>.json
+openmemore export --scope work           # only some scopes
+openmemore export -o backup.json
+openmemore export -o -                   # to stdout
+```
+
+An export contains every memory, with its earlier versions, and every conversation, each with its scope. The file is readable only by you, since it holds everything you've stored.
+
+`openmemore import` reads it back with the same scopes, unless you pass `--scope`. Earlier versions of memories are exported as history but not imported: importing restores what's current.
+
+The format is documented in the [export format reference](/reference/export-format), so you can also convert another provider's history to it.

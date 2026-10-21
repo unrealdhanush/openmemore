@@ -1,0 +1,57 @@
+---
+title: "OpenMemore"
+sidebarTitle: "Introduction"
+description: "One shared memory for all your AI assistants, kept on your own machine."
+icon: "house"
+---
+
+Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMemore is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install OpenMemore and connect your first two assistants.
+  </Card>
+  <Card title="Connect your assistants" icon="plug" href="/connect">
+    VS Code Copilot, Cursor, Claude Code, Claude Desktop, and any other MCP client.
+  </Card>
+  <Card title="Capture conversations" icon="file-lines" href="/guides/capture">
+    Store chats from the transcripts apps already save, so nothing depends on the model.
+  </Card>
+  <Card title="Security and privacy" icon="shield" href="/security">
+    What's stored where, what leaves your machine, and what OpenMemore doesn't protect against.
+  </Card>
+</CardGroup>
+
+## How it works
+
+- **One store:** `~/.openmemore/openmemore.db`, a single SQLite file. Each assistant starts its own `openmemore serve` process, and they all share the file.
+- **What assistants can do:**
+  - `get_profile`: load what you've told your assistants before.
+  - `save_memories`: keep preferences, facts and decisions.
+  - `record_exchange`: record what you asked and what it answered, including code.
+  - `recent_conversations` and `search_context`: find earlier conversations with any assistant, by meaning as well as by words.
+  - `update_memory` and `forget`: correct and delete.
+  - `consolidation_batch` and `propose_memories`: turn conversations into proposed memories, for you to review.
+- **Capture:** an assistant records an exchange by calling `record_exchange`, which a short instruction you paste in asks it to do. For VS Code Copilot and Claude Code, OpenMemore can instead read the conversations they already save on disk.
+- **Search:** keyword search (SQLite FTS5) combined with meaning-based search, using a small local embedding model (`BAAI/bge-small-en-v1.5`, about 70MB, downloaded once). Searching never sends anything off your machine.
+- **History:** import your ChatGPT and Claude data exports, or any provider's history converted to [OpenMemore's own format](/reference/export-format). Export everything back out in that same format.
+
+```text
+ Claude Desktop        Cursor         Claude Code       (each starts its own process)
+       |                 |                 |
+ openmemore serve   openmemore serve   openmemore serve
+        \                |                /
+         +--- ~/.openmemore/openmemore.db  (SQLite, WAL) ---+
+         |  memories · conversations · search indexes ·     |
+         |  vectors · audit log                             |
+         +--------------------------------------------------+
+               ^                            ^
+               |                            |
+   openmemore import / capture     openmemore daemon (optional)
+```
+
+## Status
+
+<Note>
+OpenMemore is pre-release, and there's no package on PyPI yet. It runs on macOS, Linux and Windows, and CI tests all three. Desktop clients have been verified by hand on macOS only.
+</Note>

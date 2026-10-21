@@ -1,0 +1,66 @@
+---
+title: "Capture conversations"
+description: "Store VS Code Copilot and Claude Code chats from the transcripts they already save, without relying on the model."
+icon: "file-lines"
+---
+
+An assistant records an exchange by calling `record_exchange`, and whether it does depends on the model. VS Code Copilot and Claude Code save their chats on disk, so OpenMemore can read those transcripts instead. Every turn is then stored, whatever the model does.
+
+| Source | Reads |
+|---|---|
+| `vscode-copilot` | VS Code's chat sessions: `workspaceStorage/<hash>/chatSessions/` for chats in a folder, and `globalStorage/emptyWindowChatSessions/` for chats with no folder open |
+| `claude-code` | One JSONL file per session, under `~/.claude/projects/<project>/` |
+
+## Turn it on
+
+`openmemore setup vscode-copilot` and `openmemore setup claude-code` turn capture on for those apps. That adds them to `[capture] sources` in `config.toml`:
+
+```toml
+[capture]
+sources = ["claude-code", "vscode-copilot"]
+days = 30            # only transcripts changed within this many days
+```
+
+Setup then reads the existing transcripts once, and offers the [background service](/guides/background).
+
+## When chats are captured
+
+- **Before each lookup:** while capture is on, each `search_context`, `recent_conversations` and `consolidation_batch` call first picks up new turns. It spends at most 250ms on that, and leaves anything more for the next call.
+- **In the background:** with the [daemon](/guides/background) running, changed transcripts are read every few seconds, so another assistant finds a conversation moments after it happens.
+- **On request:** `openmemore capture` catches up on older chats, those changed in the last `days` days.
+
+```sh
+openmemore capture                         # every enabled source
+openmemore capture --source claude-code    # just one
+openmemore capture --days 365              # further back than the config says
+```
+
+## Only some projects
+
+For apps whose transcripts record the folder a chat was in, which both VS Code and Claude Code do, you can limit capture to some folders. Subfolders count, and exclusions win:
+
+```toml
+[capture]
+include_folders = ["~/projects"]          # only chats from these folders
+exclude_folders = ["~/projects/client"]   # never chats from these
+```
+
+- With `include_folders` set, chats with no folder aren't captured.
+- Excluding a folder later stops capturing its new turns. What was already stored stays until you [delete it](/guides/deleting).
+- A transcript that was skipped is read from the start if its folder is included later.
+
+## What's stored
+
+- **Each turn:** your prompt, and the text of the answer. Tool calls and the model's thinking are skipped.
+- **Secrets** are replaced with `[REDACTED]` before anything is stored.
+- **Recaps:** a turn where the assistant only looked up earlier conversations through OpenMemore is marked as a recap. Search ranks it below the conversations it recaps.
+- **No duplicates:** a captured app's `record_exchange` calls are skipped, so its turns aren't stored twice. Its standing instruction says not to call it.
+- **Deleted stays deleted:** a conversation you delete isn't captured again.
+
+<Warning>
+Both transcript formats are undocumented. Capture is verified on VS Code 1.99 and Claude Code 2.1, and a format change will need a reader update. A transcript that can't be read is reported and skipped, and never fails the assistant's call.
+</Warning>
+
+## Other apps
+
+Any app or library that records its conversations with OpenTelemetry's GenAI conventions can send them to the daemon. See [OpenTelemetry](/reference/opentelemetry). For the rest, `record_exchange` and the standing instruction are the way in.

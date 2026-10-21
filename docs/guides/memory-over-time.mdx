@@ -1,0 +1,53 @@
+---
+title: "Memory over time"
+description: "Corrections keep history, questions about the past get answers from the past, and conflicts wait for you."
+icon: "clock-rotate-left"
+---
+
+Memories keep two timelines: when something was true in your life, and when OpenMemore learned it. The idea comes from [LongMemory](https://github.com/CaviraOSS/LongMemory)'s design.
+
+## Corrections
+
+A correction doesn't overwrite. When an assistant calls `update_memory`, or you approve a proposal that replaces a memory, the old memory becomes history: true until the change. Current answers only use what's true now.
+
+```text
+Uses Go 1.21.   true until 2026-03   superseded by #42
+Uses Go 1.23.   true since 2026-03   current
+```
+
+A memory can also say when it stopped being true without being replaced (`valid_to`), such as a project that's over. It's then **ended**.
+
+## Questions about the past
+
+"What did I use before?" or "what did I prefer last year?" need history, not the current answer. Assistants get it with:
+
+- `search_context(mode="history")`: earlier versions, and things no longer true, alongside current ones.
+- `search_context(as_of="2025-03")`: what was true at that time. It implies history.
+
+Every result carries a status:
+
+| Status | Meaning |
+|---|---|
+| `current` | True now |
+| `superseded` | Replaced by a correction; `replaced_by` says which memory |
+| `ended` | No longer true |
+| `contradicted` | Disagrees with another memory, and you haven't said which is right |
+
+Conversation results are `chat`, or `recap` for a turn that only looked up earlier conversations.
+
+## Conflicts
+
+When two memories disagree and it isn't clear which is right, neither is treated as current until you settle it on the [review page](/guides/consolidation#review). The profile counts how many are waiting (`unresolved_conflicts`).
+
+## Confirmation
+
+Something stated again by another assistant, or found again in a new conversation, gains confidence instead of being stored twice. A memory stated once has confidence 0.6, and each independent confirmation raises it.
+
+## Ranking
+
+Results favor what's recent and what you actually use: memories that assistants keep retrieving rank higher (ACT-R-style activation). Two options help an assistant see and control this:
+
+- `explain=true` says why each result was chosen: which searches found it, at what rank, and the recency, confidence and recap adjustments.
+- `budget_tokens` keeps results within about that many tokens, best first, and reports how many were left out.
+
+See the [MCP reference](/reference/mcp) for every argument.

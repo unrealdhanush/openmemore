@@ -1,0 +1,14 @@
+---
+title: "Limitations"
+description: "What OpenMemore can't do yet, and where it depends on things outside its control."
+icon: "triangle-exclamation"
+---
+
+- **Recording depends on the model** for clients without transcript capture. In testing, assistants rarely called `record_exchange` without the [standing instruction](/connect#the-standing-instruction).
+- **Transcript capture reads undocumented formats.** It's verified on VS Code 1.99 and Claude Code 2.1, and a format change will need a reader update. A broken reader is reported and skipped.
+- **Web-only assistants can't connect,** because they can't start a local server. That covers ChatGPT, claude.ai and Gemini on the web. Their history can come in through [exports](/guides/import-export).
+- **Meaning-based search uses a small model** that misses some paraphrases. "the fitness app throttling me" doesn't find a note about Strava rate limits.
+- **The ChatGPT and Claude export parsers** are tested on synthetic exports. Both formats are undocumented, and a very large export is loaded into memory whole.
+- **Clients are verified by hand on macOS:** Claude Desktop, VS Code, Cursor and Claude Code. Linux and Windows are covered by CI only.
+- **Most desktop assistants don't export over OpenTelemetry,** so the daemon's endpoint is for apps and libraries you instrument yourself.
+- **The `Memory` library is experimental,** and its API may still change.

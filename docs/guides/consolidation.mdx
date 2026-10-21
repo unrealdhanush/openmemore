@@ -1,0 +1,75 @@
+---
+title: "Consolidate and review"
+description: "Turn conversations into proposed memories, and approve what's worth keeping."
+icon: "list-check"
+---
+
+Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. Consolidation reads conversations and proposes memories, each citing the conversations it came from. **Nothing is saved until you approve it.**
+
+There are two ways to consolidate: ask an assistant, or let OpenMemore do it each night with a model you choose.
+
+## Ask an assistant
+
+Ask any connected assistant to **"consolidate my chats"**, or use its OpenMemore `consolidate` prompt. It:
+
+1. calls `consolidation_batch` for the conversations that haven't been consolidated yet, a batch at a time;
+2. calls `propose_memories` with what's worth remembering: preferences, facts, decisions and why, projects and their current state;
+3. repeats until nothing is left, or for at most 10 batches.
+
+The model that writes the proposals is your assistant's own. OpenMemore calls no model and needs no API key for this.
+
+## Review
+
+```sh
+openmemore review     # opens a local page in your browser
+```
+
+The review page lets you:
+- approve, edit or reject each proposal, and see the conversations it came from;
+- approve a proposal similar to an existing memory as a replacement for it;
+- settle conflicts between memories that disagree;
+- find near-duplicate memories and merge them into one, keeping history;
+- search, edit and delete memories, and see each one's history.
+
+The page listens on `127.0.0.1` only, behind a token in the link `openmemore review` prints. `--no-browser` prints the link without opening it, and `--port` picks the port. Press Ctrl+C to stop it.
+
+`openmemore status` says how many proposals are waiting.
+
+## Automatic consolidation
+
+<Info>
+Optional, and off until you set it up.
+</Info>
+
+OpenMemore can also consolidate on its own, each night, with a model you choose. It calls any endpoint that speaks Open Responses, the open LLM API standard: OpenAI, Ollama, LM Studio, vLLM or OpenRouter, for example. Endpoints that only speak OpenAI-style Chat Completions work too.
+
+<CodeGroup>
+```sh Local model
+openmemore consolidate setup --endpoint http://127.0.0.1:11434/v1 --model qwen2.5:7b
+```
+
+```sh Hosted model
+openmemore consolidate setup --endpoint https://api.openai.com/v1 --model <model> --key
+```
+</CodeGroup>
+
+```sh
+openmemore consolidate status   # whether it's on, and how the last run went
+openmemore consolidate run      # now, instead of at 03:00
+openmemore consolidate off      # --forget also deletes the saved key and the allowed host
+```
+
+- **Runs at** 03:00 local time by default (`--schedule HH:MM`), on up to 50 conversations a run (`max_conversations` in the config). The [background service](/guides/background) runs it, so the nightly run needs that installed. `openmemore consolidate run` works without it.
+- **Checks first:** setup sends a one-line test request, unless you pass `--no-check`. If it fails, the settings are saved but consolidation stays off.
+- **Local endpoints** never send anything off your machine.
+- **Hosted endpoints** are used only after you allow that host, in a dialog. The key is kept in `~/.openmemore/consolidation.key`, a file only you can read.
+- **Proposals** land in the same review queue, shown as "proposed by `model:<model name>`". The model also proposes corrections when a chat contradicts a memory.
+
+What OpenMemore sends and expects back is in [the consolidation endpoint reference](/reference/consolidation-endpoint).
+
+## What's never proposed twice
+
+- A rejected proposal isn't proposed again.
+- A statement that's already a memory, or already waiting for review, is skipped. Restating a memory raises its confidence instead.
+- A conversation is read once. When it continues, only its new messages come back.
+- Proposals that look like secrets are rejected.

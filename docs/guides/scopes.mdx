@@ -1,0 +1,57 @@
+---
+title: "Scopes"
+description: "Keep an assistant away from part of your data, or share everything with every assistant."
+icon: "layer-group"
+---
+
+Every memory and conversation carries a scope label, such as `personal` or `work`. Each client reads some scopes and writes one. That lets you keep an assistant away from part of your data: a work editor that never sees your personal notes, say.
+
+By default every client reads and writes `personal`, so everything is shared.
+
+## Give a client its own scopes
+
+Find the client's name with `openmemore clients`, then add a table for it to `~/.openmemore/config.toml`:
+
+```toml
+[defaults]
+read_scopes = ["personal"]
+write_scope = "personal"
+
+[clients.cursor-vscode]      # a client, by the name `openmemore clients` shows
+read_scopes = ["work"]
+write_scope = "work"
+```
+
+- **Reads:** the client sees memories and conversations in its `read_scopes` only, in search, in its profile and in recent conversations.
+- **Writes:** what it saves gets its `write_scope`, and it can correct or delete only items in that scope. To the client, items in scopes it can't read look as if they don't exist.
+- **Fallback:** a client without a `[clients.<name>]` table, or a key left out of one, uses `[defaults]`.
+- **When it applies:** each assistant reads the config when it starts its server, so restart the assistant after changing it.
+
+Scopes are free-form strings. `personal` and `work` are just the starting set.
+
+<Note>
+A client configured to read only `work` can't see what other clients wrote to `personal`. That's the isolation working. For two assistants to share memories, they need a scope in common.
+</Note>
+
+## Share everything
+
+```toml
+ignore_scopes = true
+```
+
+Every client then reads every scope, and can change items in any scope. New items still get their client's `write_scope` as a label, so you can turn separation back on later. `openmemore clients` shows "all (ignore_scopes)", and the `ping` tool reports `read_scopes: null`.
+
+## Captured conversations
+
+Conversations captured from an app's transcripts are stored in the write scope of the app they belong to: VS Code's chats under the `visual-studio-code` client's scope, and Claude Code's under `claude-code`. They're filed under the reader's name (`vscode-copilot`, `claude-code`), so "what did I ask Copilot?" finds them.
+
+Conversations sent over [OpenTelemetry](/reference/opentelemetry) go to the write scope of the app's `service.name`, which you scope like any client.
+
+## Imports and exports
+
+- **Imports:** `openmemore import` stores a ChatGPT or Claude export in `[defaults] write_scope`, or in the scope you pass with `--scope`. An OpenMemore export keeps its own scopes.
+- **Exports:** `openmemore export --scope work` exports only that scope. Each item keeps its scope in the file.
+
+## What scopes are not
+
+Scopes decide which assistant sees what. They don't protect the database file: any program running as you can read it. Client names come from what each app reports about itself, and nothing verifies them, so an app could report another app's name. See [Security and privacy](/security).
