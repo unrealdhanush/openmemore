@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import insert, plain
-from openmemore import db, embed, repo, wipe
+from openmemore import cli, db, embed, repo, wipe
 from openmemore.cli import app, initialize
 from openmemore.ingest import store_conversation
 from openmemore.models import ParsedConversation, ParsedMessage
@@ -26,6 +26,18 @@ def chat(conn, external_id, *times, text="Planning a vegetable garden."):
             ParsedMessage(external_id=str(i), role="user", content=f"{text} ({i})", created_at=t)
             for i, t in enumerate(times)]), "personal")
     return cid
+
+
+@pytest.fixture(autouse=True)
+def password(monkeypatch):
+    """Stands in for sudo's password check; tests flip `ok` and read `asked`."""
+    check = type("Check", (), {"ok": True, "asked": 0})()
+
+    def ask():
+        check.asked += 1
+        return check.ok
+    monkeypatch.setattr(cli, "_password_ok", ask)
+    return check
 
 
 @pytest.fixture
@@ -111,6 +123,25 @@ def test_the_command_asks_backs_up_and_records_itself(store, home):
     with closing(db.connect(backup)) as copy:
         assert len(ids(copy, "memories")) == 6
     assert [r[0] for r in conn.execute("SELECT tool FROM audit_log")] == ["wipe"]
+
+
+def test_the_command_needs_the_password_even_with_yes(store, password):
+    conn, s = store
+    password.ok = False
+    code, out = run("wipe", "--all", "--yes")
+    assert code == 1 and "Nothing deleted" in out and ids(conn, "memories") and password.asked == 1
+    run("wipe", "--all", input="no\n")
+    assert password.asked == 1  # declined before the password was asked
+
+
+def test_the_password_is_asked_through_sudo_without_its_cache(monkeypatch):
+    monkeypatch.undo()  # the real check, with sudo itself faked
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "run", lambda args: calls.append(args) or type("R", (), {"returncode": 1}))
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    assert not cli._password_ok() and calls[0][:3] == ["sudo", "-k", "-v"]
+    monkeypatch.setattr(cli.sys, "platform", "win32")  # no sudo there: the typed confirmation stands
+    assert cli._password_ok() and len(calls) == 1
 
 
 def test_the_command_takes_a_local_date(store, home):
