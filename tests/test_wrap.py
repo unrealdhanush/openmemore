@@ -1,6 +1,6 @@
 import pytest
 
-from openmcp.safety.wrap import MAX_ITEM_CHARS, looks_like_injection, wrap
+from openmemore.safety.wrap import MAX_ITEM_CHARS, looks_like_injection, wrap
 
 
 def test_wraps_with_source_and_id():

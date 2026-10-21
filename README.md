@@ -1,16 +1,16 @@
-# OpenMCP
+# OpenMemore
 
 > Working name. Rename before any public release.
 
 One shared memory for all your AI assistants, kept on your own machine.
 
-Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMCP is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
+Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMemore is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
 
 **Status:** pre-release. v1 is milestones M0 to M4 of [SPEC.md](SPEC.md), and M5 (consolidation and review) is done; the milestone map in SPEC.md Section 11 lists what's next. The repository is private, and there's no published package yet.
 
 ## How it works
 
-- **One store:** `~/.openmcp/openmcp.db`, a single SQLite file. Each assistant starts its own `openmcp serve` process and they all share the file.
+- **One store:** `~/.openmemore/openmemore.db`, a single SQLite file. Each assistant starts its own `openmemore serve` process and they all share the file.
 - **What assistants can do:**
   - `get_profile`: what you've told your assistants before
   - `save_memories`: preferences, facts, decisions
@@ -18,68 +18,68 @@ Ask Claude something today and ask Cursor about it tomorrow: it knows what you m
   - `recent_conversations` and `search_context`: find earlier conversations, with any assistant, by meaning as well as by words
   - `update_memory` and `forget`
   - `consolidation_batch` and `propose_memories`: turn conversations into proposed memories, for you to review
-- **Capture:** an assistant records an exchange by calling `record_exchange`, which a short instruction you paste in asks it to do. For VS Code Copilot and Claude Code, OpenMCP can instead read the conversations they already save on disk, so nothing depends on the model.
+- **Capture:** an assistant records an exchange by calling `record_exchange`, which a short instruction you paste in asks it to do. For VS Code Copilot and Claude Code, OpenMemore can instead read the conversations they already save on disk, so nothing depends on the model.
 - **Search:** keyword search (SQLite FTS5) combined with meaning-based search, using a small local embedding model (`BAAI/bge-small-en-v1.5`, about 70MB, downloaded once). Nothing leaves your machine.
-- **History:** import your ChatGPT and Claude data exports, or any provider's history converted to OpenMCP's own format. Export everything back out in that same format.
+- **History:** import your ChatGPT and Claude data exports, or any provider's history converted to OpenMemore's own format. Export everything back out in that same format.
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/). uv provides Python 3.12, so you don't need your own; some system Pythons can't load SQLite extensions. OpenMCP runs on macOS, Linux and Windows; CI tests all three.
+Requires [uv](https://docs.astral.sh/uv/). uv provides Python 3.12, so you don't need your own; some system Pythons can't load SQLite extensions. OpenMemore runs on macOS, Linux and Windows; CI tests all three.
 
 ```sh
-uv tool install --managed-python --python 3.12 "openmcp @ git+https://github.com/unrealdhanush/openmcp@main"
-openmcp init      # creates ~/.openmcp (set OPENMCP_HOME to put it elsewhere)
-openmcp embed     # downloads the embedding model once, so search works by meaning
+uv tool install --managed-python --python 3.12 "openmemore @ git+https://github.com/unrealdhanush/openmemore@main"
+openmemore init      # creates ~/.openmemore (set OPENMEMORE_HOME to put it elsewhere)
+openmemore embed     # downloads the embedding model once, so search works by meaning
 ```
 
-Upgrade with `uv tool upgrade openmcp`, then restart your assistants: each one loads OpenMCP when it starts.
+Upgrade with `uv tool upgrade openmemore`, then restart your assistants: each one loads OpenMemore when it starts.
 
 ## Connect your assistants
 
 ```sh
-openmcp setup cursor          # or vscode-copilot, claude-code, or any other client's name
-openmcp setup --dry-run       # see what it would do first
+openmemore setup cursor          # or vscode-copilot, claude-code, or any other client's name
+openmemore setup --dry-run       # see what it would do first
 ```
 
 Any MCP client works, with no client-specific support needed. The server is the same for every client:
 
 ```json
-{ "mcpServers": { "openmcp": { "command": "/path/to/openmcp", "args": ["serve"] } } }
+{ "mcpServers": { "openmemore": { "command": "/path/to/openmemore", "args": ["serve"] } } }
 ```
 
-`openmcp setup` never edits another app's files. Where the app has its own way to add an MCP server, setup uses it:
+`openmemore setup` never edits another app's files. Where the app has its own way to add an MCP server, setup uses it:
 
 | Client | How setup adds the server |
 |---|---|
 | VS Code (Copilot) | `code --add-mcp`. Needs `code` on your PATH (in VS Code, run "Shell Command: Install 'code' command in PATH") |
 | Cursor | Cursor's install link, which opens its own review prompt |
 | Claude Code | `claude mcp add` |
-| Claude Desktop, and everything else | Prints the snippet above. Paste it into the client's MCP config (Claude Desktop: Settings → Developer → Edit Config), or run `openmcp setup <client> --config <that file>` to merge it in |
+| Claude Desktop, and everything else | Prints the snippet above. Paste it into the client's MCP config (Claude Desktop: Settings → Developer → Edit Config), or run `openmemore setup <client> --config <that file>` to merge it in |
 
-**The standing instruction.** Assistants don't reliably use tools just because they're available, so setup copies a short instruction to your clipboard. Paste it wherever the client reads your own instructions, for example Claude Desktop's Settings → Profile, or Cursor's User Rules. It points to the server's own instructions, which update with OpenMCP, so you only paste it once.
+**The standing instruction.** Assistants don't reliably use tools just because they're available, so setup copies a short instruction to your clipboard. Paste it wherever the client reads your own instructions, for example Claude Desktop's Settings → Profile, or Cursor's User Rules. It points to the server's own instructions, which update with OpenMemore, so you only paste it once.
 
-Restart the client after setup. `openmcp clients` then lists each client that has connected, under the name its app reports (Claude Desktop is `claude-ai`, Cursor is `cursor-vscode`), with the scopes it gets.
+Restart the client after setup. `openmemore clients` then lists each client that has connected, under the name its app reports (Claude Desktop is `claude-ai`, Cursor is `cursor-vscode`), with the scopes it gets.
 
 ## Scopes
 
 Every memory and conversation carries a scope label, for example `personal` or `work`. Each client reads some scopes and writes one, so you can keep an assistant away from part of your data. The default is that every client reads and writes `personal`, which shares everything:
 
 ```toml
-# ~/.openmcp/config.toml
+# ~/.openmemore/config.toml
 ignore_scopes = false        # true: every client reads and changes everything, whatever its scope
 
 [defaults]
 read_scopes = ["personal"]
 write_scope = "personal"
 
-[clients.cursor-vscode]      # a client, by the name `openmcp clients` shows
+[clients.cursor-vscode]      # a client, by the name `openmemore clients` shows
 read_scopes = ["work"]
 write_scope = "work"
 ```
 
 ## Capture conversations from disk
 
-`openmcp setup vscode-copilot` and `openmcp setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmcp capture`; it reads chats changed in the last 30 days (`[capture] days`).
+`openmemore setup vscode-copilot` and `openmemore setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmemore capture`; it reads chats changed in the last 30 days (`[capture] days`).
 
 To capture only some projects, list folders under `[capture]`. This works for apps whose transcripts record the folder a chat was in, which Claude Code and VS Code both do. Subfolders count, and exclusions win:
 
@@ -92,15 +92,15 @@ exclude_folders = ["~/projects/client"]   # never chats from these
 ## Capture in the background
 
 ```sh
-openmcp daemon install    # asks first; then starts at login (launchd, systemd, or a Windows logon task)
-openmcp daemon status
+openmemore daemon install    # asks first; then starts at login (launchd, systemd, or a Windows logon task)
+openmemore daemon status
 ```
 
-Nothing runs in the background without your permission. `openmcp daemon install` first asks in a dialog (Allow / Don't Allow), or in the terminal when there's no desktop, such as over SSH. `openmcp setup` offers it when there's something to capture, and scripts can pass `--yes`. On macOS it then appears under System Settings → General → Login Items, where you can also switch it off.
+Nothing runs in the background without your permission. `openmemore daemon install` first asks in a dialog (Allow / Don't Allow), or in the terminal when there's no desktop, such as over SSH. `openmemore setup` offers it when there's something to capture, and scripts can pass `--yes`. On macOS it then appears under System Settings → General → Login Items, where you can also switch it off.
 
 The daemon reads transcripts from capture-enabled apps every few seconds and embeds what's new. Another assistant can then find a conversation moments after it happens, without waiting for the next lookup.
 
-It's also an OpenTelemetry endpoint. Any app or library that records its conversations with OpenTelemetry's standard GenAI conventions can send them there; there's no app-specific code. That includes agents built with LangChain, LlamaIndex, or the OpenAI and Anthropic SDKs plus OpenTelemetry instrumentation. `openmcp daemon telemetry` prints the standard settings to give such an app (`OTEL_EXPORTER_OTLP_ENDPOINT` and a token header).
+It's also an OpenTelemetry endpoint. Any app or library that records its conversations with OpenTelemetry's standard GenAI conventions can send them there; there's no app-specific code. That includes agents built with LangChain, LlamaIndex, or the OpenAI and Anthropic SDKs plus OpenTelemetry instrumentation. `openmemore daemon telemetry` prints the standard settings to give such an app (`OTEL_EXPORTER_OTLP_ENDPOINT` and a token header).
 - **Formats:** logs and traces, in JSON or protobuf.
 - **Which app:** it's filed under the app's `service.name`, which you can give scopes like any client.
 - **What's kept:** only the text of what you and the assistant said. System prompts, tool output and the telemetry's other attributes are dropped.
@@ -108,11 +108,11 @@ It's also an OpenTelemetry endpoint. Any app or library that records its convers
 
 Most desktop assistants don't export their conversations this way. For them, transcript capture and `record_exchange` remain the way in.
 
-`openmcp daemon uninstall` stops it and removes the service.
+`openmemore daemon uninstall` stops it and removes the service.
 
 ## Memory over time
 
-Memories keep two timelines: when something was true in your life, and when OpenMCP learned it. That idea comes from [LongMemory](https://github.com/CaviraOSS/LongMemory)'s design.
+Memories keep two timelines: when something was true in your life, and when OpenMemore learned it. That idea comes from [LongMemory](https://github.com/CaviraOSS/LongMemory)'s design.
 - **Corrections:** a correction doesn't overwrite. The old memory becomes history, true until the change, and current answers only use what's true now.
 - **Questions about the past:** "what did I use before?" or "what did I prefer last year?" are answered with `search_context(mode="history")` or `as_of="2025-03"`. Every result says whether it's current, superseded, ended or contradicted.
 - **Conflicts:** when two memories disagree and it isn't clear which is right, you settle it on the review page. Until then, neither is treated as current.
@@ -121,12 +121,12 @@ Memories keep two timelines: when something was true in your life, and when Open
 
 ## Consolidate and review
 
-Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. To turn chats into memories, ask any connected assistant to **"consolidate my chats"**, or use its OpenMCP `consolidate` prompt. It reads the conversations that haven't been consolidated yet, a batch at a time, and proposes memories, each citing the conversations it came from. The model that writes the proposals is your assistant's own; OpenMCP calls no model and needs no API key.
+Captured and imported chats hold most of what your assistants have learned, but only memories make up your profile. To turn chats into memories, ask any connected assistant to **"consolidate my chats"**, or use its OpenMemore `consolidate` prompt. It reads the conversations that haven't been consolidated yet, a batch at a time, and proposes memories, each citing the conversations it came from. The model that writes the proposals is your assistant's own; OpenMemore calls no model and needs no API key.
 
 Nothing is saved until you approve it:
 
 ```sh
-openmcp review     # opens a local page in your browser
+openmemore review     # opens a local page in your browser
 ```
 
 The review page lets you:
@@ -135,25 +135,25 @@ The review page lets you:
 - find near-duplicate memories and merge them into one, keeping history;
 - search, edit and delete memories, and see each one's history.
 
-**Automatic consolidation (optional, off by default).** OpenMCP can also consolidate on its own each night, with a model you choose. It calls any endpoint that speaks the open LLM API standard, Open Responses, such as OpenAI, Ollama, LM Studio, vLLM or OpenRouter. Endpoints that only speak OpenAI-style Chat Completions work too:
+**Automatic consolidation (optional, off by default).** OpenMemore can also consolidate on its own each night, with a model you choose. It calls any endpoint that speaks the open LLM API standard, Open Responses, such as OpenAI, Ollama, LM Studio, vLLM or OpenRouter. Endpoints that only speak OpenAI-style Chat Completions work too:
 
 ```sh
-openmcp consolidate setup --endpoint http://127.0.0.1:11434/v1 --model qwen2.5:7b             # a local server
-openmcp consolidate setup --endpoint https://api.openai.com/v1 --model <model> --key   # hosted: asks first
-openmcp consolidate run      # now, instead of at 03:00
-openmcp consolidate off
+openmemore consolidate setup --endpoint http://127.0.0.1:11434/v1 --model qwen2.5:7b             # a local server
+openmemore consolidate setup --endpoint https://api.openai.com/v1 --model <model> --key   # hosted: asks first
+openmemore consolidate run      # now, instead of at 03:00
+openmemore consolidate off
 ```
 
-What OpenMCP sends and expects is in [docs/consolidation-endpoint.md](docs/consolidation-endpoint.md). A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
+What OpenMemore sends and expects is in [docs/consolidation-endpoint.md](docs/consolidation-endpoint.md). A local endpoint never sends anything off your machine. A hosted one is used only after you allow that host in a dialog, and its key is kept in a file only you can read. The proposals land in the same review queue: the model also proposes corrections when a chat contradicts a memory, and nothing is saved until you approve it.
 
-A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmcp review` prints.
+A rejected proposal isn't proposed again. A conversation is read once, and comes back later with only its new messages. The page listens on 127.0.0.1 only, behind a token in the link `openmemore review` prints.
 
 ## Use it from your own programs (experimental)
 
 Agents and scripts you write can share the same memory, in-process, with no server:
 
 ```python
-from openmcp import Memory
+from openmemore import Memory
 
 memory = Memory("trip-planner")       # a client name, scoped like any app
 
@@ -167,40 +167,40 @@ See [docs/library.md](docs/library.md).
 ## Import and export
 
 ```sh
-openmcp import ~/Downloads/chatgpt-export.zip   # ChatGPT or Claude data export, or an OpenMCP export
-openmcp status                                  # import progress and what's stored
-openmcp export                                  # everything, to openmcp-export-<date>.json (readable only by you)
+openmemore import ~/Downloads/chatgpt-export.zip   # ChatGPT or Claude data export, or an OpenMemore export
+openmemore status                                  # import progress and what's stored
+openmemore export                                  # everything, to openmemore-export-<date>.json (readable only by you)
 ```
 
 Imports run newest conversations first, and everything is searchable by keyword within seconds. Meaning-based search catches up as the import continues. An import is safe to interrupt: run the same command again to resume. Importing a file twice adds nothing, and conversations you deleted stay deleted.
 
-An export contains every memory, with its earlier versions, and every conversation, each with its scope. `openmcp import` reads it back with the same scopes, unless you pass `--scope`. To bring in history from another provider, convert its export to this format; the format is documented in `src/openmcp/ingest/openmcp_format.py`.
+An export contains every memory, with its earlier versions, and every conversation, each with its scope. `openmemore import` reads it back with the same scopes, unless you pass `--scope`. To bring in history from another provider, convert its export to this format; the format is documented in `src/openmemore/ingest/openmemore_format.py`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `openmcp init` | Create `~/.openmcp`, the database and the config |
-| `openmcp setup [client]` | Connect an MCP client and copy the standing instruction |
-| `openmcp clients` | Clients that have connected, and their scopes |
-| `openmcp memories list\|show\|rm` | Browse and delete memories |
-| `openmcp conversations list\|show\|rm` | Browse and delete conversations |
-| `openmcp review` | Approve proposed memories; browse, edit and delete memories |
-| `openmcp consolidate setup\|run\|status\|off` | Optional nightly consolidation with a model you choose |
-| `openmcp import <file>` / `openmcp export` | Bring history in, take everything out |
-| `openmcp capture` | Catch up on transcripts from capture-enabled apps |
-| `openmcp daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints the OpenTelemetry settings |
-| `openmcp embed` | Download the model and embed whatever isn't embedded yet |
-| `openmcp status` | Import jobs, store counts, proposals waiting for review |
-| `openmcp audit [--stats]` | Every tool call: which client, which app, what, how long |
-| `openmcp serve` | The MCP server; your clients run this themselves |
+| `openmemore init` | Create `~/.openmemore`, the database and the config |
+| `openmemore setup [client]` | Connect an MCP client and copy the standing instruction |
+| `openmemore clients` | Clients that have connected, and their scopes |
+| `openmemore memories list\|show\|rm` | Browse and delete memories |
+| `openmemore conversations list\|show\|rm` | Browse and delete conversations |
+| `openmemore review` | Approve proposed memories; browse, edit and delete memories |
+| `openmemore consolidate setup\|run\|status\|off` | Optional nightly consolidation with a model you choose |
+| `openmemore import <file>` / `openmemore export` | Bring history in, take everything out |
+| `openmemore capture` | Catch up on transcripts from capture-enabled apps |
+| `openmemore daemon install\|status\|uninstall` | Capture in the background; `daemon telemetry` prints the OpenTelemetry settings |
+| `openmemore embed` | Download the model and embed whatever isn't embedded yet |
+| `openmemore status` | Import jobs, store counts, proposals waiting for review |
+| `openmemore audit [--stats]` | Every tool call: which client, which app, what, how long |
+| `openmemore serve` | The MCP server; your clients run this themselves |
 
 ## Safety model
 
-- **Local only.** There's no server and no account. Your data is in `~/.openmcp`, and the only network access is the one-time model download.
+- **Local only.** There's no server and no account. Your data is in `~/.openmemore`, and the only network access is the one-time model download.
 - **Secrets.** Memories that look like credentials (API keys, tokens, private keys, card numbers, passwords) are rejected. In recorded and imported conversations, those parts are replaced with `[REDACTED]`. The filter uses patterns, so it will miss some secrets.
 - **Stored data is data, not instructions.** Everything returned to a model is wrapped and labelled as your stored data, and content that looks like a prompt injection is flagged. This makes injection visible and harder. It doesn't make it impossible.
-- **Every call is logged** with the client, the reporting app, the tool and the timing (`openmcp audit`).
+- **Every call is logged** with the client, the reporting app, the tool and the timing (`openmemore audit`).
 - **Scopes are about assistants, not security.** They decide which assistant sees what. They don't protect the database file: any program running as you can read it. Client names come from what each app reports about itself, and nothing verifies that.
 - **Deleting really deletes** (`forget`, `rm`): the item, its history, its search index entries and its vectors.
 
@@ -217,9 +217,9 @@ An export contains every memory, with its earlier versions, and every conversati
 
 ```sh
 uv sync
-uv run pytest                        # real-model tests download ~70MB once to ~/.cache/openmcp-test-models
+uv run pytest                        # real-model tests download ~70MB once to ~/.cache/openmemore-test-models
 uv run python scripts/benchmark.py   # performance budget: 10k memories, 100k chunks (SPEC.md 4.3)
 uv run python -m bench locomo           # retrieval quality on LongMemEval / LoCoMo (SPEC.md M7.6; results in bench/RESULTS.md)
 ```
 
-Running `openmcp setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that. See [SPEC.md](SPEC.md) for the design, milestones and open questions.
+Running `openmemore setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that. See [SPEC.md](SPEC.md) for the design, milestones and open questions.

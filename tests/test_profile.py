@@ -1,9 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
 from conftest import caller, insert
-from openmcp.models import PROFILE_GROUP_CAP
-from openmcp.safety.wrap import NOTICE
-from openmcp.tools.profile import get_profile
+from openmemore.models import PROFILE_GROUP_CAP
+from openmemore.safety.wrap import NOTICE
+from openmemore.tools.profile import get_profile
 
 
 def ids(items):
@@ -13,7 +13,7 @@ def ids(items):
 def test_groups_active_memories_by_kind(conn):
     pref = insert(conn, "Prefers Python.", kind="preference")
     fact = insert(conn, "Lives in Berlin.", kind="fact")
-    proj = insert(conn, "OpenMCP: M1 underway.", kind="project", project="OpenMCP")
+    proj = insert(conn, "OpenMemore: M1 underway.", kind="project", project="OpenMemore")
     dec = insert(conn, "Chose SQLite.", kind="decision")
     insert(conn, "Random note.", kind="note")
 

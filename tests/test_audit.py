@@ -1,7 +1,7 @@
 import pytest
 
-from openmcp import db
-from openmcp.audit import audited
+from openmemore import db
+from openmemore.audit import audited
 
 
 def test_successful_call_records_summary_and_count(tmp_path):

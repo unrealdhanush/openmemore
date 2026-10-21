@@ -1,4 +1,4 @@
-"""Run OpenMCP's retrieval against a benchmark (SPEC.md M7.6).
+"""Run OpenMemore's retrieval against a benchmark (SPEC.md M7.6).
 
 Each history is stored the way capture stores conversations (one conversation per
 session, one message per turn, with its date), embedded, and searched with
@@ -24,13 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from bench.datasets import CACHE, Haystack, Question
-from openmcp import __version__, db, embed
-from openmcp.config import ClientScopes
-from openmcp.ingest import store_conversation
-from openmcp.models import ParsedConversation, ParsedMessage
-from openmcp.safety.wrap import unwrap
-from openmcp.tools import Caller
-from openmcp.tools.search import search_context
+from openmemore import __version__, db, embed
+from openmemore.config import ClientScopes
+from openmemore.ingest import store_conversation
+from openmemore.models import ParsedConversation, ParsedMessage
+from openmemore.safety.wrap import unwrap
+from openmemore.tools import Caller
+from openmemore.tools.search import search_context
 
 READER = Caller(client="bench", scopes=ClientScopes(read_scopes=None, write_scope="personal"))
 PROVIDER = "bench"
@@ -78,7 +78,7 @@ class CachingEmbedder:
 
 
 def use_embedder(embedder: embed.Embedder | None) -> None:
-    """Make OpenMCP's code use this embedder (None: keyword search only)."""
+    """Make OpenMemore's code use this embedder (None: keyword search only)."""
     embed._embedder, embed._unavailable = embedder, None if embedder else "benchmark: keyword search only"
     if embedder is None:
         embed.get_embedder = lambda allow_download=False: None  # type: ignore[assignment]
@@ -181,7 +181,7 @@ def run(dataset: str, haystacks: Iterable[Haystack], ks: Sequence[int] = (5, 10)
     per_question: list[dict[str, Any]] = []
     ingest_s: list[float] = []
     query_ms: list[float] = []
-    with tempfile.TemporaryDirectory(prefix="openmcp-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="openmemore-bench-") as tmp:
         for n, haystack in enumerate(haystacks, start=1):
             with closing(db.open_db(Path(tmp) / f"{n}.db")) as conn:
                 start = time.perf_counter()
@@ -208,7 +208,7 @@ def run(dataset: str, haystacks: Iterable[Haystack], ks: Sequence[int] = (5, 10)
             if progress:
                 progress(n, len(haystacks))
     return {
-        "dataset": dataset, "commit": measured, "openmcp": __version__, "embedder": embedder_name,
+        "dataset": dataset, "commit": measured, "openmemore": __version__, "embedder": embedder_name,
         "ks": list(ks), "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "haystacks": len(haystacks), "questions": len(per_question),
         "summary": summarize(per_question),

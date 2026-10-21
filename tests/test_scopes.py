@@ -7,8 +7,8 @@ import json
 import pytest
 
 from conftest import connect
-from openmcp import config
-from openmcp.cli import initialize
+from openmemore import config
+from openmemore.cli import initialize
 
 HOME_APP, WORK_APP = "home-app", "work-app"
 
@@ -55,7 +55,7 @@ async def test_m4_done_when_a_work_only_client_cant_see_personal_data(scoped):
             assert found["results"] == [], query  # keyword and vector paths
         _, profile = await call(work, "get_profile")
         assert all(profile[group] == [] for group in ("preferences", "facts", "active_projects", "recent_decisions"))
-        resource = json.loads((await work.read_resource("openmcp://profile")).contents[0].text)
+        resource = json.loads((await work.read_resource("openmemore://profile")).contents[0].text)
         assert resource["preferences"] == [] and resource["active_projects"] == []
         _, recent = await call(work, "recent_conversations")
         assert recent["conversations"] == []
@@ -99,7 +99,7 @@ async def test_a_work_only_client_cant_change_personal_data_or_tell_it_exists(sc
 async def test_the_cli_is_the_owner_and_sees_every_scope(scoped):
     """The CLI acts for the user, who owns everything: it lists and exports all scopes."""
     from typer.testing import CliRunner
-    from openmcp.cli import app
+    from openmemore.cli import app
 
     await personal_data(scoped)
     async with connect(scoped, WORK_APP) as work:

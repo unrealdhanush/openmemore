@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 2: relations between memories, applied through openmcp.relations
+"""SPEC.md M7.7 part 2: relations between memories, applied through openmemore.relations
 in the same transaction as their effect."""
 
 import json
@@ -9,12 +9,12 @@ from datetime import UTC, datetime
 import pytest
 
 from conftest import caller
-from openmcp import db, relations, repo
-from openmcp.ingest import store_conversation
-from openmcp.models import MemoryInput, ParsedConversation, ParsedMessage, ProposalInput
-from openmcp.proposals import Approval, approve, find_duplicates
-from openmcp.tools.consolidation import propose_memories
-from openmcp.tools.memories import forget, save_memories, update_memory
+from openmemore import db, relations, repo
+from openmemore.ingest import store_conversation
+from openmemore.models import MemoryInput, ParsedConversation, ParsedMessage, ProposalInput
+from openmemore.proposals import Approval, approve, find_duplicates
+from openmemore.tools.consolidation import propose_memories
+from openmemore.tools.memories import forget, save_memories, update_memory
 
 ME = caller("claude-ai", read=["personal"], write="personal")
 
@@ -108,8 +108,8 @@ def test_existing_history_becomes_links_when_upgrading(tmp_path, monkeypatch):
 
 
 def test_export_and_import_keep_where_memories_came_from(conn, tmp_path):
-    from openmcp.export import export_document
-    from openmcp.ingest.jobs import import_export
+    from openmemore.export import export_document
+    from openmemore.ingest.jobs import import_export
 
     cid = chat(conn, "chat-1", "I've switched to coffee.")
     [pid] = propose_memories(conn, ME, [ProposalInput(kind="preference", content="Prefers coffee.",

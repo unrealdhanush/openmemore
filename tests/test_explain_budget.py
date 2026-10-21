@@ -3,12 +3,12 @@
 import pytest
 
 from conftest import caller, connect, insert
-from openmcp.cli import initialize
-from openmcp.models import PROFILE_GROUP_CAP
-from openmcp.ingest import store_conversation
-from openmcp.models import ParsedConversation, ParsedMessage
-from openmcp.tools.profile import get_profile
-from openmcp.tools.search import estimate_tokens, search_context
+from openmemore.cli import initialize
+from openmemore.models import PROFILE_GROUP_CAP
+from openmemore.ingest import store_conversation
+from openmemore.models import ParsedConversation, ParsedMessage
+from openmemore.tools.profile import get_profile
+from openmemore.tools.search import estimate_tokens, search_context
 
 ME = caller("claude-ai", read=["personal"], write="personal")
 
@@ -32,8 +32,8 @@ def test_explain_says_what_made_each_score(conn):
 
 
 def test_explain_with_meaning_search(conn, fake_embedder):
-    from openmcp.models import MemoryInput
-    from openmcp.tools.memories import save_memories
+    from openmemore.models import MemoryInput
+    from openmemore.tools.memories import save_memories
 
     save_memories(conn, ME, [MemoryInput(kind="preference", content="Prefers green tea.")])
     [hit] = search_context(conn, ME, "green tea", explain=True, include_chats=False).results
@@ -64,7 +64,7 @@ def test_a_profile_budget_doesn_t_let_one_group_crowd_out_the_rest(conn):
 
 @pytest.mark.anyio
 async def test_through_mcp_and_the_library(home):
-    from openmcp import Memory
+    from openmemore import Memory
 
     initialize(home)
     memory = Memory("claude-ai", home=home)

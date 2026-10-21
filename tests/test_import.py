@@ -10,13 +10,13 @@ from typer.testing import CliRunner
 
 from conftest import FakeEmbedder, caller, plain
 from export_factory import chatgpt_conversation, chatgpt_export, write_zip
-from openmcp import db, repo
-from openmcp.cli import app, initialize
-from openmcp.ingest import chatgpt, claude
-from openmcp.ingest.detect import ExportError, load
-from openmcp.ingest.jobs import BATCH, import_export
-from openmcp.tools.conversations import recent_conversations
-from openmcp.tools.search import search_context
+from openmemore import db, repo
+from openmemore.cli import app, initialize
+from openmemore.ingest import chatgpt, claude
+from openmemore.ingest.detect import ExportError, load
+from openmemore.ingest.jobs import BATCH, import_export
+from openmemore.tools.conversations import recent_conversations
+from openmemore.tools.search import search_context
 
 FIXTURES = Path(__file__).parent / "fixtures"
 READER = caller("gemini-cli", read=["personal"], write="personal")
@@ -96,7 +96,7 @@ def test_exports_are_recognized_from_their_contents(tmp_path):
 
 
 @pytest.mark.parametrize("contents, message", [
-    ({"conversations.json": "[{\"something\": 1}]"}, "doesn't look like a format OpenMCP can import"),
+    ({"conversations.json": "[{\"something\": 1}]"}, "doesn't look like a format OpenMemore can import"),
     ({"conversations.json": "{not json"}, "isn't valid JSON"),
     ({"conversations.json": "{\"a\": 1}"}, "doesn't look like a format"),
     ({"conversations.json": "42"}, "should hold a list"),
@@ -257,7 +257,7 @@ def test_import_command_refuses_what_it_cant_read(home, tmp_path):
     bad = tmp_path / "notes.json"
     bad.write_text("[1, 2, 3]")
     code, out = cli("import", str(bad))
-    assert code == 2 and "doesn't look like a format OpenMCP can import (it reads: ChatGPT, Claude, OpenMCP export)" in out
+    assert code == 2 and "doesn't look like a format OpenMemore can import (it reads: ChatGPT, Claude, OpenMemore export)" in out
     assert cli("import", str(tmp_path / "missing.zip"))[0] == 2
 
 
@@ -269,7 +269,7 @@ def test_status_before_any_import(home):
 
 def test_everything_is_stored_before_embedding_starts_and_embedding_goes_newest_first(conn, big_export):
     """Interrupting the embedding phase leaves the whole export stored (and keyword
-    searchable), with the newest conversations embedded first; `openmcp embed` finishes."""
+    searchable), with the newest conversations embedded first; `openmemore embed` finishes."""
     def stop_after_first_group(done, total):
         raise KeyboardInterrupt
 
@@ -283,5 +283,5 @@ def test_everything_is_stored_before_embedding_starts_and_embedding_goes_newest_
     )}
     assert embedded_titles == {f"Conversation {i}" for i in range(450, 500)}  # the newest 50
 
-    from openmcp import embed
+    from openmemore import embed
     assert embed.embed_pending(conn, FakeEmbedder()).remaining == 0

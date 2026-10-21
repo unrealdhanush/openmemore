@@ -6,13 +6,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import caller
-from openmcp import relations, repo
-from openmcp.ingest import store_conversation
-from openmcp.models import MemoryInput, ParsedConversation, ParsedMessage, ProposalInput
-from openmcp.tools.consolidation import propose_memories
-from openmcp.tools.memories import save_memories
-from openmcp.tools.profile import get_profile
-from openmcp.tools.search import search_context
+from openmemore import relations, repo
+from openmemore.ingest import store_conversation
+from openmemore.models import MemoryInput, ParsedConversation, ParsedMessage, ProposalInput
+from openmemore.tools.consolidation import propose_memories
+from openmemore.tools.memories import save_memories
+from openmemore.tools.profile import get_profile
+from openmemore.tools.search import search_context
 
 CLAUDE = caller("claude-ai", read=["personal"], write="personal")
 CURSOR = caller("cursor-vscode", read=["personal"], write="personal")
@@ -60,7 +60,7 @@ def test_repeats_don_t_count_twice(conn):
     save(conn, CURSOR)
     assert save(conn, CURSOR).confirmed == []  # the same source again within a day
     assert confidence(conn, memory_id) == pytest.approx(0.75)
-    later = NOW + timedelta(days=2)
+    later = datetime.now(UTC) + timedelta(days=2)  # save() confirms at the real time
     assert relations.support(conn, memory_id, later, source="cursor-vscode")  # a day later it counts again
 
 
@@ -68,7 +68,7 @@ def test_conversations_confirm_once_each(conn):
     first, second = chat(conn, "a"), chat(conn, "b")
     [pid] = propose_memories(conn, CLAUDE, [ProposalInput(kind="preference", content="Prefers metric units.",
                                                           conversation_ids=[first])], []).proposed
-    from openmcp.proposals import approve
+    from openmemore.proposals import approve
 
     memory_id = approve(conn, pid)  # derived from conversation a
     again = propose_memories(conn, CLAUDE, [ProposalInput(kind="preference", content="Prefers metric units.",

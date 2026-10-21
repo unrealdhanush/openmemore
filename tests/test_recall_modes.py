@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 import pytest
 
 from conftest import caller, connect
-from openmcp import db, repo
-from openmcp.cli import initialize
-from openmcp.ingest import store_conversation
-from openmcp.models import MemoryInput, ParsedConversation, ParsedMessage
-from openmcp.tools.memories import save_memories, update_memory
-from openmcp.tools.search import search_context
+from openmemore import db, repo
+from openmemore.cli import initialize
+from openmemore.ingest import store_conversation
+from openmemore.models import MemoryInput, ParsedConversation, ParsedMessage
+from openmemore.tools.memories import save_memories, update_memory
+from openmemore.tools.search import search_context
 
 ME = caller("claude-ai", read=["personal"], write="personal")
 
@@ -96,7 +96,7 @@ def test_replaced_versions_are_queued_for_vectors_when_upgrading(tmp_path, monke
 
 @pytest.mark.anyio
 async def test_the_tool_and_the_library(home):
-    from openmcp import Memory
+    from openmemore import Memory
 
     initialize(home)
     memory = Memory("claude-ai", home=home)

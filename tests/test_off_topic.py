@@ -6,11 +6,11 @@ search, so the assistants kept bringing that project up."""
 from datetime import UTC, datetime
 
 from conftest import caller, insert
-from openmcp import embed, relations
-from openmcp.ingest import store_conversation
-from openmcp.models import ParsedConversation, ParsedMessage
-from openmcp.tools import search
-from openmcp.tools.search import search_context
+from openmemore import embed, relations
+from openmemore.ingest import store_conversation
+from openmemore.models import ParsedConversation, ParsedMessage
+from openmemore.tools import search
+from openmemore.tools.search import search_context
 
 ME = caller()
 QUERY = "Copilot pricing complaints"

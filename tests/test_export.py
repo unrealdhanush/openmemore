@@ -1,4 +1,4 @@
-"""SPEC.md M4: `openmcp export` dumps every memory and conversation, and `openmcp import`
+"""SPEC.md M4: `openmemore export` dumps every memory and conversation, and `openmemore import`
 reads it back: into an empty store, everything current returns with its scopes; into the
 same store, nothing is added."""
 
@@ -12,14 +12,14 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import caller, plain
-from openmcp import db, repo
-from openmcp.cli import app, initialize
-from openmcp.export import export_document
-from openmcp.ingest import store_conversation
-from openmcp.ingest.jobs import import_export
-from openmcp.models import MemoryInput, ParsedConversation, ParsedMessage
-from openmcp.tools.conversations import record_exchange
-from openmcp.tools.memories import save_memories, update_memory
+from openmemore import db, repo
+from openmemore.cli import app, initialize
+from openmemore.export import export_document
+from openmemore.ingest import store_conversation
+from openmemore.ingest.jobs import import_export
+from openmemore.models import MemoryInput, ParsedConversation, ParsedMessage
+from openmemore.tools.conversations import record_exchange
+from openmemore.tools.memories import save_memories, update_memory
 
 ME = caller("claude-ai", read=["personal", "work"], write="personal")
 AT_WORK = caller("cursor-vscode", read=["work"], write="work")
@@ -66,7 +66,7 @@ def write(doc, path):
 
 def test_export_holds_everything_with_history_and_scopes(source):
     doc = export_document(source)
-    assert (doc["format"], doc["version"]) == ("openmcp.export", 1)
+    assert (doc["format"], doc["version"]) == ("openmemore.export", 1)
     [old, new, work] = doc["memories"]
     assert (old["content"], old["superseded_by"]) == ("Prefers tea.", new["id"])
     assert (work["scope"], work["project"], work["source"]) == ("work", "Billing", "cursor-vscode")
@@ -111,7 +111,7 @@ def test_exporting_some_scopes(source):
 
 
 def test_imported_memories_go_through_the_secret_filter(tmp_path):
-    doc = {"format": "openmcp.export", "version": 1, "conversations": [], "memories": [
+    doc = {"format": "openmemore.export", "version": 1, "conversations": [], "memories": [
         {"kind": "fact", "content": "Deploy key is ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
          "created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"},
         {"kind": "fact", "content": "Has a cat.", "created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"},
@@ -136,18 +136,18 @@ def cli(*args):
 
 def test_export_and_import_commands(home, tmp_path):
     initialize(home)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         fill(conn)
     target = tmp_path / "backup.json"
     code, out, _ = cli("export", "--output", str(target))
     assert code == 0 and "Exported 2 memories (1 earlier versions) and 2 conversations (5 messages)" in out
     if os.name != "nt":
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
-    assert json.loads(target.read_text())["format"] == "openmcp.export"
+    assert json.loads(target.read_text())["format"] == "openmemore.export"
 
     code, out, raw = cli("export", "--output", "-", "--scope", "work")
     assert code == 0 and [m["content"] for m in json.loads(raw)["memories"]] == ["Uses Go at work."]
 
     code, out, _ = cli("import", str(target))
-    assert code == 0 and "Imported the OpenMCP export keeping its scopes" in out
+    assert code == 0 and "Imported the OpenMemore export keeping its scopes" in out
     assert "Memories: 0 added, 2 already here." in out

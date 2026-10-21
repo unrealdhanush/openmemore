@@ -1,6 +1,6 @@
 # Benchmark results
 
-Retrieval quality over time (SPEC.md M7.6), appended by `uv run python -m bench <dataset> --record`. Session recall: share of the answer's sessions among the top k results; any-hit: at least one; NDCG over the distinct sessions found; turn recall: share of the marked answer turns. Datasets are LongMemEval (MIT) and LoCoMo (non-commercial terms), downloaded to ~/.cache/openmcp-bench, never committed.
+Retrieval quality over time (SPEC.md M7.6), appended by `uv run python -m bench <dataset> --record`. Session recall: share of the answer's sessions among the top k results; any-hit: at least one; NDCG over the distinct sessions found; turn recall: share of the marked answer turns. Datasets are LongMemEval (MIT) and LoCoMo (non-commercial terms), downloaded to ~/.cache/openmemore-bench, never committed.
 
 
 **Baselines (2026-10-19):** the two entries below measured main at 36471d3, before M7.7 (with the 30-day recency half-life), plus search's new `now` argument so ranking uses each question's date. That's what "+uncommitted" marks.

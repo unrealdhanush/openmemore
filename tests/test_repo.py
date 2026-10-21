@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from openmcp import db, repo
-from openmcp.models import AuditEntry
+from openmemore import db, repo
+from openmemore.models import AuditEntry
 
 
 def test_insert_audit_round_trip(tmp_path):

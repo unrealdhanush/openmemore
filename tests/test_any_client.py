@@ -12,20 +12,20 @@ from mcp.client.stdio import StdioServerParameters
 from mcp.types import Implementation
 
 from conftest import connect, plain
-from openmcp import config
-from openmcp.cli import initialize
-from openmcp.clients import client_name
-from openmcp.server import build_server
+from openmemore import config
+from openmemore.cli import initialize
+from openmemore.clients import client_name
+from openmemore.server import build_server
 
 SOME_EDITOR = Implementation(name="Some Editor 2", version="1.0")
-COMMAND = ("/opt/openmcp/bin/openmcp",)
+COMMAND = ("/opt/openmemore/bin/openmemore",)
 
 
 def generic(home, app):
-    """The generic snippet's server: `openmcp serve`, in its own process."""
+    """The generic snippet's server: `openmemore serve`, in its own process."""
     return Client(
-        StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve"],
-                              env={"OPENMCP_HOME": str(home)}),
+        StdioServerParameters(command=sys.executable, args=["-m", "openmemore.cli", "serve"],
+                              env={"OPENMEMORE_HOME": str(home)}),
         client_info=app, read_timeout_seconds=30,
     )
 
@@ -98,14 +98,14 @@ async def test_each_call_records_the_application(home):
     initialize(home)
     async with Client(build_server(home), client_info=Implementation(name="claude-ai", version="1")) as c:
         assert (await c.call_tool("ping", {})).structured_content["connected_app"] == "claude-ai"
-        await c.read_resource("openmcp://profile")
+        await c.read_resource("openmemore://profile")
     rows = [tuple(r) for r in config_db(home).execute("SELECT client, app, tool FROM audit_log ORDER BY id")]
-    assert rows == [("claude-ai", "claude-ai", "ping"), ("claude-ai", "claude-ai", "openmcp://profile")]
+    assert rows == [("claude-ai", "claude-ai", "ping"), ("claude-ai", "claude-ai", "openmemore://profile")]
 
 
 def config_db(home):
-    from openmcp import db
-    return db.connect(home / "openmcp.db")
+    from openmemore import db
+    return db.connect(home / "openmemore.db")
 
 
 # --- CLI -------------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def config_db(home):
 @pytest.mark.anyio
 async def test_clients_command_lists_the_apps_that_connected(home):
     from typer.testing import CliRunner
-    from openmcp.cli import app
+    from openmemore.cli import app
     initialize(home)
     async with Client(build_server(home), client_info=SOME_EDITOR) as c:
         await c.call_tool("ping", {})
@@ -126,24 +126,24 @@ async def test_clients_command_lists_the_apps_that_connected(home):
 
 def test_clients_command_before_anything_connects(home):
     from typer.testing import CliRunner
-    from openmcp.cli import app
+    from openmemore.cli import app
     initialize(home)
     assert "No MCP client has connected yet" in plain(CliRunner().invoke(app, ["clients"]).output)
 
 
 # --- importers from any provider ---------------------------------------------------------
 
-from openmcp.ingest import registry  # noqa: E402
-from openmcp.ingest.detect import ExportError, load  # noqa: E402
-from openmcp.ingest.jobs import import_export  # noqa: E402
-from openmcp.tools.conversations import recent_conversations  # noqa: E402
+from openmemore.ingest import registry  # noqa: E402
+from openmemore.ingest.detect import ExportError, load  # noqa: E402
+from openmemore.ingest.jobs import import_export  # noqa: E402
+from openmemore.tools.conversations import recent_conversations  # noqa: E402
 from conftest import FakeEmbedder, caller  # noqa: E402
 
 READER = caller("reader", read=["personal"], write="personal")
 
 
-def openmcp_doc(*conversations, version=1):
-    return {"format": "openmcp.export", "version": version, "conversations": list(conversations)}
+def openmemore_doc(*conversations, version=1):
+    return {"format": "openmemore.export", "version": version, "conversations": list(conversations)}
 
 
 def conv(provider, id_, *pairs, updated="2026-10-01T10:00:00Z"):
@@ -159,31 +159,31 @@ def write(tmp_path, doc, name="history.json"):
     return path
 
 
-def test_the_openmcp_format_brings_in_any_providers_history(conn, tmp_path):
-    path = write(tmp_path, openmcp_doc(
+def test_the_openmemore_format_brings_in_any_providers_history(conn, tmp_path):
+    path = write(tmp_path, openmemore_doc(
         conv("gemini", "g1", ("user", "Plan a vegetable garden"), ("assistant", "Start with tomatoes and basil.")),
         conv("perplexity", "p1", ("user", "Best trail shoes?"), ("assistant", "Look for a rock plate."),
              updated="2026-10-02T10:00:00Z"),
     ))
     report = import_export(conn, path, scope="personal", embedder=FakeEmbedder())
 
-    assert (report.provider, report.conversations, report.embedded) == ("openmcp", 2, 4)
+    assert (report.provider, report.conversations, report.embedded) == ("openmemore", 2, 4)
     assert [c.source for c in recent_conversations(conn, READER).conversations] == ["perplexity", "gemini"]
     assert recent_conversations(conn, READER, source="gemini").conversations[0].title == "Plan a vegetable garden"
 
 
-def test_openmcp_format_problems_are_reported(conn, tmp_path):
+def test_openmemore_format_problems_are_reported(conn, tmp_path):
     bad_role = conv("gemini", "g2", ("system", "You are helpful"), ("user", "hi"))
-    report = import_export(conn, write(tmp_path, openmcp_doc(bad_role, conv("gemini", "g3", ("user", "ok")))), scope="personal")
+    report = import_export(conn, write(tmp_path, openmemore_doc(bad_role, conv("gemini", "g3", ("user", "ok")))), scope="personal")
     assert report.conversations == 1 and len(report.errors) == 1 and "role" in report.errors[0]
     with pytest.raises(ExportError, match="version 2 isn't supported"):
-        load(write(tmp_path, openmcp_doc(version=2), "v2.json"))
+        load(write(tmp_path, openmemore_doc(version=2), "v2.json"))
 
 
 def test_a_new_provider_needs_only_a_registry_entry(conn, tmp_path, monkeypatch):
     """SPEC M3.5 done-when: a provider's importer added through the registry alone.
     An invented format, imported end to end with no other code changed."""
-    from openmcp.models import ParsedConversation, ParsedMessage
+    from openmemore.models import ParsedConversation, ParsedMessage
 
     toy = registry.Importer(
         name="toy", display="Toy Assistant",
@@ -211,18 +211,18 @@ def test_a_new_provider_needs_only_a_registry_entry(conn, tmp_path, monkeypatch)
 
 def test_importer_registry_entries_are_distinct():
     names = [i.name for i in registry.importers()]
-    assert len(names) == len(set(names)) and {"chatgpt", "claude", "openmcp"} <= set(names)
+    assert len(names) == len(set(names)) and {"chatgpt", "claude", "openmemore"} <= set(names)
 
 
 @pytest.mark.anyio
 async def test_clients_command_hides_earlier_names_unless_asked(home):
     from typer.testing import CliRunner
-    from openmcp.cli import app
-    from openmcp import db as openmcp_db
+    from openmemore.cli import app
+    from openmemore import db as openmemore_db
     initialize(home)
     async with Client(build_server(home), client_info=SOME_EDITOR) as c:
         await c.call_tool("ping", {})
-    conn = openmcp_db.connect(home / "openmcp.db")  # rows as earlier versions wrote them
+    conn = openmemore_db.connect(home / "openmemore.db")  # rows as earlier versions wrote them
     conn.execute("INSERT INTO audit_log (ts, client, tool, duration_ms, app) VALUES ('2026-10-01T00:00:00.000Z', 'old-name', 'ping', 1, 'Some Editor 2')")
     conn.execute("INSERT INTO audit_log (ts, client, tool, duration_ms) VALUES ('2026-10-01T00:00:00.000Z', 'older', 'ping', 1)")
     out = plain(CliRunner().invoke(app, ["clients"], env={"COLUMNS": "200"}).output)

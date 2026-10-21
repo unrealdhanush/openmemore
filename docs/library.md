@@ -1,11 +1,11 @@
-# Using OpenMCP from your own programs
+# Using OpenMemore from your own programs
 
-> **Experimental.** The import name changes when the project gets its final name (SPEC.md M9).
+> **Experimental** until the first public release (SPEC.md M9): the API may still change.
 
 Your own agents and scripts can share memory with your AI assistants. They read what Claude or Cursor saved, and write what your assistants will find later. This runs in your program's process, with no server:
 
 ```python
-from openmcp import Memory
+from openmemore import Memory
 
 memory = Memory("trip-planner")
 
@@ -15,7 +15,7 @@ def plan(request: str, context: str = "") -> str:
     ...  # call your model with `context` in the prompt
 ```
 
-It uses the same store and rules as your assistants: `~/.openmcp` (or `OPENMCP_HOME`), scopes, the secret filter, and the audit log. Every call is logged under the program's client name, with the app recorded as `openmcp library`.
+It uses the same store and rules as your assistants: `~/.openmemore` (or `OPENMEMORE_HOME`), scopes, the secret filter, and the audit log. Every call is logged under the program's client name, with the app recorded as `openmemore library`.
 
 ## `Memory(name, *, home=None)`
 
@@ -81,9 +81,9 @@ Calls are grouped into conversations:
 
 ## Errors
 
-- **Direct calls** raise `openmcp.OpenMCPError` with the reason: not found (or not in this client's scopes), a secret, and so on.
-- **Decorators** never break your function. If storing or recalling fails, the problem is logged on the `openmcp` logger, and the function runs as usual (with an empty `context` for `recall`).
+- **Direct calls** raise `openmemore.OpenMemoreError` with the reason: not found (or not in this client's scopes), a secret, and so on.
+- **Decorators** never break your function. If storing or recalling fails, the problem is logged on the `openmemore` logger, and the function runs as usual (with an empty `context` for `recall`).
 
 ## Cost
 
-`import openmcp` loads nothing heavy. The store opens on the first call, and the embedding model loads only when something needs a vector. Without the model, from `openmcp embed`, search uses words only, and new items are embedded later by the daemon.
+`import openmemore` loads nothing heavy. The store opens on the first call, and the embedding model loads only when something needs a vector. Without the model, from `openmemore embed`, search uses words only, and new items are embedded later by the daemon.

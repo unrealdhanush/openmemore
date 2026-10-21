@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from openmcp import db
+from openmemore import db
 
 EXPECTED_TABLES = {
     "schema_version",

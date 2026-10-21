@@ -2,8 +2,8 @@ import tomllib
 
 from typer.testing import CliRunner
 
-from openmcp import config, db
-from openmcp.cli import app, initialize
+from openmemore import config, db
+from openmemore.cli import app, initialize
 
 runner = CliRunner()
 
@@ -11,7 +11,7 @@ runner = CliRunner()
 def test_init_creates_layout(home):
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0, result.output
-    assert (home / "openmcp.db").is_file()
+    assert (home / "openmemore.db").is_file()
     assert (home / "config.toml").is_file()
     assert (home / "imports").is_dir()
     assert (home / "logs").is_dir()
@@ -43,5 +43,5 @@ def test_init_db_is_migrated_and_wal(home):
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
-def test_home_defaults_to_dot_openmcp(isolated_user):
-    assert config.home() == isolated_user / ".openmcp"
+def test_home_defaults_to_dot_openmemore(isolated_user):
+    assert config.home() == isolated_user / ".openmemore"

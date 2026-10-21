@@ -1,6 +1,6 @@
 """Optional judged answers (SPEC.md M7.6): a model answers each question from the
 retrieved context only, and a second call judges the answer against the reference.
-Both go through OpenMCP's model client (openmcp.llm), so any Open Responses or Chat
+Both go through OpenMemore's model client (openmemore.llm), so any Open Responses or Chat
 Completions endpoint works. Retrieval metrics stay the headline; this shows whether
 what was retrieved is enough to answer."""
 
@@ -11,7 +11,7 @@ from typing import Any
 
 from bench.datasets import Question
 from bench.runner import Retrieved
-from openmcp import llm
+from openmemore import llm
 
 ANSWER_INSTRUCTIONS = (
     "Answer the question using only the conversation excerpts provided. Be brief. If the excerpts don't "

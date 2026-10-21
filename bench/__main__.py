@@ -1,4 +1,4 @@
-"""`uv run python -m bench <dataset>`: measure OpenMCP's retrieval (SPEC.md M7.6).
+"""`uv run python -m bench <dataset>`: measure OpenMemore's retrieval (SPEC.md M7.6).
 
     uv run python -m bench longmemeval-s --limit 100      # an even spread over question types
     uv run python -m bench locomo
@@ -27,14 +27,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, help="At most this many histories, spread evenly over question types.")
     parser.add_argument("--k", default="5,10", help="Cutoffs, comma-separated (default 5,10).")
     parser.add_argument("--keywords-only", action="store_true", help="Without the embedding model.")
-    parser.add_argument("--model-dir", default=os.environ.get("OPENMCP_MODEL_DIR")
-                        or str(Path.home() / ".cache" / "openmcp-test-models"), help="Where the embedding model is cached.")
+    parser.add_argument("--model-dir", default=os.environ.get("OPENMEMORE_MODEL_DIR")
+                        or str(Path.home() / ".cache" / "openmemore-test-models"), help="Where the embedding model is cached.")
     parser.add_argument("--judge-endpoint", help="Also answer and judge each question with this model endpoint.")
     parser.add_argument("--judge-model")
     parser.add_argument("--judge-api", default="responses", choices=["responses", "chat-completions"])
     parser.add_argument("--record", action="store_true", help="Append the summary to bench/RESULTS.md.")
     parser.add_argument("--set", action="append", default=[], metavar="MODULE.NAME=VALUE",
-                        help="Override a constant for tuning, e.g. openmcp.tools.search.CHAT_ACTIVATION_WEIGHT=0.002.")
+                        help="Override a constant for tuning, e.g. openmemore.tools.search.CHAT_ACTIVATION_WEIGHT=0.002.")
     args = parser.parse_args(argv)
     ks = sorted({int(k) for k in args.k.split(",")})
     settings = apply_settings(args.set)
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         runner.use_embedder(None)
         embedder_name = "none (keywords only)"
     else:
-        from openmcp import embed
+        from openmemore import embed
 
         model = embed.FastEmbedder(Path(args.model_dir), allow_download=True)
         runner.use_embedder(runner.CachingEmbedder(model, runner.cache_path()))
@@ -51,12 +51,12 @@ def main(argv: list[str] | None = None) -> int:
     answer = None
     if args.judge_endpoint:
         from bench.judge import answerer
-        from openmcp import llm
+        from openmemore import llm
 
         if not args.judge_model:
             parser.error("--judge-model is required with --judge-endpoint")
         answer = answerer(llm.Model(endpoint=args.judge_endpoint, model=args.judge_model, api=args.judge_api,
-                                    api_key=os.environ.get("OPENMCP_MODEL_API_KEY")), max(ks))
+                                    api_key=os.environ.get("OPENMEMORE_MODEL_API_KEY")), max(ks))
 
     haystacks = runner.sample(datasets.load(args.dataset), args.limit)
     print(f"{args.dataset}: {len(haystacks)} histories, {sum(len(h.questions) for h in haystacks)} questions, "

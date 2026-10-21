@@ -12,13 +12,13 @@ import pytest
 from mcp import Client
 
 from conftest import FakeEmbedder, caller
-from openmcp import db, embed
-from openmcp.capture import capture, claude_code, vscode_copilot
-from openmcp.cli import initialize
-from openmcp.config import CaptureConfig, Config
+from openmemore import db, embed
+from openmemore.capture import capture, claude_code, vscode_copilot
+from openmemore.cli import initialize
+from openmemore.config import CaptureConfig, Config
 from conftest import connect
-from openmcp.tools.conversations import record_exchange
-from openmcp.tools.search import search_context
+from openmemore.tools.conversations import record_exchange
+from openmemore.tools.search import search_context
 from test_capture import add_claude_session, add_vscode_session, bump_mtime
 
 DESKTOP = caller("claude-desktop", read=["personal"], write="personal")
@@ -60,7 +60,7 @@ async def test_record_exchange_after_a_lookup_is_not_marked(home):
     """The manual test's living-room case: the user asked Claude for its own opinion
     right after a lookup. A timing rule marked that new content as a recap."""
     initialize(home)
-    conn = db.connect(home / "openmcp.db")
+    conn = db.connect(home / "openmemore.db")
     record_exchange(conn, COPILOT, *ORIGINAL)
     async with connect(home, "claude-desktop") as client:
         await client.call_tool("recent_conversations", {"source": "copilot"})
@@ -92,7 +92,7 @@ def test_a_turn_that_calls_a_recall_tool_later_is_updated(conn, user_home):
 
     with path.open("a") as f:
         f.write(json.dumps({"type": "assistant", "uuid": "a-x", "sessionId": "sess-0001", "message": {
-            "role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "mcp__openmcp__recent_conversations", "input": {}}],
+            "role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "mcp__openmemore__recent_conversations", "input": {}}],
         }}) + "\n")
     bump_mtime(path)
     capture(conn, cfg, user_home=user_home, days=36500)

@@ -1,5 +1,5 @@
 """SPEC.md M7.7 part 1: two timelines on memories. When something was true in the user's
-life (valid_from / valid_to) is kept apart from when OpenMCP learned it, and learned
+life (valid_from / valid_to) is kept apart from when OpenMemore learned it, and learned
 otherwise (created_at / superseded_at)."""
 
 from datetime import UTC, datetime, timedelta
@@ -8,13 +8,13 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import caller
-from openmcp import db, repo
-from openmcp.models import MemoryInput, ProposalInput
-from openmcp.proposals import Approval, approve, find_duplicates
-from openmcp.tools.consolidation import propose_memories
-from openmcp.tools.memories import save_memories, update_memory
-from openmcp.tools.profile import get_profile
-from openmcp.tools.search import search_context
+from openmemore import db, repo
+from openmemore.models import MemoryInput, ProposalInput
+from openmemore.proposals import Approval, approve, find_duplicates
+from openmemore.tools.consolidation import propose_memories
+from openmemore.tools.memories import save_memories, update_memory
+from openmemore.tools.profile import get_profile
+from openmemore.tools.search import search_context
 
 ME = caller("claude-ai", read=["personal"], write="personal")
 JUNE = datetime(2026, 6, 1, tzinfo=UTC)
@@ -73,8 +73,8 @@ def test_a_correction_never_ends_the_old_memory_before_it_began(conn):
 
 
 def test_a_proposal_is_true_from_its_conversation_not_from_approval(conn):
-    from openmcp.ingest import store_conversation
-    from openmcp.models import ParsedConversation, ParsedMessage
+    from openmemore.ingest import store_conversation
+    from openmemore.models import ParsedConversation, ParsedMessage
 
     tea = save(conn, "Prefers tea.", valid_from="2026-01")
     conversation_id, _ = store_conversation(conn, ParsedConversation(
@@ -108,8 +108,8 @@ def test_export_and_import_keep_the_timeline(conn, tmp_path):
     import json
     from contextlib import closing
 
-    from openmcp.export import export_document
-    from openmcp.ingest.jobs import import_export
+    from openmemore.export import export_document
+    from openmemore.ingest.jobs import import_export
 
     save(conn, "Lived in Paris.", valid_from="2015", valid_to="2020")
     doc = export_document(conn)
@@ -145,8 +145,8 @@ def test_existing_history_gets_a_timeline_when_upgrading(tmp_path, monkeypatch):
 
 
 def test_the_library_takes_dates(home):
-    from openmcp import Memory
-    from openmcp.cli import initialize
+    from openmemore import Memory
+    from openmemore.cli import initialize
 
     initialize(home)
     memory = Memory("agent", home=home)
@@ -154,5 +154,5 @@ def test_the_library_takes_dates(home):
     assert memory.search("Paris", chats=False) == []  # ended: not current
     tea = memory.save("Prefers tea.", kind="preference", valid_from="2025")
     memory.update(tea, "Prefers coffee.", valid_from="2026-06")
-    with db.connect(home / "openmcp.db") as conn:
+    with db.connect(home / "openmemore.db") as conn:
         assert repo.get_memory(conn, tea).valid_to == JUNE and repo.get_memory(conn, old).valid_to is not None

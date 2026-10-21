@@ -1,6 +1,6 @@
-# OpenMCP — v1 Build Spec
+# OpenMemore — v1 Build Spec
 
-> Working name. Rename before any public release ("OpenMCP" reads like the protocol itself and may already be taken).
+> Working name. Rename before any public release ("OpenMemore" reads like the protocol itself and may already be taken).
 
 ## 0. Instructions for Claude Code
 
@@ -20,7 +20,7 @@ A **local-first MCP server** that gives every AI assistant a user works with (Cl
 
 Any connected model can **write** what it learns (preferences, projects, decisions), **record** each substantive exchange (what the user asked, what it answered), and **read** what other models stored. Ask Claude something today, ask a different assistant about it tomorrow, and it knows what you mean. Start a project in Claude, continue it in another assistant without re-explaining anything.
 
-Single-assistant memory of preferences is already solved inside each product. The point of OpenMCP is what no single assistant can do: carry context **across** assistants.
+Single-assistant memory of preferences is already solved inside each product. The point of OpenMemore is what no single assistant can do: carry context **across** assistants.
 
 Models do not "learn from each other." They read and write a shared store. No weights change.
 
@@ -49,20 +49,20 @@ Models do not "learn from each other." They read and write a shared store. No we
 ```
  Claude Desktop     Cursor      Gemini CLI      (each spawns its own stdio process)
        |              |             |
-   openmcp serve  openmcp serve  openmcp serve   (each names its client from clientInfo)
+   openmemore serve  openmemore serve  openmemore serve   (each names its client from clientInfo)
        \              |             /
         \             |            /
-         +----- ~/.openmcp/openmcp.db  (SQLite, WAL mode) -----+
+         +----- ~/.openmemore/openmemore.db  (SQLite, WAL mode) -----+
          |   memories | conversations | messages | chunks      |
          |   FTS5 indexes | sqlite-vec vectors | audit_log     |
          +------------------------------------------------------+
                               ^
                               |
-                 openmcp import <export.zip>   (CLI, background job)
+                 openmemore import <export.zip>   (CLI, background job)
 ```
 
 Key consequences:
-- Each MCP client launches its **own** `openmcp serve` process over stdio, so **several processes may write to the DB at once**. Use WAL mode plus `busy_timeout`, and keep transactions short.
+- Each MCP client launches its **own** `openmemore serve` process over stdio, so **several processes may write to the DB at once**. Use WAL mode plus `busy_timeout`, and keep transactions short.
 - **Bulk ingestion never runs inside `serve`.** Import is a CLI command with resumable jobs, so a large import can't stall a chat. The one exception is transcript capture (M1.5): before each read, `serve` stores what changed in enabled clients' transcripts, incrementally and within a 250ms budget (anything left over waits for the next read). The first backfill runs from the CLI.
 
 ---
@@ -70,14 +70,14 @@ Key consequences:
 ## 3. Data directory
 
 ```
-~/.openmcp/
-  openmcp.db         # SQLite database
+~/.openmemore/
+  openmemore.db         # SQLite database
   config.toml        # clients + scopes
   imports/           # reserved; exports are read where they are, not copied
   logs/
 ```
 
-Overridable with the `OPENMCP_HOME` environment variable (tests use a temp dir).
+Overridable with the `OPENMEMORE_HOME` environment variable (tests use a temp dir).
 
 ---
 
@@ -86,7 +86,7 @@ Overridable with the `OPENMCP_HOME` environment variable (tests use a temp dir).
 | Concern | Choice |
 |---|---|
 | Language | Python 3.11+ |
-| Packaging | `uv`, `pyproject.toml`, console script `openmcp` |
+| Packaging | `uv`, `pyproject.toml`, console script `openmemore` |
 | MCP | Official `mcp` Python SDK (FastMCP), stdio transport |
 | Validation / schemas | Pydantic v2 |
 | Storage | SQLite (stdlib `sqlite3`), WAL mode. **No ORM.** |
@@ -118,10 +118,10 @@ MCP tools / CLI  ->  Pydantic models (models.py)  ->  repository (repo.py)  ->  
 
 ### 4.3 Performance budget
 
-- `openmcp serve` ready to accept calls in under 500ms (embedding model must **not** load at startup).
+- `openmemore serve` ready to accept calls in under 500ms (embedding model must **not** load at startup).
 - `search_context`: p95 under 100ms once warm, on a store of 10k memories and 100k chunks.
 - `save_memories` with 20 items: p95 under 300ms once warm.
-- Every tool call records `duration_ms` in `audit_log`; `openmcp audit --stats` prints p50/p95 per tool so these budgets are checked against real numbers.
+- Every tool call records `duration_ms` in `audit_log`; `openmemore audit --stats` prints p50/p95 per tool so these budgets are checked against real numbers.
 - `scripts/benchmark.py` checks the two p95 budgets on a synthetic store (Zipf-distributed vocabulary, random unit vectors; queries and saves use the real model). Measured 2026-10-18 on an M-series Mac: `search_context` p50 72ms / p95 76ms, `save_memories` (20) p50 208ms / p95 219ms; startup ~360ms. About 60ms of each search is the exact vector scan over 100k chunks, which grows linearly with the store.
 
 ---
@@ -129,11 +129,11 @@ MCP tools / CLI  ->  Pydantic models (models.py)  ->  repository (repo.py)  ->  
 ## 5. Repo layout
 
 ```
-openmcp/
+openmemore/
   pyproject.toml
   README.md
   SPEC.md
-  src/openmcp/
+  src/openmemore/
     __init__.py
     cli.py              # typer app: init, serve, setup, capture, import, status, memories, conversations, audit, export
     config.py           # load/write config.toml, client scope resolution
@@ -143,7 +143,7 @@ openmcp/
     migrations/         # 001_init.sql, ...
     server.py           # FastMCP server, tool + prompt registration
     instructions.py     # server instructions + the standing instruction for each client
-    setup.py            # `openmcp setup <client>`: register the server, install the standing instruction
+    setup.py            # `openmemore setup <client>`: register the server, install the standing instruction
     clients.py          # naming clients from what they report (M3.5); no table of clients
     tools/
       memories.py       # save, update, forget
@@ -165,9 +165,9 @@ openmcp/
       claude.py         # Claude export parser
       detect.py         # open a zip/json/folder, recognize the format from its contents
       registry.py       # the importer registry (M3.5): built-in importers plus register()
-      openmcp_format.py # OpenMCP's own format (openmcp.export): what export writes, and a way in for any provider
+      openmemore_format.py # OpenMemore's own format (openmemore.export): what export writes, and a way in for any provider
     audit.py
-    export.py           # `openmcp export`: everything, in OpenMCP's own format
+    export.py           # `openmemore export`: everything, in OpenMemore's own format
   scripts/
     benchmark.py        # performance budget check (Section 4.3)
   tests/
@@ -219,7 +219,7 @@ CREATE TABLE chunks (
 CREATE TABLE memories (
   id             INTEGER PRIMARY KEY,
   kind           TEXT NOT NULL CHECK (kind IN ('fact','preference','project','decision','note')),
-  subject        TEXT,                 -- short label, e.g. 'coding style', 'OpenMCP'
+  subject        TEXT,                 -- short label, e.g. 'coding style', 'OpenMemore'
   content        TEXT NOT NULL,
   project        TEXT,                 -- optional project tag
   scope          TEXT NOT NULL DEFAULT 'personal',
@@ -378,7 +378,7 @@ The instant cold start. A prompt template the user triggers in any connected cli
 
 This gives each assistant's existing memory a path into the store within minutes, while full exports index in the background.
 
-### 7.7 MCP resource: `openmcp://profile`
+### 7.7 MCP resource: `openmemore://profile`
 Same payload as `get_profile()`, exposed as a resource for clients that prefer resources.
 
 ### 7.8 `record_exchange`
@@ -417,9 +417,9 @@ recent_conversations(
 ### 7.10 Server instructions and standing instructions
 The MCP `instructions` tell every connected model, in short: call `get_profile` at the start; call `record_exchange` after every answer (with any code); save decisions with `save_memories` (kind `decision`) so they outrank the options discussed before them; call `recent_conversations` or `search_context` when the user refers to an earlier conversation (including with another assistant) before saying it doesn't know; never record secrets. Clients whose transcripts are captured get the same text without `record_exchange`.
 
-Real clients don't act on server instructions alone: in the M1 manual test, Claude Desktop made no tool calls until the user added the same guidance as a personal preference. So `openmcp setup <client>` (Section 9) also installs it as a **standing instruction** wherever the client reads the user's own instructions.
+Real clients don't act on server instructions alone: in the M1 manual test, Claude Desktop made no tool calls until the user added the same guidance as a personal preference. So `openmemore setup <client>` (Section 9) also installs it as a **standing instruction** wherever the client reads the user's own instructions.
 
-Where setup can write that place (Copilot's settings, `~/.claude/CLAUDE.md`), it installs the full guidance and refreshes it on every run. Where the user has to paste it (Claude Desktop keeps personal preferences in the user's account, not on disk; Cursor's User Rules), it is a short **pointer** instead: use the openmcp tools as the server's instructions describe, naming only the calls that matter most (`get_profile` at the start, `record_exchange` after every answer, `save_memories` for decisions and preferences, recall tools before saying "I don't know"). Everything that may change lives in the server instructions, which ship with each upgrade, so the pasted text doesn't go stale. Setup copies it to the clipboard (`pbcopy`, `clip`, `wl-copy`/`xclip`/`xsel`); without a clipboard tool it prints it. Manual test (2026-10-18, Claude Desktop): with only the pointer, it reused conversation ids and searched by topic, details found only in the server instructions, but didn't save a stated decision until `save_memories` was named in the pointer.
+Where setup can write that place (Copilot's settings, `~/.claude/CLAUDE.md`), it installs the full guidance and refreshes it on every run. Where the user has to paste it (Claude Desktop keeps personal preferences in the user's account, not on disk; Cursor's User Rules), it is a short **pointer** instead: use the openmemore tools as the server's instructions describe, naming only the calls that matter most (`get_profile` at the start, `record_exchange` after every answer, `save_memories` for decisions and preferences, recall tools before saying "I don't know"). Everything that may change lives in the server instructions, which ship with each upgrade, so the pasted text doesn't go stale. Setup copies it to the clipboard (`pbcopy`, `clip`, `wl-copy`/`xclip`/`xsel`); without a clipboard tool it prints it. Manual test (2026-10-18, Claude Desktop): with only the pointer, it reused conversation ids and searched by topic, details found only in the server instructions, but didn't save a stated decision until `save_memories` was named in the pointer.
 
 ---
 
@@ -450,9 +450,9 @@ This doesn't make injection impossible. It makes it visible and harder. Say so h
 
 ## 9. Clients and scopes
 
-**A client is named by what its application reports when it connects** (MCP `clientInfo`), made config-friendly: `claude-ai` (Claude Desktop), `visual-studio-code`, `cursor-vscode`, `Some Editor 2` → `some-editor-2`. There's no client table, no `--client` option, and no renaming: `openmcp clients` lists the names of the applications that have connected, with their scopes. (Earlier versions had `--client` and config `app` pins; M3.5 made them unnecessary and they were removed. A config that still has an `app` key fails to load, naming the key.)
+**A client is named by what its application reports when it connects** (MCP `clientInfo`), made config-friendly: `claude-ai` (Claude Desktop), `visual-studio-code`, `cursor-vscode`, `Some Editor 2` → `some-editor-2`. There's no client table, no `--client` option, and no renaming: `openmemore clients` lists the names of the applications that have connected, with their scopes. (Earlier versions had `--client` and config `app` pins; M3.5 made them unnecessary and they were removed. A config that still has an `app` key fails to load, naming the key.)
 
-`config.toml`, created by `openmcp init`, starts with only `[defaults]` and a commented example:
+`config.toml`, created by `openmemore init`, starts with only `[defaults]` and a commented example:
 
 ```toml
 ignore_scopes = false
@@ -468,7 +468,7 @@ write_scope = "personal"
 
 - Clients without a `[clients.<name>]` table use `[defaults]`.
 - Scopes are labels on every memory and conversation; free-form strings, `personal` and `work` are just the starting set. They let an assistant be kept away from part of the user's data.
-- `ignore_scopes = true` (top level; off by default) turns that off: every client reads every scope and can change items in any scope. New items still get the client's `write_scope` as their label, so separation can be turned back on later. `ping` reports `read_scopes: null`, and `openmcp clients` shows "all".
+- `ignore_scopes = true` (top level; off by default) turns that off: every client reads every scope and can change items in any scope. New items still get the client's `write_scope` as their label, so separation can be turned back on later. `ping` reports `read_scopes: null`, and `openmemore clients` shows "all".
 - A client configured to read only `work` can't read what others write to `personal`. That's the isolation working as designed; the cross-assistant tests (M1, v1) need clients that share a scope.
 
 `[capture]` (M1.5) lists the transcript readers in use; it starts empty:
@@ -481,7 +481,7 @@ days = 30            # only transcripts changed within this many days
 
 Captured conversations are stored under the reader's name (`vscode-copilot`, so "what did I ask Copilot?" finds them), in the write scope of the application the reader belongs to (`visual-studio-code`), the same client its live calls come from. Each reader declares that application's `clientInfo` name, which is also how a captured client's `record_exchange` calls are recognized and skipped instead of stored twice: the server instructions go out before a client says who it is, so every client gets the recording variant.
 
-`openmcp setup [client]` connects a client (M3.5, `--dry-run` shows it first). It never edits another app's files: it uses the vendor's own mechanism where there is one, and otherwise prints the snippet that works in every MCP client (`--config <path>` merges it into a JSON file you name, keeping a `.bak`). The standing instruction is the pointer, put on the clipboard.
+`openmemore setup [client]` connects a client (M3.5, `--dry-run` shows it first). It never edits another app's files: it uses the vendor's own mechanism where there is one, and otherwise prints the snippet that works in every MCP client (`--config <path>` merges it into a JSON file you name, keeping a `.bak`). The standing instruction is the pointer, put on the clipboard.
 
 | Client | How setup adds the server | Capture |
 |---|---|---|
@@ -495,12 +495,12 @@ The generic snippet (the same for every client):
 ```json
 {
   "mcpServers": {
-    "openmcp": {"command": "/path/to/openmcp", "args": ["serve"]}
+    "openmemore": {"command": "/path/to/openmemore", "args": ["serve"]}
   }
 }
 ```
 
-- **Run from a development checkout** (an editable install, e.g. `uv run openmcp setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmcp` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
+- **Run from a development checkout** (an editable install, e.g. `uv run openmemore setup` inside the repo), setup hands the whole job to an installed copy (a `uv tool install` first, then `openmemore` on PATH outside the checkout): registering the checkout would make the app run whatever branch is checked out, and the checkout's code would migrate the real database. Without an installed copy it stops and says how to install one; `--dev` registers the checkout deliberately.
 - **VS Code** can also start MCP servers configured for other apps (`chat.mcp.discovery.enabled`). That once ran Claude Desktop's entry, with `--client claude-desktop`, as Copilot. With clients named by what they report, a server started that way is still named after VS Code, so discovery is harmless.
 
 ---
@@ -509,9 +509,9 @@ The generic snippet (the same for every client):
 
 ### CLI flow
 ```
-openmcp import ~/Downloads/chatgpt-export.zip      # provider auto-detected
-openmcp import ~/Downloads/claude-export.zip --scope personal
-openmcp status                                     # job progress, counts
+openmemore import ~/Downloads/chatgpt-export.zip      # provider auto-detected
+openmemore import ~/Downloads/claude-export.zip --scope personal
+openmemore status                                     # job progress, counts
 ```
 
 ### Pipeline
@@ -520,8 +520,8 @@ openmcp status                                     # job progress, counts
 3. **Parse** with the provider adapter into the normalized schema (`ParsedConversation`, shared with transcript capture), one conversation at a time.
 4. **Order newest-first** by conversation `updated_at`. Recent history becomes searchable first.
 5. **Store**, 50 conversations per transaction: conversations, messages, and chunks (indexed for keyword search), through the same store as capture (secrets redacted, messages upserted by the provider's ids). The job's `cursor` and `processed` advance in the same transaction. Storing runs at ~10k messages a second, so a whole export is keyword-searchable within seconds.
-6. **Embed**, newest conversations first, after everything is stored. With bge-small this runs at ~70 messages a second on a laptop (a 1,000-conversation, 10,000-message export: ~1s to store, ~2 min to embed). Embedding inside each batch instead held the oldest conversations back from keyword search for as long as embedding everything took. If this phase is interrupted, `openmcp embed` finishes it.
-7. **Resume**: if interrupted while storing, re-running `openmcp import` on the same file continues from `cursor`. A newer export of the same account adds only what's new. Conversations the user deleted are not imported again (`deleted_conversations`).
+6. **Embed**, newest conversations first, after everything is stored. With bge-small this runs at ~70 messages a second on a laptop (a 1,000-conversation, 10,000-message export: ~1s to store, ~2 min to embed). Embedding inside each batch instead held the oldest conversations back from keyword search for as long as embedding everything took. If this phase is interrupted, `openmemore embed` finishes it.
+7. **Resume**: if interrupted while storing, re-running `openmemore import` on the same file continues from `cursor`. A newer export of the same account adds only what's new. Conversations the user deleted are not imported again (`deleted_conversations`).
 
 Imports store **conversations and messages only**. They do not auto-create memories in v1; distilling memories from history is consolidation ("Later").
 
@@ -539,8 +539,8 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 
 ### M0 — Skeleton
 - `pyproject.toml`, `uv` setup, console script.
-- `openmcp init` creates data dir, DB (migration 001), and default config.
-- `openmcp serve` starts a FastMCP stdio server with a `ping` tool (M0 had `--client X`; M3.5 removed it).
+- `openmemore init` creates data dir, DB (migration 001), and default config.
+- `openmemore serve` starts a FastMCP stdio server with a `ping` tool (M0 had `--client X`; M3.5 removed it).
 - `models.py` and `repo.py` exist with the base pattern (one model, one repository function) so later milestones follow it.
 - **Done when:** MCP Inspector connects and `ping` works; startup is under 500ms; tests cover init and migrations.
 
@@ -549,54 +549,54 @@ Skip empty messages, system scaffolding, and tool noise. Unknown fields are igno
 - Live capture: `record_exchange` and `recent_conversations`, chat chunks indexed with FTS5, server instructions (Section 7.10).
 - Secret filter (reject for memories, redact for exchanges), read wrapping, audit log.
 - Scope checks on every tool (read scopes for reads; write scope plus read for writes).
-- `import_my_memory` prompt and `openmcp://profile` resource.
-- CLI: `openmcp memories list|show|rm`, `openmcp conversations list|show|rm`, `openmcp audit` (with `--stats` for p50/p95 per tool).
-- `openmcp setup <client>` with standing instructions (Sections 7.10, 9); `code` on `record_exchange`; later turns ranked first and the ordering note. (Added after the first manual test: models didn't call the tools unprompted, summaries lost code, and an assistant mixed an early suggestion with the later decision.)
+- `import_my_memory` prompt and `openmemore://profile` resource.
+- CLI: `openmemore memories list|show|rm`, `openmemore conversations list|show|rm`, `openmemore audit` (with `--stats` for p50/p95 per tool).
+- `openmemore setup <client>` with standing instructions (Sections 7.10, 9); `code` on `record_exchange`; later turns ranked first and the ordering note. (Added after the first manual test: models didn't call the tools unprompted, summaries lost code, and an assistant mixed an early suggestion with the later decision.)
 - **Done when:** you ask one assistant (e.g. Claude Desktop) a substantive question, then ask a **different** assistant (e.g. Gemini CLI, or Cursor with `personal` readable) about that previous question, both with and without naming its topic ("what did I ask Claude earlier?"), and it answers from the stored exchange without being told. An automated test scripts the same flow across two real server processes.
 
 ### M1.5 — Transcript capture
 Capture that doesn't depend on the model calling a tool, for clients that save transcripts on the user's disk.
 - Parsers for Claude Code (session JSONL under `~/.claude/projects/`) and VS Code Copilot Chat (`chatSessions/*.json` under the VS Code user directory). User prompts and answer text only: tool calls, tool output, thinking, subagent turns, and command scaffolding are skipped. Both formats are undocumented, so parsers ignore what they don't recognize and are tested against synthetic fixtures modeled on real files.
 - `capture_files` tracking: unchanged files are skipped; append-only transcripts are re-read from the start of their last turn; messages upsert by the transcript's own ids, so a growing answer updates in place. Deleting a captured conversation stops its transcript from being captured again.
-- Opt-in per client through `[capture]`, which `openmcp setup` turns on. `serve` refreshes before `search_context` and `recent_conversations` within a 250ms budget; `openmcp capture` backfills.
+- Opt-in per client through `[capture]`, which `openmemore setup` turns on. `serve` refreshes before `search_context` and `recent_conversations` within a 250ms budget; `openmemore capture` backfills.
 - Captured clients get instructions without `record_exchange` and aren't offered the tool.
 - **Done when:** you ask Copilot (VS Code) something without any tool call recording it, then ask Claude Desktop "what did I ask Copilot?" and about the topic by name, and it answers from the captured transcript. An automated test scripts the same flow with a real server process and a synthetic transcript.
 
 ### M2 — Semantic search
-- `embed.py` with lazy model loading (don't slow server startup). Servers never download the model (too slow for a tool call): without it they use keyword search and leave new rows pending. `openmcp embed` downloads it (to `<data dir>/models`) and embeds everything pending; `setup` and `capture` run it too. `ping` reports whether semantic search is ready.
+- `embed.py` with lazy model loading (don't slow server startup). Servers never download the model (too slow for a tool call): without it they use keyword search and leave new rows pending. `openmemore embed` downloads it (to `<data dir>/models`) and embeds everything pending; `setup` and `capture` run it too. `ping` reports whether semantic search is ready.
 - `sqlite-vec` tables; embed on write: memories before their write transaction (the vector is needed for near-duplicate checks), chunks from `record_exchange` and transcript capture right after it, within 200ms, newest first.
 - Hybrid search with reciprocal rank fusion and recency boost; near-duplicate detection in `save_memories`.
 - **Done when:** a paraphrased query finds a memory that keyword search alone misses (test it), and a benchmark script on a synthetic 10k-memory / 100k-chunk store meets the Section 4.3 budget.
 
 ### M3 — Import
 - Job table, ChatGPT and Claude adapters, auto-detect, newest-first batching, resume.
-- `openmcp import`, `openmcp status` with a `rich` progress bar.
+- `openmemore import`, `openmemore status` with a `rich` progress bar.
 - Imported conversations are searchable and listable alongside captured ones (same tables, same tools).
 - Parsers: ChatGPT (follows `current_node` to the root, so abandoned branches are left out; skips system and tool messages, hidden scaffolding, tool calls, custom instructions, reasoning, and images) and Claude (text blocks; tool use and results skipped). Unknown shapes are skipped, and a conversation that fails to parse is reported, not fatal.
 - **Done when:** a synthetic export of 500 conversations imports, the newest 50 are searchable before the job finishes, and killing and re-running resumes without duplicates. Both are tested: after the first batch, a second connection finds the newest conversation and not the oldest; an import killed after 150 conversations resumes at 150 and ends with exactly 500 conversations and 2,000 messages. Still to do by hand: check the parsers against a real export of each provider (kept out of the repo), since the formats are undocumented.
 
 ### M3.5 — Any MCP client
-**Goal: OpenMCP works with every MCP client and every assistant provider, not a fixed list.**
+**Goal: OpenMemore works with every MCP client and every assistant provider, not a fixed list.**
 
 **Principle: the core needs no per-client knowledge.** A first version kept a registry of clients (config file locations, entry shapes, instruction locations, `clientInfo` names). Every fact in it belonged to another vendor and could change without notice; Cursor showed it, reporting `cursor-vscode` where its code suggested `Cursor`. So anything client-specific is optional, isolated so that when it breaks nothing else does, and delegated to interfaces the vendor maintains:
 - **Naming:** a client is named by what its application reports when the session starts (MCP `clientInfo`): `Some Editor 2` becomes `some-editor-2`, and `[clients.some-editor-2]` gives it scopes. No table of client names. (`--client` and config `app` pins first stayed as overrides, then were removed: nothing needed them.)
-- **Connecting:** one snippet, identical for every client: `openmcp serve`. Setup never edits another app's files. Where a vendor provides a way to add an MCP server, setup uses it, detected when it runs rather than assumed from a version table: VS Code's `code --add-mcp <json>`, Cursor's install link (`cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64>`, which opens Cursor's own review prompt), and `claude mcp add`. Everywhere else, Claude Desktop included, it prints the snippet; `--config <path>` merges it into a JSON file the user names. (Cursor's CLI also accepts `--add-mcp`, a leftover from VS Code that writes a settings file Cursor's agent doesn't read; checked, and not used.)
+- **Connecting:** one snippet, identical for every client: `openmemore serve`. Setup never edits another app's files. Where a vendor provides a way to add an MCP server, setup uses it, detected when it runs rather than assumed from a version table: VS Code's `code --add-mcp <json>`, Cursor's install link (`cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64>`, which opens Cursor's own review prompt), and `claude mcp add`. Everywhere else, Claude Desktop included, it prints the snippet; `--config <path>` merges it into a JSON file the user names. (Cursor's CLI also accepts `--add-mcp`, a leftover from VS Code that writes a settings file Cursor's agent doesn't read; checked, and not used.)
 - **Instructions:** the pointer instruction, on the clipboard, pasted wherever the client reads the user's own instructions. A variant for captured clients says not to call `record_exchange`.
 - **Capture:** transcript readers are the only client-specific code that's hard to avoid: there's no standard for transcripts. They're optional (`record_exchange` covers every client) and isolated (a reader that fails is reported and skipped). Each declares the application it reads, as that application reports itself, so a captured client isn't recorded twice: its `record_exchange` calls are skipped.
-- **`openmcp clients`** lists the applications that have actually connected (from the audit log), with the scopes each gets.
-- **History from any provider:** importers are a registry (`openmcp.ingest.registry`) with `register()`; OpenMCP's own conversation format is the third importer, a provider-neutral way in through a converter.
+- **`openmemore clients`** lists the applications that have actually connected (from the audit log), with the scopes each gets.
+- **History from any provider:** importers are a registry (`openmemore.ingest.registry`) with `register()`; OpenMemore's own conversation format is the third importer, a provider-neutral way in through a converter.
 - Web-only assistants (ChatGPT, claude.ai, Gemini on the web) can't start a local server: they're reachable through exports (M3) or remote access (Section 12). Documented, not hidden.
 - **Done when:** a client with no special support (a test client with an arbitrary `clientInfo` name) connects with the generic snippet, gets the scopes configured for its name, and records and recalls; the vendor install paths are each checked against a real install; a provider's importer can be added through the registry alone; existing setups keep working.
-- **Status (2026-10-18):** all built and tested. Real installs: Cursor 3.25.9 (connected from a config setup wrote, reported `cursor-vscode`, followed the pointer: `get_profile`, `record_exchange` reusing the conversation, topic search, lookups not recorded); VS Code 1.99.3's `--add-mcp` (writes its own settings and replaces an earlier entry, checked against a throwaway profile); Cursor's install link (used for real: Cursor's prompt wrote `openmcp serve` with no `--client` into its own `~/.cursor/mcp.json`; its server then reported `cursor-vscode`, was named `cursor` through the config pin, and answered from a `personal` memory); `claude mcp add` (its help output; the old registry-era run used the same command). Open: one-click bundles (e.g. for Claude Desktop); plug-in transcript readers in `[capture] sources`.
+- **Status (2026-10-18):** all built and tested. Real installs: Cursor 3.25.9 (connected from a config setup wrote, reported `cursor-vscode`, followed the pointer: `get_profile`, `record_exchange` reusing the conversation, topic search, lookups not recorded); VS Code 1.99.3's `--add-mcp` (writes its own settings and replaces an earlier entry, checked against a throwaway profile); Cursor's install link (used for real: Cursor's prompt wrote `openmemore serve` with no `--client` into its own `~/.cursor/mcp.json`; its server then reported `cursor-vscode`, was named `cursor` through the config pin, and answered from a `personal` memory); `claude mcp add` (its help output; the old registry-era run used the same command). Open: one-click bundles (e.g. for Claude Desktop); plug-in transcript readers in `[capture] sources`.
 
 ### M4 — Scopes and ownership
 - Scope checks exist from M1; M4 audits that every tool and CLI path (including imports) honors them, and documents scope setup.
-- `openmcp export` dumps all memories and conversations to JSON.
+- `openmemore export` dumps all memories and conversations to JSON.
 - README: install, client setup (the generic snippet, and the vendor installers setup uses), the safety model, honest limitations.
 - **Done when:** a client configured to read only `work` cannot see `personal` memories (tested), and the cross-client success test below passes.
 - **Status (2026-10-19):**
   - **Scope audit:** `tests/test_scopes.py` has one app write `personal` data through every write path (memories, recorded chats, vectors). A work-only client then tries every read and write path. It sees and changes none of it: search by keyword and by meaning, profile and its resource, recent conversations, update, forget, appending to a chat, writing into `personal`, near-duplicate reports. Errors for out-of-scope ids are identical to errors for ids that don't exist. Imports take an explicit scope (or an export's own), and capture uses the scope of the app it belongs to. The CLI acts as the owner and sees every scope.
-  - **`openmcp export`:** it writes the `openmcp.export` format (memories with their history, conversations, scopes, recall flags; the file is readable only by the user). `openmcp import` reads it back with scopes kept, unless `--scope` overrides. A round trip into an empty store restores everything current; importing into the same store adds nothing; imported memories go through the secret filter.
+  - **`openmemore export`:** it writes the `openmemore.export` format (memories with their history, conversations, scopes, recall flags; the file is readable only by the user). `openmemore import` reads it back with scopes kept, unless `--scope` overrides. A round trip into an empty store restores everything current; importing into the same store adds nothing; imported memories go through the secret filter.
   - **README:** rewritten.
   - **v1 success test: passed (2026-10-19)**, below. **M4 and v1 are done.**
 
@@ -609,7 +609,7 @@ Start a project in Claude Desktop and work on it over a few exchanges. The next 
 ### M5: Consolidation and review (after v1)
 Captured and imported chats hold most of what the assistants have learned, but only memories make up the profile. Consolidation turns chats into proposed memories and finds near-duplicates. A local review page lets the user approve, edit or reject each proposal before it becomes a memory, and browse and edit memories in general.
 
-**Where the model comes from:** the user's own assistants, through MCP. OpenMCP has no model of its own, no API key and no account, and that stays true: the client the user is talking to reads the chats and writes the proposals. Consequences:
+**Where the model comes from:** the user's own assistants, through MCP. OpenMemore has no model of its own, no API key and no account, and that stays true: the client the user is talking to reads the chats and writes the proposals. Consequences:
 - Consolidation runs when the user asks for it, not on a schedule.
 - The proposals are only as good as that client's model.
 - Nothing becomes a memory without the user's approval.
@@ -629,12 +629,12 @@ The proposal queue doesn't depend on what wrote a proposal, so a local-model or 
   - **Scope:** a proposal takes its source conversations' scope, which the caller must be able to read; sources in different scopes are an error. With no sources, it takes the caller's write scope.
   - **Updates:** an item can name the memory it updates (`replaces`), for example a project that has moved on. It must be a current memory the caller can read, in the same scope as the item's sources. On the review page, approving such a proposal makes it a new version of that memory, unless the user chooses to keep both.
   - **Checks:** the secret filter applies. A proposal is skipped when it duplicates an active memory, or a pending or rejected proposal, in its scope. A near-duplicate of an active memory is kept, and noted with that memory's id, so the review page can offer "replace it".
-- **Prompt `consolidate`:** asks the model to work through `consolidation_batch` until it's empty, or for a set number of batches, and then tells the user to run `openmcp review`. Saying "consolidate my chats" works too, because the tool descriptions say when to use the tools.
+- **Prompt `consolidate`:** asks the model to work through `consolidation_batch` until it's empty, or for a set number of batches, and then tells the user to run `openmemore review`. Saying "consolidate my chats" works too, because the tool descriptions say when to use the tools.
 
-**Near-duplicates, without a model:** on `openmcp review`, and from a button on the page, active memories of the same kind and scope with similarity at or above the near-duplicate threshold (0.92, Section 7.1) are grouped. Each group becomes a `merge` proposal whose text is the newest memory's, which the user can edit. Approving it adds the merged memory and marks every memory in the group as superseded by it, so history and `forget` cover the whole group.
+**Near-duplicates, without a model:** on `openmemore review`, and from a button on the page, active memories of the same kind and scope with similarity at or above the near-duplicate threshold (0.92, Section 7.1) are grouped. Each group becomes a `merge` proposal whose text is the newest memory's, which the user can edit. Approving it adds the merged memory and marks every memory in the group as superseded by it, so history and `forget` cover the whole group.
 
-**`openmcp review`:**
-- **Server:** a local web page on `127.0.0.1` at a random port, opened in the browser. The URL carries a random token made for that run, which the page exchanges for an `HttpOnly`, `SameSite=Strict` cookie. Requests with another `Host` header are refused (DNS rebinding). Requests that change something must carry an `X-OpenMCP` header, which a page on another site can't send without a CORS preflight that this server never grants. The page is plain HTML and JavaScript inside the package: no build step and no CDN, so it works offline. Stored text is always shown as text, never as HTML.
+**`openmemore review`:**
+- **Server:** a local web page on `127.0.0.1` at a random port, opened in the browser. The URL carries a random token made for that run, which the page exchanges for an `HttpOnly`, `SameSite=Strict` cookie. Requests with another `Host` header are refused (DNS rebinding). Requests that change something must carry an `X-OpenMemore` header, which a page on another site can't send without a CORS preflight that this server never grants. The page is plain HTML and JavaScript inside the package: no build step and no CDN, so it works offline. Stored text is always shown as text, never as HTML.
 - **Proposals:** each one shows its source conversations, and the similar memory or the memories it would merge. Actions: approve, edit and approve, approve as a replacement for the similar memory, reject, and approve or reject all.
 - **Memories:** search and filter (scope, kind, project), edit (a new version, as `update_memory`), delete (`forget`), and history.
 - **Actions** are taken as the owner, like the CLI, and logged in the audit log as client `review`. An approved memory keeps the proposing client as its source, and records the proposal and source conversations in its metadata.
@@ -663,7 +663,7 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 |---|---|---|
 | M6 | Background service | — |
 | M7 | Automatic consolidation | M6 |
-| M7.5 | OpenMCP as a library | — (experimental until M9's rename) |
+| M7.5 | OpenMemore as a library | — (experimental until M9) |
 | M7.6 | Evaluation | — |
 | M7.7 | Truth over time | M7.6 (to measure each change) |
 | M8 | Use it for real | M6, M7 |
@@ -673,16 +673,16 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
 | M11 | Transcript standard | M9, and evidence from M6 and M8 |
 
 ### M6: Background service
-- `openmcp daemon`, installed as a per-user service (launchd on macOS, systemd user units on Linux, a scheduled task or service on Windows). It shares the store with the `serve` processes, like any other connection (WAL).
+- `openmemore daemon`, installed as a per-user service (launchd on macOS, systemd user units on Linux, a scheduled task or service on Windows). It shares the store with the `serve` processes, like any other connection (WAL).
 - **Live capture:** transcripts are captured as they change (file watching), not only when a client next reads. Client hooks are used where a client has them.
 - **An OpenTelemetry endpoint** (OTLP/HTTP on 127.0.0.1) for any app or library that records conversations following OpenTelemetry's GenAI semantic conventions. It has no app-specific code; the app is its `service.name`, scoped like any client.
-- **Permission first:** nothing runs in the background until the user allows it. No OS asks for a per-user background task (macOS only reports it afterwards, under Login Items), so OpenMCP asks itself: a native Allow / Don't Allow dialog when there's a desktop session (osascript, a PowerShell message box, zenity or kdialog), else the terminal. The default is no, `--yes` is for scripts, and the decision is audited.
-- `openmcp setup` offers to install the service when there's something to capture, and `openmcp status` reports whether it is running.
+- **Permission first:** nothing runs in the background until the user allows it. No OS asks for a per-user background task (macOS only reports it afterwards, under Login Items), so OpenMemore asks itself: a native Allow / Don't Allow dialog when there's a desktop session (osascript, a PowerShell message box, zenity or kdialog), else the terminal. The default is no, `--yes` is for scripts, and the decision is audited.
+- `openmemore setup` offers to install the service when there's something to capture, and `openmemore status` reports whether it is running.
 - **Capture by folder** (added after M6, low-key: config only, with one dimmed line in `setup`):
   - `[capture] include_folders` and `exclude_folders` limit transcript capture to some projects, for apps whose transcripts record a folder: Claude Code's working directory, and VS Code's workspace. Subfolders count, exclusions win, and with `include_folders` set, chats with no folder aren't captured.
   - Each transcript's folder is remembered (migration 014), so a skipped one isn't read again while it's excluded, and is read from the start once it's captured.
   - Excluding a folder later stops capturing its new turns; what was already stored stays until the user deletes it.
-- **Done when:** an app instrumented with OpenTelemetry's standard GenAI instrumentation is captured live, with no app-specific code and no client reading first, and the service survives a reboot on macOS, Linux and Windows (CI covers what it can). (First written as "a Claude Code chat captured through OpenTelemetry". Claude Code uses its own event names, not the standard's, so that would have needed an app-specific mapping, which OpenMCP doesn't keep. Its chats come in through the transcript reader instead.)
+- **Done when:** an app instrumented with OpenTelemetry's standard GenAI instrumentation is captured live, with no app-specific code and no client reading first, and the service survives a reboot on macOS, Linux and Windows (CI covers what it can). (First written as "a Claude Code chat captured through OpenTelemetry". Claude Code uses its own event names, not the standard's, so that would have needed an app-specific mapping, which OpenMemore doesn't keep. Its chats come in through the transcript reader instead.)
 - **Decisions while building:**
   - **Polling:** transcripts are checked every few seconds (`[daemon] interval`) rather than watched with a file-system library. Unchanged files cost one stat each, and there's no new dependency.
   - **OpenTelemetry follows the standard only** (open-telemetry/semantic-conventions-genai, status Development):
@@ -690,10 +690,10 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
     - **Conversations:** a conversation is `gen_ai.conversation.id`, or, when the library has none, its opening message. Messages are identified by role and text, so the history re-sent with every call changes nothing.
     - **Recaps:** a standard `tool_call` part naming a recall tool marks the turn as a recap.
     - **What's kept:** only the text of user and assistant messages; system instructions, tool output, reasoning and every other attribute are dropped.
-    - **History:** the first version of M6 mapped Claude Code's own event names instead (migration 012). The user chose not to keep app-specific code, so migration 013 removes that, and `openmcp daemon telemetry` prints only the standard OTLP settings.
+    - **History:** the first version of M6 mapped Claude Code's own event names instead (migration 012). The user chose not to keep app-specific code, so migration 013 removes that, and `openmemore daemon telemetry` prints only the standard OTLP settings.
   - **Encodings:** OTLP/HTTP logs and traces, in JSON or protobuf, optionally gzipped. Python's official exporter only sends protobuf, so it's read directly from the wire format for the few OTLP messages used, with no added package. Tests check this against the official `opentelemetry-proto` encoder, a test-only dependency. Metrics are accepted and dropped, so a shared endpoint doesn't make exporters complain.
-  - **Receiver checks:** it needs the config's token in `x-openmcp-token`, its own `Host`, and `application/json` or `application/x-protobuf`. A web page can send neither without a CORS preflight, which the receiver never grants.
-  - **Never edits another app's files:** `openmcp daemon telemetry` prints the settings rather than writing them.
+  - **Receiver checks:** it needs the config's token in `x-openmemore-token`, its own `Host`, and `application/json` or `application/x-protobuf`. A web page can send neither without a CORS preflight, which the receiver never grants.
+  - **Never edits another app's files:** `openmemore daemon telemetry` prints the settings rather than writing them.
 - **Status (2026-10-19):** built and tested (`tests/test_otel.py`, `tests/test_daemon.py`, including the daemon run as a real process). Verified on macOS:
   - **OpenTelemetry's official Python SDK and OTLP exporter**, configured only through the standard environment variables the command prints (protobuf, gzip, token header), sent a two-call conversation. It was stored as one conversation, filed under the app's `service.name`.
   - **OpenTelemetry's released OpenAI instrumentation** (`opentelemetry-instrumentation-openai-v2` 2.3, earlier conventions) wrapped an ordinary OpenAI app, against a local stand-in API. Its message events became one conversation, identified by its opening message, with the system prompt left out. The newest release, 2.4b0, implements today's conventions but didn't import with its dependencies at the time, so it's covered by tests only.
@@ -702,34 +702,34 @@ M0 to M5 are done: v1 is M0 to M4, and M5 (consolidation and review) is verified
   - **Not yet tested:** an actual reboot, and the Linux and Windows services on real machines (their service definitions are tested).
 
 ### M7: Automatic consolidation
-- **Off by default, and nothing to install.** Without setup, consolidation happens only when the user asks an assistant to (M5). OpenMCP ships no model.
-- **A model OpenMCP calls itself, brought by the user,** through the open standard for LLM APIs rather than any provider's SDK:
+- **Off by default, and nothing to install.** Without setup, consolidation happens only when the user asks an assistant to (M5). OpenMemore ships no model.
+- **A model OpenMemore calls itself, brought by the user,** through the open standard for LLM APIs rather than any provider's SDK:
   - **Open Responses** (openresponses.org, spec 2026-04-24): `POST {endpoint}/responses` with `model`, `instructions` and `input`; the text is in `output` items of type `message`, as `output_text` parts. OpenAI, Ollama, LM Studio, vLLM, OpenRouter, Hugging Face and others implement it.
   - **Chat Completions** (`api = "chat-completions"`) for servers that don't speak it yet, such as some providers' compatibility endpoints.
   - The client is `httpx`, already a dependency of the MCP SDK and now declared. Structured output isn't part of Open Responses compliance, so the model is asked for JSON and the text is parsed leniently.
 - **Local or remote:**
   - A local endpoint (loopback) is called with proxy settings ignored and without following redirects, so nothing leaves the machine.
   - Any other host needs the user's permission first, from the same dialog as M6, naming the host. Its `allowed_host` is kept in config, and changing the endpoint asks again.
-  - API keys go in `~/.openmcp/consolidation.key` (0600), because the OS-run daemon doesn't get the user's environment; `OPENMCP_MODEL_API_KEY` overrides it for manual runs.
+  - API keys go in `~/.openmemore/consolidation.key` (0600), because the OS-run daemon doesn't get the user's environment; `OPENMEMORE_MODEL_API_KEY` overrides it for manual runs.
 - **The work,** the same pipeline as M5:
   - One model call per conversation: its new messages, wrapped as data, plus up to 30 related memories in its scope (nearest by meaning, or newest).
   - Proposals go through `propose_memories`, so scopes, the secret filter, duplicate and rejection checks, and review are unchanged; they're credited to `model:<name>`.
   - **Drift detection:** a memory the conversation contradicts is proposed as its correction with `replaces`. A `replaces` naming a memory the model wasn't shown is cleared.
   - A model error stops the run, and the conversation stays due.
-- **Scheduled by M6:** daily at `[consolidation] schedule` (03:00), in its own thread. A run missed while the machine slept happens when the daemon next looks. `openmcp consolidate run` runs it now.
-  - Every run is recorded in `consolidation_runs` (migration 015) and shown by `openmcp status` and `openmcp consolidate status`.
-- **CLI:** `openmcp consolidate setup --endpoint URL --model NAME [--api chat-completions] [--key]` sends a one-line test request before turning it on. `openmcp consolidate off [--forget]` turns it off, and `--forget` also deletes the key and the allowed host.
+- **Scheduled by M6:** daily at `[consolidation] schedule` (03:00), in its own thread. A run missed while the machine slept happens when the daemon next looks. `openmemore consolidate run` runs it now.
+  - Every run is recorded in `consolidation_runs` (migration 015) and shown by `openmemore status` and `openmemore consolidate status`.
+- **CLI:** `openmemore consolidate setup --endpoint URL --model NAME [--api chat-completions] [--key]` sends a one-line test request before turning it on. `openmemore consolidate off [--forget]` turns it off, and `--forget` also deletes the key and the allowed host.
 - **Done when:** proposals appear overnight without asking an assistant, they're as reviewable as M5's, and a local endpoint sends nothing off the machine (tested). This was first written as "the local model" with Ollama in mind; the user didn't want a model install, so any local endpoint counts.
 - **Status (2026-10-19):** built and tested (`tests/test_consolidate_auto.py`).
   - Both protocols are tested against recorded requests; the run, drift, errors, the schedule and the CLI are covered.
   - The local-only check runs a real local stand-in server, with every outgoing connection recorded and a proxy configured in the environment. Only 127.0.0.1 is contacted, and with the guard removed the test fails.
   - **Not yet run:** against a real model, which waits for the user to pick one.
 
-### M7.5: OpenMCP as a library
-Agents and programs the user writes get the same shared memory as their assistants, in-process, with no server: `from openmcp import Memory`. It's the M5/M6 store and rules (scopes, secret filter, wrapping, embeddings, audit), not a second implementation: the library calls the same tool functions the MCP server does.
+### M7.5: OpenMemore as a library
+Agents and programs the user writes get the same shared memory as their assistants, in-process, with no server: `from openmemore import Memory`. It's the M5/M6 store and rules (scopes, secret filter, wrapping, embeddings, audit), not a second implementation: the library calls the same tool functions the MCP server does.
 
 ```python
-from openmcp import Memory
+from openmemore import Memory
 
 memory = Memory("trip-planner")      # a client name, like an app's MCP clientInfo: [clients.trip-planner] scopes it
 
@@ -744,29 +744,29 @@ memory.profile(); memory.recent(); memory.record(question, answer); memory.updat
 ```
 
 - **Decorators:** `@memory.remember` and `@memory.recall` work on sync and `async` functions; the store work runs in a thread for async ones.
-  - **Errors:** a store failure is logged (`openmcp` logger) and never breaks the decorated function. Direct calls raise `OpenMCPError`.
+  - **Errors:** a store failure is logged (`openmemore` logger) and never breaks the decorated function. Direct calls raise `OpenMemoreError`.
 - **What `remember` records:** the question is the named argument (`question=`), or the first string argument, or all arguments. The answer is the return value as text.
   - **Conversations:** calls are grouped into one conversation per decorated function, per `Memory`, per process. `conversation=` names a group, and `with memory.conversation("trip-42"):` groups across functions.
 - **What `recall` passes in:** `memory.context(...)` goes into the argument named by `into=` (default `context`). The function must accept it; that's checked when it's decorated.
   - `profile=True` adds the profile, and `limit=` and `kinds=` narrow the search.
 - **Text and wrapping:** results carry `wrapped` text (Section 8), for putting in a prompt, and plain `text`, for program logic.
 - **Home:** `Memory(..., home=path)` overrides the data directory, which is otherwise the same as the CLI's, so the agent shares the store with the user's apps.
-- **Import cost:** `import openmcp` stays cheap. `Memory` loads lazily, and the embedding model only when something needs a vector, as in the server.
-- **Experimental until M9.** The import name changes with the final name. A lighter install without the embedding runtime is an M9 packaging question.
+- **Import cost:** `import openmemore` stays cheap. `Memory` loads lazily, and the embedding model only when something needs a vector, as in the server.
+- **Experimental until M9.** A lighter install without the embedding runtime is an M9 packaging question.
 - **Done when:**
   - a decorated function's exchanges are found by an assistant through MCP;
   - the function receives what an assistant saved;
   - scopes apply by client name;
   - sync and async both work;
   - a store failure doesn't break the function (tested).
-- **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmcp` loading nothing else. Documented in [docs/library.md](docs/library.md).
+- **Status (2026-10-19):** built and tested (`tests/test_library.py`): every "done when" item, plus importing `openmemore` loading nothing else. Documented in [docs/library.md](docs/library.md).
 
 ### M7.6: Evaluation
 Measured retrieval quality, so changes to recall are judged by numbers rather than by feel, on public long-term memory benchmarks:
 - **LongMemEval** (MIT; `longmemeval_s_cleaned`: 500 questions, about 50 sessions of history each, with the sessions and turns holding each answer marked).
 - **LoCoMo** (10 long conversations, 1,986 questions, with evidence turns marked).
 
-The datasets are downloaded to `~/.cache/openmcp-bench` on first use and never committed, since LoCoMo's terms are non-commercial.
+The datasets are downloaded to `~/.cache/openmemore-bench` on first use and never committed, since LoCoMo's terms are non-commercial.
 
 - **Retrieval metrics, no model needed:** each question's history is stored in a fresh store, the way capture stores conversations, then searched with `search_context`, with "now" set to the question's date. Metrics at k = 5 and 10:
   - session recall (share of the answer's sessions found);
@@ -787,7 +787,7 @@ The datasets are downloaded to `~/.cache/openmcp-bench` on first use and never c
 
 ### M7.7: Truth over time
 Ported from LongMemory's design (Apache-2.0), reimplemented rather than translated, and measured with M7.6 as each part lands:
-1. **Two timelines:** memories get `valid_from` / `valid_to` (when it was true) beside recorded time and supersession time (when OpenMCP learned it, and when that changed). A correction closes the old memory's validity. Existing history fills them in.
+1. **Two timelines:** memories get `valid_from` / `valid_to` (when it was true) beside recorded time and supersession time (when OpenMemore learned it, and when that changed). A correction closes the old memory's validity. Existing history fills them in.
 2. **Relations:** one table of `supersedes`, `contradicts`, `supports` and `derived_from` links, applied in one transaction, replacing the ad hoc `superseded_by` and metadata fields.
 3. **Recall modes and labels:** `search_context(mode="current" | "history")`. Results are labelled current, superseded (pointing to its correction), contradicted, or recap. Current answers never include a superseded or unresolved-contradicted memory.
 4. **Contradictions in review:** a model or the user can flag that two memories disagree. Unresolved ones are labelled and kept out of current answers until resolved on the review page.
@@ -795,7 +795,7 @@ Ported from LongMemory's design (Apache-2.0), reimplemented rather than translat
 6. **Explanations and budgets:** `explain` returns why each result was chosen (each signal's contribution), and `budget_tokens` fills the context up to a token limit.
 7. **Activation:** recency and frequency of use (ACT-R style) replace the fixed recency half-life, tuned with M7.6.
 
-What OpenMCP doesn't take: automatic supersession from regular-expression claim extraction. In LongMemory every topic-less preference shares one topic, so a new preference silently supersedes an unrelated one. What replaces what stays a reviewed decision. Out of scope too: project, skill, wiki and code-graph memory, team access control, and connectors.
+What OpenMemore doesn't take: automatic supersession from regular-expression claim extraction. In LongMemory every topic-less preference shares one topic, so a new preference silently supersedes an unrelated one. What replaces what stays a reviewed decision. Out of scope too: project, skill, wiki and code-graph memory, team access control, and connectors.
 - **Done when:** every part is tested, history questions ("what did I prefer before?") are answered while current answers stay current, and M7.6's numbers for knowledge-update and temporal questions don't regress (and improve where the change targets them).
 - **Status (2026-10-19): built and tested,** parts 1–7 (migrations 016–020).
   - **Measured after M7.7** (evidence recall at 5):
@@ -806,7 +806,7 @@ What OpenMCP doesn't take: automatic supersession from regular-expression claim 
 
 ### M8: Use it for real
 - **A week of daily use** across the user's apps, with consolidation running.
-- **`openmcp report`:** a usage report from the audit log:
+- **`openmemore report`:** a usage report from the audit log:
   - what was recalled, and by which client;
   - searches that found nothing;
   - which clients recorded, and which were captured;
@@ -822,7 +822,7 @@ Every public surface documented in `docs/`, written for someone who has never se
   - every CLI command and option;
   - every `config.toml` key;
   - every MCP tool, prompt and resource, with arguments and results;
-  - the OpenMCP export format, as JSON Schema;
+  - the OpenMemore export format, as JSON Schema;
   - what the OpenTelemetry endpoint accepts (GenAI conventions, encodings, the token);
   - the consolidation endpoint contract;
   - the library API (M7.5).
@@ -831,11 +831,11 @@ Every public surface documented in `docs/`, written for someone who has never se
 - **Done when:** a reader can install, connect, configure and troubleshoot from `docs/` alone, and the coverage tests pass.
 
 ### M9: Public release
-- **Pre-flight (Section 13):** employer approval, a final name, a license.
+- **Pre-flight (Section 13):** employer approval, a final name, a license (all done 2026-10-21).
 - **New repository:** publish only the clean `main`, because GitHub keeps old PR refs.
 - **A package on PyPI** (`uv tool install <name>`).
 - **A README** for people who've never seen the project, linking the documentation (M8.5).
-- **The OpenMCP format** published as JSON Schema.
+- **The OpenMemore format** published as JSON Schema.
 - **Done when:** someone else, on a clean machine, installs it and connects two apps in under five minutes from the README alone.
 
 ### M10: Web and mobile clients
@@ -844,13 +844,13 @@ Every public surface documented in `docs/`, written for someone who has never se
 - **Done when:** claude.ai on a phone reads a memory saved from Cursor, and a security review of the tunnel and authorization finds nothing blocking.
 
 ### M11: Transcript standard
-A standard for conversation transcripts, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMCP's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
+A standard for conversation transcripts, so no client needs a transcript reader: what MCP did for tools, for conversations. The schema is the easy part (OpenMemore's conversation format, published as JSON Schema, plus rules for chats that grow: events appended as they happen, stable message ids for in-place updates, tool use marked); adoption is the hard part. Routes, most to least promising:
   1. **An MCP extension**: a server declares it wants conversation turns, and a client that supports it sends each user and assistant turn to the servers the user approved. It replaces both `record_exchange` (model-dependent) and transcript readers (undocumented formats), and the client owns consent. Needs proposing through MCP's own process.
   2. **A published file schema** clients write to disk: simpler, but needs every vendor to adopt it without a protocol pulling them.
-  3. **OpenTelemetry's GenAI semantic conventions**, a standard that already exists: some clients export telemetry, and OpenMCP could receive it like any backend (an OTLP receiver). Depends on what each client actually sends (see Section 14).
+  3. **OpenTelemetry's GenAI semantic conventions**, a standard that already exists: some clients export telemetry, and OpenMemore could receive it like any backend (an OTLP receiver). Depends on what each client actually sends (see Section 14).
 
   Meanwhile transcript readers stay optional adapters into the schema, deleted as clients produce it natively.
-- **Done when:** the MCP extension is written up and proposed through MCP's process, with OpenMCP as the reference server and one open-source client implementing it.
+- **Done when:** the MCP extension is written up and proposed through MCP's process, with OpenMemore as the reference server and one open-source client implementing it.
 
 ---
 
@@ -867,15 +867,18 @@ Built when there's a reason to, not on the milestone map:
 
 ## 13. Pre-flight before going public
 
-- [ ] Get employer approval for publishing open source work in this area. Keep the repo private until then.
-- [ ] Pick a final name and check package-registry and GitHub availability.
+- [x] Get employer approval for publishing open source work in this area. Keep the repo private until then. **Approved (2026-10-21).**
+- [x] Pick a final name and check package-registry and GitHub availability. **OpenMemore (2026-10-21).**
+  - `openmemore` is free on PyPI, npm and crates.io; no GitHub user, org or repository has the name.
+  - Rejected: `openmcp` (taken on PyPI); `openmemory` (Mem0's product); `memor` (an active LLM-memory project on PyPI); `memore` (dormant npm package, GitHub username taken).
+  - The code was called OpenMCP until then.
 - [ ] Confirm no real personal data exists anywhere in the git history.
   - **Done (2026-10-19), for `main`:**
     - **Scan:** all commits, file versions, commit messages and PR texts. One real project name from a live test was found in a test, a docstring, a commit message and a PR description.
     - **Rewrite:** `git filter-repo` replaced that name with synthetic text, and moved every commit's author email to the GitHub noreply address. The rewritten `main` was force-pushed; the final tree was unchanged and the tests passed.
     - **Cleanup:** the merged feature branches were deleted, the PR description was edited, and a rescan found nothing.
   - **Still on GitHub:** each PR's original commits under `refs/pull/N/head`. Git can't delete these, so PR pages still show the old commits and authors. Before going public, either publish as a new repository with only the clean `main`, or ask GitHub Support to purge them. A new repository is simpler, and fits the rename. Rescan whatever gets published.
-- [ ] Choose a license (MIT or Apache-2.0 are the usual picks).
+- [x] Choose a license. **Apache-2.0 (2026-10-21):** permissive, with a patent grant.
 
 ## 14. Open questions
 
@@ -883,12 +886,12 @@ Built when there's a reason to, not on the milestone map:
 - ~~What's the right near-duplicate threshold?~~ 0.92 with bge-small: rewordings score 0.97–0.995, different facts 0.73–0.84 ("allergic to peanuts" vs "shellfish": 0.84), but true paraphrases sit right on the line ("Allergic to peanuts." vs "Has a peanut allergy.": 0.920). Revisit on real data.
 - Search similarity cutoffs (0.55 floor, 0.08 window) come from a 20-question synthetic set: 18/20 paraphrases found, ~1 unrelated item per query. bge-small misses some paraphrases entirely: "how was I planning to deal with the fitness app throttling me" ranks the Strava 429 memory 11th (similarity 0.48). A test records this as an expected failure, so a better model shows up as a test to update.
 - ~~Should imported chats ever be readable by default, or opt-in per scope?~~ They go to the default write scope, or `--scope`; which clients can read them follows that scope's config like everything else.
-- ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmcp setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
+- ~~How reliably do models call `record_exchange` unprompted?~~ Measured in the M1 manual test (2026-10-17): Claude Desktop and Copilot made **no** recording calls from tool descriptions and server instructions alone. With a standing instruction, Claude Desktop recorded every technical turn but skipped a casual one. Hence standing instructions via `openmemore setup` (M1) and transcript capture (M1.5). Open: how well standing instructions hold up over long chats, and in clients that show no transcript on disk (Claude Desktop, claude.ai).
 - Recaps recorded through `record_exchange` despite the instructions aren't marked (Section 7.2). Telling a recap from new content by what it says (does the answer mostly restate what the lookup returned?) may work where timing didn't. The verbatim question "what was the pet thing I asked Copilot about?" scores 0.543 against the original chat, just under the similarity floor, so only a topic search ("cat names": 0.81) finds it by meaning.
-- Do clients' OpenTelemetry exports carry whole conversations, and can OpenMCP use them instead of transcript readers? **Experiment (2026-10-18)**, a local OTLP/HTTP receiver:
+- Do clients' OpenTelemetry exports carry whole conversations, and can OpenMemore use them instead of transcript readers? **Experiment (2026-10-18)**, a local OTLP/HTTP receiver:
   - **Claude Code 2.1** (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOG_USER_PROMPTS=1`) sends `user_prompt` (the prompt text) and `assistant_response` (the answer text) log events, linked by `prompt.id`, with `message.uuid` and `session.id`. That's enough to rebuild conversations live. The transport is standard (OTLP), but the event names are Claude Code's own, not OpenTelemetry's GenAI conventions. M6 briefly mapped them, then dropped the mapping so that OpenTelemetry capture has no app-specific code; Claude Code's chats come in through its transcript reader.
   - **Cursor 3.25** uses GenAI attributes only for request details (model, tokens), with no message text and no user-configurable export.
   - **Copilot Chat 0.26.7**: inconclusive (it bundles the OpenTelemetry libraries, apparently for internal telemetry).
   - Trade-off for Claude Code: a receiver must be running whenever Claude Code runs, and can't backfill, where the transcript reader needs no setup and backfills. **Resolved in M6:** the daemon's OpenTelemetry endpoint reads only the standard GenAI conventions, so Claude Code's chats stay with its transcript reader until it emits those.
-- Should OpenMCP propose an MCP extension for clients to share conversation turns with servers the user approves (Section 12)? Its usage would make the case.
+- Should OpenMemore propose an MCP extension for clients to share conversation turns with servers the user approves (Section 12)? Its usage would make the case.
 - Claude Code's `--resume` and VS Code's chat export may copy history into a new session file, which is captured as a separate conversation. Dedupe across sessions if it turns out to matter.

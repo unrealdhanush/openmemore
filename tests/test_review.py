@@ -1,5 +1,5 @@
 """SPEC.md M5: approving and rejecting proposals, merging near-duplicates, and the
-`openmcp review` page, which only answers its own token, on its own host."""
+`openmemore review` page, which only answers its own token, on its own host."""
 
 from contextlib import closing
 
@@ -7,13 +7,13 @@ import pytest
 from starlette.testclient import TestClient
 
 from conftest import caller, connect
-from openmcp import db, relations, repo
-from openmcp.cli import initialize
-from openmcp.models import MemoryInput, ProposalInput
-from openmcp.proposals import Approval, ProposalError, approve, find_duplicates, reject
-from openmcp.review import CHANGE_HEADER, build_app
-from openmcp.tools.consolidation import propose_memories
-from openmcp.tools.memories import forget, save_memories, update_memory
+from openmemore import db, relations, repo
+from openmemore.cli import initialize
+from openmemore.models import MemoryInput, ProposalInput
+from openmemore.proposals import Approval, ProposalError, approve, find_duplicates, reject
+from openmemore.review import CHANGE_HEADER, build_app
+from openmemore.tools.consolidation import propose_memories
+from openmemore.tools.memories import forget, save_memories, update_memory
 
 ME = caller("claude-ai", read=["personal", "work"], write="personal")
 
@@ -85,7 +85,7 @@ def near_duplicates(conn, fake_embedder):
 def test_near_duplicates_become_one_merge_proposal(conn, near_duplicates):
     assert find_duplicates(conn) == 1
     [merge] = repo.list_proposals(conn)
-    assert (merge.action, merge.memory_ids, merge.source_client) == ("merge", near_duplicates, "openmcp")
+    assert (merge.action, merge.memory_ids, merge.source_client) == ("merge", near_duplicates, "openmemore")
     assert merge.content == "Uses dark mode everywhere."  # the newest one's text
     assert find_duplicates(conn) == 0  # already waiting for review
 
@@ -130,7 +130,7 @@ async def test_an_approved_proposal_reaches_other_clients(home):
         [proposal_id] = result.structured_content["proposed"]
     async with connect(home, "cursor-vscode") as client:
         assert (await client.call_tool("get_profile", {})).structured_content["preferences"] == []
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         approve(conn, proposal_id)
     async with connect(home, "cursor-vscode") as client:
         [pref] = (await client.call_tool("get_profile", {})).structured_content["preferences"]
@@ -163,7 +163,7 @@ def test_the_page_needs_its_token(page):
     assert page.get("/?token=wrong").status_code == 403
     signed_in(page)
     response = page.get("/")
-    assert response.status_code == 200 and "OpenMCP review" in response.text
+    assert response.status_code == 200 and "OpenMemore review" in response.text
     assert "default-src 'none'" in response.headers["content-security-policy"]
 
 
@@ -175,7 +175,7 @@ def test_the_page_refuses_other_hosts(page):
 
 def test_changes_need_the_header(page, home):
     signed_in(page)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         [proposal_id] = propose(conn, "Likes jazz.")
     assert page.post(f"/api/proposals/{proposal_id}/approve", json={}).status_code == 403
     response = page.post(f"/api/proposals/{proposal_id}/approve", json={}, headers=CHANGE)
@@ -186,9 +186,9 @@ def test_changes_need_the_header(page, home):
 
 def test_reviewing_through_the_page(page, home):
     signed_in(page)
-    with closing(db.connect(home / "openmcp.db")) as conn:
-        from openmcp.ingest import store_conversation
-        from openmcp.models import ParsedConversation, ParsedMessage
+    with closing(db.connect(home / "openmemore.db")) as conn:
+        from openmemore.ingest import store_conversation
+        from openmemore.models import ParsedConversation, ParsedMessage
 
         conversation_id, _ = store_conversation(conn, ParsedConversation(
             provider="cursor-vscode", external_id="c1", title="Units", metadata={},
@@ -217,7 +217,7 @@ def test_reviewing_through_the_page(page, home):
     assert page.post("/api/memories/999", json={"content": "x"}, headers=CHANGE).status_code == 404
     assert page.post("/api/memories/1", json={"content": ""}, headers=CHANGE).status_code == 400
 
-    audit = list(db.connect(home / "openmcp.db").execute("SELECT tool, summary FROM audit_log WHERE client = 'review'"))
+    audit = list(db.connect(home / "openmemore.db").execute("SELECT tool, summary FROM audit_log WHERE client = 'review'"))
     assert [tool for tool, _ in audit] == ["approve", "reject all", "update_memory", "forget", "update_memory"]
     assert audit[-1][1].startswith("error")  # failed attempts are logged too
 
@@ -225,7 +225,7 @@ def test_reviewing_through_the_page(page, home):
 def test_find_duplicates_from_the_page(page, home, fake_embedder):
     signed_in(page)
     fake_embedder.vectors = {"Prefers dark mode.": [1.0, 0.0], "Likes a dark theme.": [0.99, 0.05]}
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         save_memories(conn, ME, [MemoryInput(kind="preference", content=c) for c in fake_embedder.vectors])
     assert page.post("/api/duplicates", headers=CHANGE).json() == {"proposed": 1}
     [merge] = page.get("/api/proposals").json()
@@ -260,7 +260,7 @@ def test_the_page_shows_what_a_proposal_updates(page, home):
     from conftest import insert
 
     signed_in(page)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         old = insert(conn, "Choosing between two ideas.", kind="project")
         propose_memories(conn, ME, [ProposalInput(kind="project", content="Picked idea 2.", replaces=old)], [])
     [view] = page.get("/api/proposals").json()

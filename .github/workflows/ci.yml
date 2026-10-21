@@ -19,11 +19,11 @@ jobs:
       # Shared runners start processes far slower than a laptop (antivirus scanning on
       # Windows), so CI only catches gross startup regressions; the 500ms budget in
       # SPEC.md Section 4.3 is checked on real machines.
-      OPENMCP_STARTUP_BUDGET_MS: "3000"
+      OPENMEMORE_STARTUP_BUDGET_MS: "3000"
       # The real embedding model (~70MB) for tests marked real_model: cached between runs,
       # and a failed download fails the build instead of skipping those tests.
-      OPENMCP_TEST_MODEL_DIR: ${{ github.workspace }}/.model-cache
-      OPENMCP_REQUIRE_MODEL: "1"
+      OPENMEMORE_TEST_MODEL_DIR: ${{ github.workspace }}/.model-cache
+      OPENMEMORE_REQUIRE_MODEL: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

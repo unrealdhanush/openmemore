@@ -4,10 +4,10 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import caller
-from openmcp import repo
-from openmcp.models import RECENT_MESSAGES_PER_CONVERSATION, CodeBlock
-from openmcp.tools.conversations import _add_message, chunk_text, recent_conversations, record_exchange
-from openmcp.tools.search import search_context
+from openmemore import repo
+from openmemore.models import RECENT_MESSAGES_PER_CONVERSATION, CodeBlock
+from openmemore.tools.conversations import _add_message, chunk_text, recent_conversations, record_exchange
+from openmemore.tools.search import search_context
 
 DESKTOP = caller("claude-desktop", read=["personal", "work"], write="personal")
 GEMINI = caller("gemini-cli", read=["personal"], write="personal")
@@ -169,7 +169,7 @@ def test_memories_and_chats_are_interleaved_by_rank(conn):
     assert hits[0].type == "memory" and hits[0].id == mem
     assert hits[1].type == "chat"
     # Both rank 1 in their own list; only the memory gets activation's small tie-breaker.
-    from openmcp.tools.search import MEMORY_ACTIVATION_WEIGHT
+    from openmemore.tools.search import MEMORY_ACTIVATION_WEIGHT
     assert 0 <= hits[0].score - hits[1].score <= MEMORY_ACTIVATION_WEIGHT + 1e-9
 
 
