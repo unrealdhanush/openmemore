@@ -33,6 +33,7 @@ openmemore wipe --all
 - **Whole items only:** a conversation goes when its last activity is before the date, and a memory goes with all its versions when its current version is. A conversation that's still active is kept whole.
 - **What else goes:** proposals, audit log entries, and finished import and consolidation records from that time. Config, the embedding model and the daemon are untouched.
 - **It asks first:** it shows what it's about to delete, and asks you to type `wipe`. `--yes` skips this.
+- **Then it asks for your password,** the way `sudo` does, through `sudo` itself. It always asks, even if you used `sudo` a moment ago, and leaves no cached `sudo` access behind. `--yes` doesn't skip this. Only accounts that can use `sudo` can wipe: on macOS, administrator accounts. Windows has no `sudo`, so only the typed `wipe` is asked there.
 - **It keeps a copy:** before deleting, it saves a copy of the database next to it, readable only by you, and tells you where. `--no-backup` skips the copy. Delete the copy too if you want the data gone for good.
 - **It erases the text:** afterwards it optimizes the full-text indexes and vacuums the database with SQLite's `secure_delete` on, so the deleted text is gone from the file, not just unlinked.
 

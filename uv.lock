@@ -1042,6 +1042,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "jsonschema" },
     { name = "opentelemetry-proto" },
     { name = "pytest" },
 ]
@@ -1060,6 +1061,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jsonschema" },
     { name = "opentelemetry-proto", specifier = ">=1.30" },
     { name = "pytest" },
 ]

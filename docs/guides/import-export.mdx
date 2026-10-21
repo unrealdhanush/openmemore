@@ -15,12 +15,12 @@ openmemore status                                  # import progress and what's 
 
 | Export | How to get it |
 |---|---|
-| ChatGPT | Settings → Data controls → Export data. You get a link to a `.zip` by email |
-| Claude | Settings → Privacy → Export data. You get a link to a `.zip` by email |
+| ChatGPT | Settings → Data controls → Export data. You get a link to a `.zip` by email. See [OpenAI's help](https://help.openai.com/en/articles/7260999-how-do-i-export-my-chatgpt-history-and-data) |
+| Claude | Settings → Privacy → Export data, on the web or in Claude Desktop. You get a link to a `.zip` by email. See [Anthropic's help](https://support.claude.com/en/articles/9450526-export-your-claude-data) |
 | OpenMemore | `openmemore export`, from this or another machine |
 | Any other provider | Convert its export to [OpenMemore's format](/reference/export-format) first |
 
-You can pass the `.zip` itself, its `conversations.json`, or the unpacked folder.
+You can pass the `.zip` itself, its `conversations.json`, or the unpacked folder. Both providers' download links expire 24 hours after they arrive.
 
 - **Order:** newest conversations first.
 - **Speed:** everything is searchable by keyword within seconds. Meaning-based search catches up as the import continues, and `openmemore embed` finishes it if you stop early.

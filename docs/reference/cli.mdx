@@ -132,11 +132,13 @@ openmemore wipe --all
 
 Delete in bulk: everything not touched since a date, or everything. Whole conversations and memories go, with their versions, proposals, the audit log, and finished import and consolidation records from that time. Deleted conversations stay deleted. Config, the embedding model and the daemon are untouched. The deleted text is then erased from the database file. See [Deleting things](/guides/deleting).
 
+After you type `wipe`, it asks for your login password the way `sudo` does (`sudo -k -v`), and deletes nothing if that fails. Windows has no `sudo`, so only the typed confirmation is asked there.
+
 | Option | Description |
 |---|---|
 | `--before DATE` | Delete what wasn't touched since this date, in local time, such as `2026-10-20` or `2026-10-20T09:30` |
 | `--all` | Delete everything stored: a fresh start |
-| `--yes`, `-y` | Don't ask for confirmation |
+| `--yes`, `-y` | Don't ask to type `wipe`. Your password is still asked |
 | `--no-backup` | Don't keep a copy of the database first |
 
 Pass exactly one of `--before` and `--all`.

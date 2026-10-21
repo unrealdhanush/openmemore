@@ -31,7 +31,8 @@
         "required_status_checks": [
           { "context": "test (ubuntu-latest)", "integration_id": 15368 },
           { "context": "test (macos-latest)", "integration_id": 15368 },
-          { "context": "test (windows-latest)", "integration_id": 15368 }
+          { "context": "test (windows-latest)", "integration_id": 15368 },
+          { "context": "docs", "integration_id": 15368 }
         ]
       }
     }

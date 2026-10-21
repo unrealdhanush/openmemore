@@ -10,7 +10,7 @@ Any MCP client works, with no client-specific support needed. The server is the 
 { "mcpServers": { "openmemore": { "command": "/path/to/openmemore", "args": ["serve"] } } }
 ```
 
-`openmemore setup` writes that for you, with the real path. It never edits another app's files: where the app has its own way to add an MCP server, setup uses it, and otherwise it prints the snippet.
+`openmemore setup` writes that for you, with the real path. If you've set `OPENMEMORE_HOME`, the entry passes it on in an `env` block, so the client uses the same store. It never edits another app's files: where the app has its own way to add an MCP server, setup uses it, and otherwise it prints the snippet.
 
 ```sh
 openmemore setup <client>        # vscode-copilot, cursor, claude-code, or any other name
