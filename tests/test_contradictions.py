@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 4: contradictions. A proposal can say it disagrees with a memory;
+"""Contradictions. A proposal can say it disagrees with a memory;
 the user settles it. Unresolved, neither side is current truth."""
 
 from datetime import UTC, datetime

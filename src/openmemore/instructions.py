@@ -1,11 +1,11 @@
-"""What OpenMemore asks connected models to do (SPEC.md Section 7.10).
+"""What OpenMemore asks connected models to do.
 
 The same guidance goes to two places: the MCP server instructions, and the standing
-instruction `openmemore setup` installs where each client reads user instructions. The
-M1 manual test showed models ignore tool descriptions and server instructions on
+instruction `openmemore setup` installs where each client reads user instructions. Manual
+testing showed models ignore tool descriptions and server instructions on
 their own (no record_exchange calls until the user added a standing instruction).
 
-Clients whose transcripts are captured from disk (SPEC.md M1.5) get a variant
+Clients whose transcripts are captured from disk get a variant
 without record_exchange: their conversations are stored without the model's help.
 
 Where the user has to paste the instruction by hand (Claude Desktop keeps it in the

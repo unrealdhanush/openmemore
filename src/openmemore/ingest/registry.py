@@ -1,4 +1,4 @@
-"""The importer registry (SPEC.md M3.5): every export format OpenMemore can read.
+"""The importer registry: every export format OpenMemore can read.
 
 An importer recognizes its format from the parsed contents (never the file name), lists
 its raw conversations, and turns one into a ParsedConversation. Adding a provider means

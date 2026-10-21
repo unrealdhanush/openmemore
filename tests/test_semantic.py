@@ -1,4 +1,4 @@
-"""Semantic search (SPEC.md M2). Most tests use FakeEmbedder (fast, offline, exact
+"""Semantic search. Most tests use FakeEmbedder (fast, offline, exact
 similarities); `real_model` tests use bge-small itself, for the milestone's done-when."""
 
 import pytest
@@ -203,7 +203,7 @@ async def test_ping_reports_semantic_search(home, monkeypatch):
     assert on == f"ready ({embed.MODEL})"
 
 
-# --- the real model (SPEC M2 done-when) ----------------------------------------------
+# --- the real model -------------------------------------------------------------------
 
 CORPUS = [
     ("note", "Orange lazy cat names: Marmalade, Pumpkin, Dozer."),
@@ -232,8 +232,8 @@ def corpus(conn):
     ("my upcoming vacation in Portugal", "Lisbon"),
     ("any food restrictions I mentioned", "peanut"),
 ])
-def test_m2_done_when_a_paraphrase_finds_what_keywords_miss(corpus, monkeypatch, real_embedder, query, expected):
-    """SPEC M2 'done when': each query shares no meaningful word with its memory."""
+def test_a_paraphrase_finds_what_keywords_miss(corpus, monkeypatch, real_embedder, query, expected):
+    """Each query shares no meaningful word with its memory."""
     monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: None)
     keyword_only = search_context(corpus, ME, query).results
     assert not any(expected in h.content for h in keyword_only)
@@ -260,7 +260,7 @@ def test_real_near_duplicates(conn, real_embedder):
 
 
 @pytest.mark.real_model
-@pytest.mark.xfail(strict=True, reason="bge-small doesn't link 'fitness app throttling' to Strava 429s (SPEC.md 14)")
+@pytest.mark.xfail(strict=True, reason="bge-small doesn't link 'fitness app throttling' to Strava 429s")
 def test_known_miss_throttling_paraphrase(corpus, real_embedder):
     save(corpus, "Strava returns 429 when the 15-minute rate limit is hit; the poller skips to the next window.",
          kind="decision")

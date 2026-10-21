@@ -35,11 +35,11 @@ build-backend = "hatchling.build"
 packages = ["src/openmemore"]
 
 [tool.uv]
-# sqlite-vec (M2) needs sqlite3 extension loading, which some system Pythons
+# sqlite-vec needs sqlite3 extension loading, which some system Pythons
 # (e.g. python.org macOS builds) disable. uv's managed builds support it.
 python-preference = "only-managed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]  # the bench/ harness (SPEC.md M7.6) is tested but not shipped
+pythonpath = ["."]  # the bench/ harness is tested but not shipped
 markers = ["real_model: uses the real embedding model (downloaded once to ~/.cache/openmemore-test-models)"]

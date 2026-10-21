@@ -1,4 +1,4 @@
-"""The owner's side of consolidation (SPEC.md M5): approving and rejecting proposals,
+"""The owner's side of consolidation: approving and rejecting proposals,
 and finding near-duplicate memories to merge. `openmemore review` calls these; clients
 can only propose."""
 
@@ -160,7 +160,7 @@ def find_duplicates(conn: sqlite3.Connection) -> int:
     least NEAR_DUPLICATE_SIMILARITY similar. A group already waiting for review, or
     rejected, isn't proposed again; nor is one that overlaps a pending merge. Returns how
     many merges were proposed. Memories not embedded yet aren't compared."""
-    import numpy as np  # only here: numpy costs ~35ms to import (SPEC.md Section 4.3)
+    import numpy as np  # only here: numpy costs ~35ms to import
 
     by_group: dict[tuple[str, str], list[tuple[Memory, bytes]]] = defaultdict(list)
     for memory, vector in repo.active_memory_vectors(conn):

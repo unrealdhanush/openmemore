@@ -6,7 +6,7 @@ One shared memory for all your AI assistants, kept on your own machine.
 
 Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMemore is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
 
-**Status:** pre-release. v1 is milestones M0 to M4 of [SPEC.md](SPEC.md), and M5 (consolidation and review) is done; the milestone map in SPEC.md Section 11 lists what's next. The repository is private, and there's no published package yet.
+**Status:** pre-release. The repository is private, and there's no published package yet.
 
 ## How it works
 
@@ -219,10 +219,10 @@ An export contains every memory, with its earlier versions, and every conversati
 ```sh
 uv sync
 uv run pytest                        # real-model tests download ~70MB once to ~/.cache/openmemore-test-models
-uv run python scripts/benchmark.py   # performance budget: 10k memories, 100k chunks (SPEC.md 4.3)
-uv run python -m bench locomo           # retrieval quality on LongMemEval / LoCoMo (SPEC.md M7.6; results in bench/RESULTS.md)
+uv run python scripts/benchmark.py   # performance budget: search p95 < 100ms, saving 20 memories < 300ms, at 10k memories and 100k chunks
+uv run python -m bench locomo           # retrieval quality on LongMemEval / LoCoMo (results in bench/RESULTS.md)
 ```
 
 The documentation is a [Mintlify](https://mintlify.com) site in `docs/` (`docs.json` and MDX pages). To preview it, run `npx mint dev` in `docs/`, which needs Node.js. `tests/test_docs.py` fails when a CLI command or option, a config key, or an MCP tool, prompt or resource has no reference entry, and when a page is missing from the navigation, links to a page that doesn't exist, or isn't valid MDX.
 
-Running `openmemore setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that. See [SPEC.md](SPEC.md) for the design, milestones and open questions.
+Running `openmemore setup` from a development checkout hands the job to your installed copy, so your apps never run a work-in-progress branch. `--dev` overrides that.

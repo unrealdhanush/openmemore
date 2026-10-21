@@ -1,4 +1,4 @@
-"""OpenMemore's own format (SPEC.md M3.5, M4): what `openmemore export` writes and `openmemore
+"""OpenMemore's own format: what `openmemore export` writes and `openmemore
 import` reads back, and a provider-neutral way in for any assistant's history: write a
 small converter from any export (Gemini via Google Takeout, Perplexity, ...) to this.
 

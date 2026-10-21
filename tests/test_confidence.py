@@ -1,4 +1,4 @@
-"""SPEC.md M7.7 part 5: support raises confidence. A memory stated again by an independent
+"""Support raises confidence. A memory stated again by an independent
 source (another client, another conversation) is confirmed, not just skipped."""
 
 from datetime import UTC, datetime, timedelta

@@ -1,4 +1,4 @@
--- Relations between memories (SPEC.md M7.7, after LongMemory's executable edges): one
+-- Relations between memories (after LongMemory's executable edges): one
 -- table, written only through openmemore.relations, which applies each link's effect in the
 -- same transaction. superseded_by stays as the fast pointer to a memory's newer version.
 CREATE TABLE memory_links (

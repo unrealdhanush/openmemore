@@ -1,4 +1,4 @@
-"""SPEC.md M6: conversations captured from OpenTelemetry's GenAI semantic conventions, from
+"""Conversations captured from OpenTelemetry's GenAI semantic conventions, from
 any app, as OTLP logs or traces, in JSON or protobuf. Protobuf payloads are encoded with
 the official opentelemetry-proto package (a test-only dependency), so the reader is
 checked against the reference encoding, not against itself."""

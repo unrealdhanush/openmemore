@@ -1,4 +1,4 @@
-"""`openmemore export` (SPEC.md M4): everything stored, in OpenMemore's own format
+"""`openmemore export`: everything stored, in OpenMemore's own format
 (openmemore.ingest.openmemore_format), which `openmemore import` reads back.
 
 Memories include their history (earlier versions, linked by `superseded_by`);

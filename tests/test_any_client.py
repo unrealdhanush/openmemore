@@ -1,4 +1,4 @@
-"""SPEC.md M3.5: any MCP client, through one generic snippet, named by what it reports."""
+"""Any MCP client, through one generic snippet, named by what it reports."""
 
 import json
 import os
@@ -44,7 +44,7 @@ def test_client_names_are_the_apps_own():
 
 
 @pytest.mark.anyio
-async def test_m3_5_done_when_an_unknown_client_works_from_the_generic_snippet(home):
+async def test_an_unknown_client_works_from_the_generic_snippet(home):
     """Nothing about this client is known: the server names it from clientInfo, applies
     the scopes configured for that name, and it records and recalls like any client."""
     initialize(home)
@@ -181,7 +181,7 @@ def test_openmemore_format_problems_are_reported(conn, tmp_path):
 
 
 def test_a_new_provider_needs_only_a_registry_entry(conn, tmp_path, monkeypatch):
-    """SPEC M3.5 done-when: a provider's importer added through the registry alone.
+    """A provider's importer added through the registry alone.
     An invented format, imported end to end with no other code changed."""
     from openmemore.models import ParsedConversation, ParsedMessage
 

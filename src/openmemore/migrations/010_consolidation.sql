@@ -1,4 +1,4 @@
--- Consolidation and review (SPEC.md M5): memories proposed from conversations, or merges
+-- Consolidation and review: memories proposed from conversations, or merges
 -- of near-duplicates, waiting for the user to approve them.
 
 CREATE TABLE proposals (

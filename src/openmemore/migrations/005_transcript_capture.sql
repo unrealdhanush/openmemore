@@ -1,4 +1,4 @@
--- Transcript capture (SPEC.md M1.5): conversations read from the transcript files that
+-- Transcript capture: conversations read from the transcript files that
 -- clients keep on the user's disk.
 
 -- A captured message keeps the transcript's id for it, so re-reading a transcript that

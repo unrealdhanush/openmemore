@@ -1,5 +1,5 @@
 """Storing conversations that come from outside a tool call: captured transcripts
-(SPEC.md M1.5) and imported exports (M3). Both arrive as ParsedConversation and are
+and imported exports. Both arrive as ParsedConversation and are
 stored the same way: secrets redacted, messages upserted by the source's own ids (so
 re-reading a source never duplicates), chunked for search.
 """

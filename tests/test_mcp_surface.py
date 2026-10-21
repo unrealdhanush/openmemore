@@ -48,8 +48,8 @@ def write_copilot_chat(user_home):
 
 
 @pytest.mark.anyio
-async def test_m1_done_when_another_assistant_answers_about_the_previous_question(home):
-    """SPEC M1 'done when', with the models' side scripted: Claude Desktop answers a question
+async def test_another_assistant_answers_about_the_previous_question(home):
+    """End to end, with the models' side scripted: Claude Desktop answers a question
     and records the exchange; a different assistant (its own server process, as in real use)
     finds it both without keywords ('what did I ask Claude?') and by topic."""
     async with stdio(home, "claude-desktop") as claude:
@@ -73,8 +73,8 @@ async def test_m1_done_when_another_assistant_answers_about_the_previous_questio
 
 
 @pytest.mark.anyio
-async def test_m1_5_done_when_a_transcript_is_found_without_record_exchange(home, tmp_path):
-    """SPEC M1.5 'done when': a Copilot chat saved by VS Code (nobody calls record_exchange)
+async def test_a_transcript_is_found_without_record_exchange(home, tmp_path):
+    """End to end: a Copilot chat saved by VS Code (nobody calls record_exchange)
     is answered about from Claude Desktop, in its own server process, by name and by topic."""
     user_home = tmp_path / "user"
     initialize(home)

@@ -1,9 +1,9 @@
 # Benchmark results
 
-Retrieval quality over time (SPEC.md M7.6), appended by `uv run python -m bench <dataset> --record`. Session recall: share of the answer's sessions among the top k results; any-hit: at least one; NDCG over the distinct sessions found; turn recall: share of the marked answer turns. Datasets are LongMemEval (MIT) and LoCoMo (non-commercial terms), downloaded to ~/.cache/openmemore-bench, never committed.
+Retrieval quality over time, appended by `uv run python -m bench <dataset> --record`. Session recall: share of the answer's sessions among the top k results; any-hit: at least one; NDCG over the distinct sessions found; turn recall: share of the marked answer turns. Datasets are LongMemEval (MIT) and LoCoMo (non-commercial terms), downloaded to ~/.cache/openmemore-bench, never committed.
 
 
-**Baselines (2026-10-19):** the two entries below measured main at 36471d3, before M7.7 (with the 30-day recency half-life), plus search's new `now` argument so ranking uses each question's date. That's what "+uncommitted" marks.
+**Baselines (2026-10-19):** the two entries below measured main at 36471d3, before memories had timelines (with the 30-day recency half-life), plus search's new `now` argument so ranking uses each question's date. That's what "+uncommitted" marks.
 ## 2026-10-19 locomo at 36471d3+uncommitted
 
 Embedder: BAAI/bge-small-en-v1.5. 10 histories, 1986 questions. Ingest 4.593 s per history; query p50 6.4 ms, p95 8.0 ms.
@@ -35,7 +35,7 @@ Embedder: BAAI/bge-small-en-v1.5. 100 histories, 100 questions. Ingest 22.621 s 
 | temporal-reasoning | 11 | 0.864 | 1.000 | 0.890 | 0.621 | 0.939 | 1.000 | 0.930 | 0.742 |
 | temporal-reasoning-abstention | 6 | – | – | – | – | – | – | – | – |
 
-## 2026-10-19 activation sweep (M7.7 part 7) at 0baa405
+## 2026-10-19 activation sweep at 0baa405
 
 Age-only activation (benchmark runs present nothing), decay 0.5, weight varied; one row per weight. Session recall@5 and NDCG@5 overall, temporal questions' recall@5, LongMemEval knowledge-update recall@5:
 

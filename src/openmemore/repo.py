@@ -106,7 +106,7 @@ def _memory(row: sqlite3.Row) -> Memory:
 
 
 def current_sql(alias: str = "") -> str:
-    """SQL for a current memory: not replaced, and its validity not ended (SPEC.md M7.7).
+    """SQL for a current memory: not replaced, and its validity not ended.
     Timestamps are stored in to_iso's format, the same as SQLite's own, so text compares."""
     a = f"{alias}." if alias else ""
     return (f"{a}superseded_by IS NULL AND ({a}valid_to IS NULL "
@@ -117,7 +117,7 @@ def current_sql(alias: str = "") -> str:
 
 def record_presented(conn: sqlite3.Connection, memory_ids: Sequence[int], chunk_ids: Sequence[int],
                      now: datetime) -> None:
-    """A client was shown these: one more presentation each, for activation (SPEC.md M7.7)."""
+    """A client was shown these: one more presentation each, for activation."""
     at = to_iso(now)
     for table, ids in (("memories", memory_ids), ("chunks", chunk_ids)):
         if ids:
@@ -722,7 +722,7 @@ def store_vectors(conn: sqlite3.Connection, table: VectorTable, vectors: Sequenc
     return len(stored)
 
 
-# --- consolidation and proposals (SPEC.md M5) ----------------------------------------
+# --- consolidation and proposals ----------------------------------------
 
 _DUE = (
     "EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.recall = 0 "

@@ -1,4 +1,4 @@
-"""Untrusted-data wrapping for everything read back out of the store (SPEC.md Section 8).
+"""Untrusted-data wrapping for everything read back out of the store.
 
 Stored content may have come from another model, an import, or text an attacker
 got into a conversation. Wrapping labels it as data, keeps it from closing its own

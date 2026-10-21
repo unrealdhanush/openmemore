@@ -1,4 +1,4 @@
-"""Claude data export: conversations.json, a list of conversations (SPEC.md Section 10).
+"""Claude data export: conversations.json, a list of conversations.
 
 Each conversation has `uuid`, `name`, ISO timestamps, and `chat_messages` in order;
 each message has `sender` ('human' or 'assistant'), `created_at`, and either `content`

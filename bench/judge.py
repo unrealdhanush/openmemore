@@ -1,4 +1,4 @@
-"""Optional judged answers (SPEC.md M7.6): a model answers each question from the
+"""Optional judged answers: a model answers each question from the
 retrieved context only, and a second call judges the answer against the reference.
 Both go through OpenMemore's model client (openmemore.llm), so any Open Responses or Chat
 Completions endpoint works. Retrieval metrics stay the headline; this shows whether

@@ -1,4 +1,4 @@
-"""Secret / PII filter applied to everything written to the store (SPEC.md Section 8).
+"""Secret / PII filter applied to everything written to the store.
 
 Memories are rejected outright (`find_secret`); captured conversation exchanges
 are redacted instead (`redact`), so a pasted key doesn't cost the whole record.

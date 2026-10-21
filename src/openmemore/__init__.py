@@ -1,6 +1,6 @@
-"""OpenMemore: one shared memory for all of a user's AI assistants (SPEC.md).
+"""OpenMemore: one shared memory for all of a user's AI assistants.
 
-`from openmemore import Memory` gives programs the same memory, in-process (SPEC.md M7.5).
+`from openmemore import Memory` gives programs the same memory, in-process.
 It's loaded on first use, so `openmemore serve` and the CLI don't pay for it.
 """
 

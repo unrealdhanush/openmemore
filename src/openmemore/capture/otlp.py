@@ -1,4 +1,4 @@
-"""OTLP export requests (SPEC.md M6): logs and traces, as OTLP/HTTP sends them, in JSON
+"""OTLP export requests: logs and traces, as OTLP/HTTP sends them, in JSON
 or protobuf, read into one shape.
 
 Protobuf is read directly from the wire format, for just the messages OpenMemore uses

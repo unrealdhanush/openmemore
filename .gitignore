@@ -17,3 +17,6 @@ build/
 
 # Benchmark run reports (summaries go in bench/RESULTS.md)
 bench/results/*.json
+
+# Development plan and milestones: kept locally, not published
+SPEC.md

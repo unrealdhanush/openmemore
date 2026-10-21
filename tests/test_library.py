@@ -1,4 +1,4 @@
-"""SPEC.md M7.5: OpenMemore as a library. Programs share memory with assistants in-process;
+"""OpenMemore as a library. Programs share memory with assistants in-process;
 the decorators record and recall without ever breaking the decorated function."""
 
 import asyncio
@@ -213,7 +213,7 @@ async def test_assistants_and_programs_share_one_memory(home):
 
 def test_importing_openmemore_stays_light():
     """`import openmemore` must not load the store or the library: the server's start-up
-    budget (SPEC.md Section 4.3) doesn't pay for them."""
+    budget doesn't pay for them."""
     out = subprocess.run([sys.executable, "-c", "import sys, openmemore; print(sorted(m for m in sys.modules "
                           "if m.startswith('openmemore.')))"], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "[]"

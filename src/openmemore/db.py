@@ -27,7 +27,7 @@ _MIGRATION_NAME = re.compile(r"^(\d+)_.*\.sql$")
 def _vec_extension() -> str:
     """sqlite-vec's loadable extension (vec0.dylib/.so/.dll; SQLite adds the suffix),
     found without importing the sqlite_vec package, whose __init__ pulls in numpy:
-    ~35ms of server startup (SPEC.md Section 4.3)."""
+    ~35ms of server startup."""
     spec = importlib.util.find_spec("sqlite_vec")
     if spec is None or spec.origin is None:
         raise RuntimeError("sqlite-vec is not installed")

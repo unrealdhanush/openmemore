@@ -1,6 +1,6 @@
-"""Embeddings for semantic search (SPEC.md M2): fastembed with BAAI/bge-small-en-v1.5.
+"""Embeddings for semantic search: fastembed with BAAI/bge-small-en-v1.5.
 
-The model never loads at server startup (SPEC.md Section 4.3): importing fastembed
+The model never loads at server startup: importing fastembed
 alone takes ~200ms. It loads on the first call that needs it, once per process.
 
 Servers never download the model, since a download is far too slow for a tool call.

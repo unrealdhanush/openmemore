@@ -169,7 +169,7 @@ def setup(
 
 def _offer_daemon() -> None:
     """After setup: if there's something to capture in the background and the daemon
-    isn't running, ask whether it may run (SPEC.md M6)."""
+    isn't running, ask whether it may run."""
     from openmemore import daemon, service
 
     cfg = config.load_config(config.config_path(config.home()))
@@ -767,7 +767,7 @@ def daemon_run(
 
 
 def _install_daemon(*, yes: bool, dry_run: bool = False) -> bool:
-    """Install and start the daemon service, after asking (SPEC.md M6). Returns whether
+    """Install and start the daemon service, after asking. Returns whether
     it's installed."""
     from openmemore import consent, daemon, service
 

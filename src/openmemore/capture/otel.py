@@ -1,4 +1,4 @@
-"""Capture through OpenTelemetry (SPEC.md M6): conversations from any app or library that
+"""Capture through OpenTelemetry: conversations from any app or library that
 records them following OpenTelemetry's GenAI semantic conventions
 (open-telemetry/semantic-conventions-genai, status Development), received by
 `openmemore daemon` as OTLP logs or traces (openmemore.capture.otlp).

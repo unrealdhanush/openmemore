@@ -1,4 +1,4 @@
-"""A language model OpenMemore calls itself (SPEC.md M7), through the open standard for LLM
+"""A language model OpenMemore calls itself, through the open standard for LLM
 APIs rather than any provider's SDK:
 
 - Open Responses (openresponses.org, spec 2026-04-24): POST {endpoint}/responses with

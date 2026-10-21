@@ -1,4 +1,4 @@
--- Semantic search (SPEC.md M2): sqlite-vec tables holding one 384-dimension embedding
+-- Semantic search: sqlite-vec tables holding one 384-dimension embedding
 -- (BAAI/bge-small-en-v1.5) per active memory and per chunk, keyed by their ids.
 
 CREATE VIRTUAL TABLE memories_vec USING vec0(embedding float[384] distance_metric=cosine);

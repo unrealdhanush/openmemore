@@ -1,4 +1,4 @@
--- Deleted conversations are remembered by their source's id, so a later export (M3) or
+-- Deleted conversations are remembered by their source's id, so a later import or
 -- a capture of the same conversation doesn't quietly bring it back: the user deleted it.
 CREATE TABLE deleted_conversations (
   provider     TEXT NOT NULL,
