@@ -293,7 +293,7 @@ Rules:
 - **`openmemore wipe`** deletes in bulk: with `--before DATE`, everything not touched since that date; with `--all`, everything.
   - **Whole items only:** a conversation goes when its last activity is before the date, and a memory goes with all its versions when its current version is. Splitting a conversation still being captured would bring its older messages back when its transcript changed.
   - **What else goes:** proposals, audit entries, and finished import and consolidation records from that time. Deleted conversations stay deleted (tombstones). Config, the model and the daemon are untouched.
-  - **Safety and erasure:** it shows the counts and asks for the word `wipe` (`--yes` skips this), and saves a 0600 copy first (`--no-backup` skips it). Then it optimizes the full-text indexes and runs `VACUUM` with `secure_delete` on, and truncates the WAL, so deleted text is gone from the file.
+  - **Safety and erasure:** it shows the counts and asks for the word `wipe` (`--yes` skips this), then, like sudo, for the login password through `sudo -k -v`, which always asks and leaves no cached credentials (`--yes` doesn't skip this; Windows has no sudo, so only the word is asked there). It saves a 0600 copy first (`--no-backup` skips it). Then it optimizes the full-text indexes and runs `VACUUM` with `secure_delete` on, and truncates the WAL, so deleted text is gone from the file.
 - `metadata` is for fields that vary by provider or are still experimental. Pydantic models expose it as `dict[str, Any]`. Never put fields there that tools filter on routinely; those get real columns.
 
 ---

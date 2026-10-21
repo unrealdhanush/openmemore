@@ -598,16 +598,33 @@ def _local_moment(value: str) -> datetime:
     return moment if moment.tzinfo else moment.astimezone()
 
 
+def _password_ok() -> bool:
+    """Ask for the login password the way sudo does, through sudo itself.
+
+    -k ignores sudo's cached credentials, so it always asks and leaves none behind.
+    Windows has no sudo: the typed confirmation stands alone there.
+    """
+    if sys.platform == "win32":
+        return True
+    try:
+        return subprocess.run(["sudo", "-k", "-v", "-p", "Password for %u, to wipe: "]).returncode == 0
+    except FileNotFoundError:
+        console.print("[red]wipe asks for your password through sudo, which isn't installed.[/red]")
+        return False
+
+
 @app.command("wipe")
 def wipe_command(
     before: str | None = typer.Option(
         None, "--before", help="Delete what wasn't touched since this date (local time), e.g. 2026-10-20."
     ),
     everything: bool = typer.Option(False, "--all", help="Delete everything stored: a fresh start."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask for confirmation."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask to type 'wipe'. Your password is still asked."),
     no_backup: bool = typer.Option(False, "--no-backup", help="Don't keep a copy of the database first."),
 ) -> None:
     """Delete in bulk: everything not touched since a date (--before), or everything (--all).
+
+    Like sudo, it asks for your login password first (not on Windows).
 
     Whole conversations and memories go, with their versions, proposals, the audit log
     and finished import and consolidation records from that time. Deleted conversations
@@ -633,7 +650,8 @@ def wipe_command(
                              (p.consolidation_runs, "consolidation runs"), (p.import_jobs, "finished imports")]:
             if count:
                 console.print(f"  {count:>6}  {label}")
-        if not yes and typer.prompt("It can't be undone. Type 'wipe' to continue", default="") != "wipe":
+        typed = yes or typer.prompt("It can't be undone. Type 'wipe' to continue", default="") == "wipe"
+        if not typed or not _password_ok():
             console.print("Nothing deleted.")
             raise typer.Exit(1)
         copy = None
