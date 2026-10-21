@@ -1,4 +1,4 @@
-"""`openmcp setup`: the generic snippet, vendor installers, and --config. Nothing here
+"""`openmemore setup`: the generic snippet, vendor installers, and --config. Nothing here
 touches real apps: installers get fake commands, and files live in a temporary home."""
 
 import base64
@@ -10,19 +10,19 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import pytest
 
-from openmcp import config
-from openmcp.capture import vscode_copilot
-from openmcp.cli import initialize
-from openmcp.instructions import STANDING_PREFIX, pointer_instruction, server_instructions, standing_instruction
-from openmcp.setup import Context, SetupError, cursor_link, installed_command, open_link, plan, server_entry
+from openmemore import config
+from openmemore.capture import vscode_copilot
+from openmemore.cli import initialize
+from openmemore.instructions import STANDING_PREFIX, pointer_instruction, server_instructions, standing_instruction
+from openmemore.setup import Context, SetupError, cursor_link, installed_command, open_link, plan, server_entry
 
-COMMAND = ("/opt/openmcp/bin/openmcp",)
+COMMAND = ("/opt/openmemore/bin/openmemore",)
 
 
 class FakeRun:
     """Records commands; answers `--help` with the given text."""
 
-    def __init__(self, help_text="", returncode=0, stdout="Added MCP servers: openmcp"):
+    def __init__(self, help_text="", returncode=0, stdout="Added MCP servers: openmemore"):
         self.help_text, self.returncode, self.stdout, self.calls = help_text, returncode, stdout, []
 
     def __call__(self, args, **kwargs):
@@ -34,7 +34,7 @@ class FakeRun:
 @pytest.fixture
 def ctx(tmp_path) -> Context:
     user_home = tmp_path / "user"
-    base = user_home / ".openmcp"
+    base = user_home / ".openmemore"
     initialize(base)
     return Context(base=base, user_home=user_home, platform="darwin", command=COMMAND, which=lambda _: None)
 
@@ -57,7 +57,7 @@ def run(steps):
 
 
 def written(ctx):
-    return [p for p in ctx.user_home.rglob("*") if p.is_file() and ".openmcp" not in p.parts]
+    return [p for p in ctx.user_home.rglob("*") if p.is_file() and ".openmemore" not in p.parts]
 
 
 def manual(steps):
@@ -110,20 +110,20 @@ def test_the_captured_pointer_says_not_to_record():
 def test_any_client_gets_the_generic_snippet_and_nothing_is_written(ctx, clipboard):
     steps = plan("some-new-editor", ctx)
     assert run(steps) == [] and written(ctx) == []
-    assert json_block(manual(steps))["mcpServers"]["openmcp"] == {"command": COMMAND[0], "args": ["serve"]}
+    assert json_block(manual(steps))["mcpServers"]["openmemore"] == {"command": COMMAND[0], "args": ["serve"]}
     assert clipboard == [pointer_instruction()]
 
 
 def test_the_snippet_is_the_same_for_every_client():
     """No client name in it: the server names the client from what it reports."""
-    default = Context(base=Path("/h/.openmcp"), user_home=Path("/h"), platform="linux", command=COMMAND)
+    default = Context(base=Path("/h/.openmemore"), user_home=Path("/h"), platform="linux", command=COMMAND)
     assert server_entry(default) == {"command": COMMAND[0], "args": ["serve"]}
     assert plan(None, default)[0].manual
 
 
 def test_a_non_default_data_directory_is_passed_to_the_client(ctx, tmp_path):
     other = with_(ctx, base=tmp_path / "elsewhere")
-    assert server_entry(other)["env"] == {"OPENMCP_HOME": str(tmp_path / "elsewhere")}
+    assert server_entry(other)["env"] == {"OPENMEMORE_HOME": str(tmp_path / "elsewhere")}
 
 
 def test_config_option_merges_into_a_named_file(ctx):
@@ -134,7 +134,7 @@ def test_config_option_merges_into_a_named_file(ctx):
     assert run(plan("some-app", ctx, config_file=path)) == []
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["theme"] == "Zoë" and data["mcpServers"]["other"] == {"command": "x"}
-    assert data["mcpServers"]["openmcp"]["args"] == ["serve"]
+    assert data["mcpServers"]["openmemore"]["args"] == ["serve"]
     assert path.with_name("mcp.json.bak").exists()
 
 
@@ -155,7 +155,7 @@ def test_vscode_uses_its_own_add_mcp_command(ctx, clipboard):
     assert run(plan("vscode-copilot", vscode)) == []
     add = fake.calls[-1]
     assert add[:2] == ["/usr/local/bin/code", "--add-mcp"]
-    assert json.loads(add[2]) == {"name": "openmcp", "command": COMMAND[0], "args": ["serve"]}
+    assert json.loads(add[2]) == {"name": "openmemore", "command": COMMAND[0], "args": ["serve"]}
     assert config.load_config(config.config_path(ctx.base)).capture.sources == ("vscode-copilot",)
     assert clipboard == [pointer_instruction(captured=True)]
     assert written(ctx) == []  # VS Code wrote its own settings; setup touched no file of VS Code's
@@ -177,7 +177,7 @@ def test_cursor_gets_its_own_install_link(ctx, clipboard):
     parsed = urlparse(url)
     assert (parsed.scheme, parsed.netloc, parsed.path) == ("cursor", "anysphere.cursor-deeplink", "/mcp/install")
     query = parse_qs(parsed.query)
-    assert query["name"] == ["openmcp"]
+    assert query["name"] == ["openmemore"]
     assert json.loads(base64.b64decode(unquote(query["config"][0]))) == {"command": COMMAND[0], "args": ["serve"]}
     assert clipboard == [pointer_instruction()]  # Cursor isn't captured: it records exchanges
 
@@ -190,17 +190,17 @@ def test_cursor_link_failure_prints_the_link(ctx):
 def test_claude_code_uses_its_own_cli_by_resolved_path(ctx):
     """On Windows an npm install is claude.cmd, which subprocess can't start by bare name."""
     fake = FakeRun()
-    windows = with_(ctx, platform="win32", command=("C:/venv/Scripts/openmcp.exe",),
+    windows = with_(ctx, platform="win32", command=("C:/venv/Scripts/openmemore.exe",),
                     which=lambda name: "C:/npm/claude.cmd", run=fake)
     assert run(plan("claude-code", windows)) == []
     assert [c[0] for c in fake.calls] == ["C:/npm/claude.cmd"] * 2  # remove, then add
-    assert fake.calls[1][-3:] == ["--", "C:/venv/Scripts/openmcp.exe", "serve"]
+    assert fake.calls[1][-3:] == ["--", "C:/venv/Scripts/openmemore.exe", "serve"]
     assert config.load_config(config.config_path(ctx.base)).capture.sources == ("claude-code",)
 
 
 def test_claude_code_without_the_cli_prints_the_command(ctx):
     [error] = run(plan("claude-code", ctx))
-    assert "claude mcp add --scope user openmcp -- /opt/openmcp/bin/openmcp serve" in error
+    assert "claude mcp add --scope user openmemore -- /opt/openmemore/bin/openmemore serve" in error
 
 
 @pytest.mark.parametrize("platform, expected", [
@@ -234,7 +234,7 @@ def test_app_data_paths_follow_each_os(tmp_path, monkeypatch, platform, env, exp
 def test_tests_run_from_a_development_checkout():
     from conftest import REAL_DEVELOPMENT_CHECKOUT
     root = REAL_DEVELOPMENT_CHECKOUT()
-    assert root is not None and (root / "src" / "openmcp" / "setup.py").exists()
+    assert root is not None and (root / "src" / "openmemore" / "setup.py").exists()
 
 
 def make_exe(path: Path) -> Path:
@@ -245,11 +245,11 @@ def make_exe(path: Path) -> Path:
 
 
 def test_installed_copy_prefers_uv_tools_and_skips_the_checkout(tmp_path):
-    # The layout uv and venvs use on this OS: Scripts\openmcp.exe on Windows.
-    bin_dir, exe = ("Scripts", "openmcp.exe") if os.name == "nt" else ("bin", "openmcp")
+    # The layout uv and venvs use on this OS: Scripts\openmemore.exe on Windows.
+    bin_dir, exe = ("Scripts", "openmemore.exe") if os.name == "nt" else ("bin", "openmemore")
     checkout = tmp_path / "repo"
     dev = make_exe(checkout / ".venv" / bin_dir / exe)
-    tool = make_exe(tmp_path / "tools" / "openmcp" / bin_dir / exe)
+    tool = make_exe(tmp_path / "tools" / "openmemore" / bin_dir / exe)
     on_path = make_exe(tmp_path / "bin" / exe)
     uv_dir = lambda *a, **k: subprocess.CompletedProcess(a, 0, str(tmp_path / "tools") + "\n", "")  # noqa: E731
     path = f"{dev.parent}{os.pathsep}{on_path.parent}"

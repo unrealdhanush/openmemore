@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMemore review</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #2f5bd3; --accent-text: #ffffff; --good: #1f7a4d; --bad: #b3261e; --chip: #efeee9;
+    --note: #fff7e0; --note-line: #ecd9a0; --shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --surface: #1f1f1d; --text: #ecebe6; --muted: #a09f98; --line: #34332f;
+      --accent: #7c9cf5; --accent-text: #10131c; --good: #5cc48f; --bad: #f08a80; --chip: #2a2a27;
+      --note: #2b2616; --note-line: #4d4326; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+  .top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 14px 0 8px; }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .stats { color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 4px; }
+  nav button { border: 0; background: none; color: var(--muted); padding: 8px 10px; border-bottom: 2px solid transparent;
+               font: inherit; cursor: pointer; }
+  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  main { padding: 16px 0 64px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .toolbar .grow { flex: 1; }
+  .note { background: var(--note); border: 1px solid var(--note-line); border-radius: 8px; padding: 10px 12px;
+          margin-bottom: 14px; font-size: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+          margin-bottom: 10px; box-shadow: var(--shadow); }
+  .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12.5px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 1px 8px; color: var(--text); }
+  .chip.merge { background: var(--accent); color: var(--accent-text); }
+  .content { margin: 8px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .reason { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; }
+  .sub { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 8px; font-size: 13.5px; }
+  .sub ul { margin: 4px 0 0; padding-left: 18px; }
+  .sub li { overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button.btn, select, input[type="search"], input[type="text"], textarea {
+    font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 11px; }
+  button.btn { cursor: pointer; }
+  button.btn:hover { border-color: var(--muted); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.btn.danger { color: var(--bad); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  button.link { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; cursor: pointer;
+                text-align: left; }
+  textarea { width: 100%; min-height: 84px; resize: vertical; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-top: 8px; }
+  .fields label { display: grid; gap: 2px; font-size: 12.5px; color: var(--muted); }
+  .fields input, .fields select { width: 100%; }
+  label.check { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 0; }
+  .status-approved { color: var(--good); } .status-rejected { color: var(--bad); }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text);
+           width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px;
+                 border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+  dialog .body { padding: 8px 16px 16px; }
+  .msg { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .msg .role { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="top"><h1>OpenMemore review</h1><span class="stats" id="stats"></span></div>
+    <nav role="tablist">
+      <button role="tab" data-tab="proposals" aria-selected="true">Proposals</button>
+      <button role="tab" data-tab="conflicts" aria-selected="false">Conflicts</button>
+      <button role="tab" data-tab="memories" aria-selected="false">Memories</button>
+      <button role="tab" data-tab="decided" aria-selected="false">Decided</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap" id="main"></main>
+<dialog id="dialog"><div class="head"><strong id="dialog-title"></strong>
+  <button class="btn" id="dialog-close">Close</button></div><div class="body" id="dialog-body"></div></dialog>
+<div id="toast" role="status"></div>
+<script>
+"use strict";
+// Everything stored is shown with textContent (via el()), never as HTML.
+const $ = (id) => document.getElementById(id);
+let state = null;
+let tab = "proposals";
+
+function el(tag, props = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (value == null || value === false) continue;
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid != null && kid !== false) node.append(kid instanceof Node ? kid : String(kid));
+  }
+  return node;
+}
+
+async function api(method, url, data) {
+  const options = { method, headers: {} };
+  if (method !== "GET") options.headers["X-OpenMemore"] = "1";
+  if (data !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(data);
+  }
+  const response = await fetch(url, options);
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(json.error || `${response.status} ${response.statusText}`);
+  return json;
+}
+
+let toastTimer;
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+async function attempt(fn) {
+  try { await fn(); } catch (e) { toast(e.message); }
+}
+
+function count(n, word, plural = word + "s") {
+  return `${n} ${n === 1 ? word : plural}`;
+}
+
+function when(iso) {
+  return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
+}
+
+function openDialog(title, body) {
+  $("dialog-title").textContent = title;
+  $("dialog-body").replaceChildren(...body);
+  $("dialog").showModal();
+}
+$("dialog-close").addEventListener("click", () => $("dialog").close());
+
+async function showConversation(id) {
+  await attempt(async () => {
+    const c = await api("GET", `/api/conversations/${id}`);
+    openDialog(`${c.title || "Conversation " + c.id} · ${c.source}`, c.messages.map((m) =>
+      el("div", { class: "msg" },
+        el("div", { class: "role" }, m.role, m.recall ? " · recap" : "", m.created_at ? " · " + when(m.created_at) : ""),
+        el("div", { class: "content" }, m.content))));
+  });
+}
+
+async function showHistory(id) {
+  await attempt(async () => {
+    const chain = await api("GET", `/api/memories/${id}/history`);
+    openDialog(`History of memory ${id}`, chain.map((m) =>
+      el("div", { class: "msg" },
+        el("div", { class: "role" }, `#${m.id} · ${m.source_client} · ${when(m.created_at)}`,
+          m.superseded_by ? ` · replaced by #${m.superseded_by}` : " · current"),
+        el("div", { class: "content" }, m.content))));
+  });
+}
+
+async function refreshState() {
+  state = await api("GET", "/api/state");
+  $("stats").textContent =
+    `${state.pending_proposals} to review · ${count(state.conflicts, "conflict")} · ` +
+    `${count(state.memories, "memory", "memories")} · ` +
+    `${count(state.due_for_consolidation, "conversation")} not yet consolidated`;
+}
+
+function memoryMeta(m) {
+  return el("div", { class: "meta" },
+    el("span", { class: "chip" }, m.kind), el("span", { class: "chip" }, m.scope),
+    m.project && el("span", { class: "chip" }, m.project), m.subject && el("span", {}, m.subject),
+    el("span", {}, `#${m.id} · ${m.source_client} · ${when(m.updated_at)}`));
+}
+
+// --- proposals ---------------------------------------------------------------------
+
+function proposalCard(p, decided) {
+  const card = el("div", { class: "card" });
+  let editing = false;
+  const replace = el("input", { type: "checkbox" });
+  const keepBoth = el("input", { type: "checkbox" });
+  const conflictChoice = el("select", { "aria-label": "How to settle the conflict" },
+    el("option", { value: "flag" }, "Not sure: keep both, and flag the conflict to settle later"),
+    el("option", { value: "replace" }, "This one is right: replace the other"),
+    el("option", { value: "both" }, "Both are true: no conflict"));
+
+  function render() {
+    const meta = el("div", { class: "meta" },
+      el("span", { class: p.action === "merge" ? "chip merge" : "chip" }, p.action === "merge" ? "merge" : "new"),
+      el("span", { class: "chip" }, p.kind), el("span", { class: "chip" }, p.scope),
+      p.project && el("span", { class: "chip" }, p.project), p.subject && el("span", {}, p.subject),
+      el("span", {}, `proposed by ${p.source_client} · ${when(p.created_at)}`),
+      decided && el("span", { class: `status-${p.status}` },
+        `${p.status}${p.memory_id ? ` as memory #${p.memory_id}` : ""} · ${when(p.decided_at)}`));
+
+    const content = editing ? editor() : el("div", { class: "content" }, p.content);
+    const parts = [meta, content, p.reason && el("p", { class: "reason" }, p.reason)];
+
+    if (p.conversations.length) {
+      parts.push(el("div", { class: "sub" }, "From ",
+        p.conversations.map((c, i) => [i ? ", " : "",
+          el("button", { class: "link", onclick: () => showConversation(c.id) }, c.title || `conversation ${c.id}`),
+          ` (${c.source})`])));
+    }
+    if (p.merging.length) {
+      parts.push(el("div", { class: "sub" }, `These ${p.merging.length} memories become one:`,
+        el("ul", {}, p.merging.map((m) => el("li", {}, m.content, " ",
+          el("button", { class: "link", onclick: () => showHistory(m.id) }, `#${m.id}`))))));
+    }
+    if (p.replaces && !decided) {
+      const current = !p.replaces.superseded_by;
+      parts.push(el("div", { class: "sub" }, `Updates memory #${p.replaces.id}: `,
+        el("span", {}, p.replaces.content), " ",
+        el("button", { class: "link", onclick: () => showHistory(p.replaces.id) }, "history"),
+        current
+          ? el("label", { class: "check" }, keepBoth, "Keep the old one too, instead of replacing it")
+          : el("p", { class: "reason" }, `It was changed since (now memory #${p.replaces.superseded_by}): ` +
+              "approving will keep both, or reject this.")));
+      if (!current) keepBoth.checked = true;
+    }
+    if (p.contradicts && !decided) {
+      parts.push(el("div", { class: "sub" }, `Conflicts with memory #${p.contradicts.id}: `,
+        el("span", {}, p.contradicts.content), " ",
+        el("button", { class: "link", onclick: () => showHistory(p.contradicts.id) }, "history"),
+        el("label", { class: "check" }, conflictChoice)));
+    }
+    if (p.similar && !decided) {
+      parts.push(el("div", { class: "sub" }, "Similar to an existing memory: ",
+        el("span", {}, p.similar.content), " ",
+        el("button", { class: "link", onclick: () => showHistory(p.similar.id) }, `#${p.similar.id}`),
+        el("label", { class: "check" }, replace, "Replace it with this one instead of keeping both")));
+    }
+    if (!decided) {
+      parts.push(el("div", { class: "actions" },
+        el("button", { class: "btn primary", onclick: approve }, editing ? "Save and approve" : "Approve"),
+        el("button", { class: "btn", onclick: () => { editing = !editing; render(); } }, editing ? "Cancel edit" : "Edit"),
+        el("button", { class: "btn danger", onclick: reject }, "Reject")));
+    }
+    card.replaceChildren(...parts.filter(Boolean));
+  }
+
+  let fields = {};
+  function editor() {
+    const content = el("textarea", { "aria-label": "Memory text" });
+    content.value = p.content;
+    const kind = el("select", {}, state.kinds.map((k) => el("option", { value: k, selected: k === p.kind }, k)));
+    const subject = el("input", { type: "text", value: p.subject || "" });
+    const project = el("input", { type: "text", value: p.project || "" });
+    fields = { content, kind, subject, project };
+    return el("div", {}, content, el("div", { class: "fields" },
+      el("label", {}, "Kind", kind), el("label", {}, "Subject", subject), el("label", {}, "Project", project)));
+  }
+
+  async function approve() {
+    const edits = { replace_similar: replace.checked, keep_replaced: keepBoth.checked };
+    if (p.contradicts) edits.on_conflict = conflictChoice.value;
+    if (editing) {
+      edits.content = fields.content.value.trim();
+      edits.kind = fields.kind.value;
+      edits.subject = fields.subject.value.trim() || null;
+      edits.project = fields.project.value.trim() || null;
+    }
+    await attempt(async () => {
+      const r = await api("POST", `/api/proposals/${p.id}/approve`, edits);
+      toast(`Saved as memory #${r.memory_id}`);
+      card.remove();
+      await afterDecision();
+    });
+  }
+
+  async function reject() {
+    await attempt(async () => {
+      await api("POST", `/api/proposals/${p.id}/reject`);
+      toast("Rejected: it won't be proposed again");
+      card.remove();
+      await afterDecision();
+    });
+  }
+
+  render();
+  return card;
+}
+
+async function afterDecision() {
+  await refreshState();
+  if (tab === "proposals" && !document.querySelector("#main .card")) await show("proposals");
+}
+
+async function proposalsTab() {
+  const list = await api("GET", "/api/proposals");
+  const ids = list.map((p) => p.id);
+  const notes = [];
+  if (state.due_for_consolidation) {
+    notes.push(el("div", { class: "note" },
+      `${count(state.due_for_consolidation, "conversation")} ${state.due_for_consolidation === 1 ? "hasn't" : "haven't"} ` +
+      "been consolidated yet. Ask any connected assistant to ",
+      el("strong", {}, "consolidate my chats"), " (or use its OpenMemore ", el("code", {}, "consolidate"),
+      " prompt), then reload this page."));
+  }
+  if (!state.semantic_search.startsWith("ready")) {
+    notes.push(el("div", { class: "note" },
+      "Finding duplicates needs the embedding model: run ", el("code", {}, "openmemore embed"), " first."));
+  }
+  const decideAll = (decision) => attempt(async () => {
+    const verb = decision === "approve" ? "Approve" : "Reject";
+    if (!confirm(`${verb} all ${ids.length} proposals?`)) return;
+    const r = await api("POST", "/api/proposals/decide", { ids, decision });
+    toast(`${verb}d ${r.done}` + (r.failed.length ? `; ${r.failed.length} couldn't be: ${r.failed[0].error}` : ""));
+    await refreshState();
+    await show("proposals");
+  });
+  const toolbar = el("div", { class: "toolbar" },
+    el("span", { class: "grow" }, list.length ? `${list.length} waiting for review` : ""),
+    el("button", { class: "btn", onclick: () => attempt(async () => {
+      const r = await api("POST", "/api/duplicates");
+      toast(r.proposed ? `Found ${count(r.proposed, "group")} of duplicates` : "No new duplicates found");
+      await refreshState();
+      await show("proposals");
+    }) }, "Find duplicates"),
+    list.length > 1 && el("button", { class: "btn", onclick: () => decideAll("approve") }, "Approve all"),
+    list.length > 1 && el("button", { class: "btn danger", onclick: () => decideAll("reject") }, "Reject all"));
+  return [toolbar, ...notes,
+    list.length ? list.map((p) => proposalCard(p, false)) : el("div", { class: "empty" }, "Nothing to review.")];
+}
+
+async function decidedTab() {
+  const [approved, rejected] = await Promise.all([
+    api("GET", "/api/proposals?status=approved"), api("GET", "/api/proposals?status=rejected")]);
+  const all = [...approved, ...rejected].sort((a, b) => (b.decided_at || "").localeCompare(a.decided_at || ""));
+  return all.length ? all.map((p) => proposalCard(p, true)) : [el("div", { class: "empty" }, "No decisions yet.")];
+}
+
+// --- conflicts ---------------------------------------------------------------------
+
+function conflictCard(c) {
+  const card = el("div", { class: "card" });
+  const settle = (resolution, message) => attempt(async () => {
+    await api("POST", `/api/conflicts/${c.id}/resolve`, { resolution });
+    toast(message);
+    card.remove();
+    await refreshState();
+  });
+  const side = (m, resolution) => el("div", { class: "sub" }, memoryMeta(m), el("div", { class: "content" }, m.content),
+    el("button", { class: "btn primary", onclick: () => settle(resolution, `Kept #${m.id}; the other is history now`) },
+      "This one is right"));
+  card.append(
+    el("div", { class: "meta" }, el("span", { class: "chip" }, "conflict"),
+      el("span", {}, `flagged by ${c.source || "unknown"} · ${when(c.created_at)}`)),
+    el("p", { class: "reason" }, "These disagree. Until you settle it, assistants see neither as current."),
+    side(c.from, "keep_from"), side(c.to, "keep_to"),
+    el("div", { class: "actions" },
+      el("button", { class: "btn", onclick: () => settle("both", "Both kept as true") }, "Both are true")));
+  return card;
+}
+
+async function conflictsTab() {
+  const list = await api("GET", "/api/conflicts");
+  return list.length ? list.map(conflictCard) : [el("div", { class: "empty" }, "No conflicts.")];
+}
+
+// --- memories ----------------------------------------------------------------------
+
+const filters = { q: "", scope: "", kind: "", project: "" };
+
+function memoryCard(m) {
+  const card = el("div", { class: "card" });
+  function view() {
+    card.replaceChildren(memoryMeta(m), el("div", { class: "content" }, m.content),
+      el("div", { class: "actions" },
+        el("button", { class: "btn", onclick: edit }, "Edit"),
+        el("button", { class: "btn", onclick: () => showHistory(m.id) }, "History"),
+        el("button", { class: "btn danger", onclick: remove }, "Delete")));
+  }
+  function edit() {
+    const content = el("textarea", { "aria-label": "Memory text" });
+    content.value = m.content;
+    const subject = el("input", { type: "text", value: m.subject || "" });
+    card.replaceChildren(memoryMeta(m), content,
+      el("div", { class: "fields" }, el("label", {}, "Subject", subject)),
+      el("div", { class: "actions" },
+        el("button", { class: "btn primary", onclick: () => attempt(async () => {
+          const r = await api("POST", `/api/memories/${m.id}`,
+            { content: content.value.trim(), subject: subject.value.trim() || null });
+          toast(`Saved as memory #${r.new_id}; the old version is kept as history`);
+          await show("memories");
+        }) }, "Save"),
+        el("button", { class: "btn", onclick: view }, "Cancel")));
+  }
+  async function remove() {
+    if (!confirm("Delete this memory and its earlier versions? This can't be undone.")) return;
+    await attempt(async () => {
+      const r = await api("DELETE", `/api/memories/${m.id}`);
+      toast(`Deleted ${r.deleted} version${r.deleted === 1 ? "" : "s"}`);
+      card.remove();
+      await refreshState();
+    });
+  }
+  view();
+  return card;
+}
+
+async function memoriesTab() {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
+  const list = await api("GET", `/api/memories?${params}`);
+  const search = el("input", { type: "search", placeholder: "Search memories", value: filters.q,
+    "aria-label": "Search memories", class: "grow" });
+  let timer;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => { filters.q = search.value; await show("memories", true); }, 250);
+  });
+  const select = (key, label, options) => {
+    const s = el("select", { "aria-label": label },
+      el("option", { value: "" }, `Any ${label}`),
+      options.map((o) => el("option", { value: o, selected: o === filters[key] }, o)));
+    s.addEventListener("change", () => { filters[key] = s.value; show("memories"); });
+    return s;
+  };
+  const toolbar = el("div", { class: "toolbar" }, search,
+    select("scope", "scope", state.scopes), select("kind", "kind", state.kinds),
+    state.projects.length > 0 && select("project", "project", state.projects));
+  return [toolbar,
+    list.length ? list.map(memoryCard) : el("div", { class: "empty" }, "No memories match.")];
+}
+
+// --- tabs --------------------------------------------------------------------------
+
+async function show(name, keepFocus = false) {
+  tab = name;
+  for (const b of document.querySelectorAll("nav button")) b.setAttribute("aria-selected", b.dataset.tab === name);
+  await attempt(async () => {
+    await refreshState();  // counts and notes can change behind the page: a client may have just proposed
+    const build = { proposals: proposalsTab, conflicts: conflictsTab, memories: memoriesTab, decided: decidedTab }[name];
+    const focused = keepFocus && document.activeElement?.type === "search";
+    $("main").replaceChildren(...(await build()).flat().filter(Boolean));
+    if (focused) {
+      const s = document.querySelector('#main input[type="search"]');
+      s.focus();
+      s.setSelectionRange(s.value.length, s.value.length);
+    }
+  });
+}
+
+for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => show(b.dataset.tab));
+show("proposals");
+</script>
+</body>
+</html>

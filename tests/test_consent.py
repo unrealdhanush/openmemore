@@ -1,4 +1,4 @@
-"""SPEC.md M6: OpenMCP asks before running in the background, in a native dialog when
+"""SPEC.md M6: OpenMemore asks before running in the background, in a native dialog when
 there's a desktop session, else in the terminal; the default is no. The dialogs are
 faked here: tests never show one."""
 
@@ -8,8 +8,8 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import plain
-from openmcp import config, consent, db, service
-from openmcp.cli import _offer_daemon, app, initialize
+from openmemore import config, consent, db, service
+from openmemore.cli import _offer_daemon, app, initialize
 
 real_ask = consent.ask
 """The real function, captured at import, before conftest's autouse fixture replaces it."""
@@ -63,7 +63,7 @@ def test_windows_message_box():
     yes = Dialog(0, "Yes\r\n")
     assert _real_ask(asker("win32", yes)) == "allowed"
     args, kwargs = yes.calls[0]
-    assert kwargs["env"]["OPENMCP_CONSENT_TEXT"] == consent.MESSAGE and consent.MESSAGE not in " ".join(args)
+    assert kwargs["env"]["OPENMEMORE_CONSENT_TEXT"] == consent.MESSAGE and consent.MESSAGE not in " ".join(args)
     assert _real_ask(asker("win32", Dialog(0, "No"))) == "denied"
 
 
@@ -83,7 +83,7 @@ def test_linux_needs_a_display():
 @pytest.fixture
 def installs(monkeypatch):
     """Record service installs instead of running launchctl, systemctl, or schtasks."""
-    from openmcp import daemon
+    from openmemore import daemon
 
     done = []
     monkeypatch.setattr(service, "install", lambda svc, run=None: done.append(svc))
@@ -97,7 +97,7 @@ def cli(*args):
 
 
 def audit_rows(home):
-    return [tuple(r) for r in db.connect(home / "openmcp.db").execute(
+    return [tuple(r) for r in db.connect(home / "openmemore.db").execute(
         "SELECT tool, summary FROM audit_log WHERE tool = 'daemon install'")]
 
 
@@ -124,7 +124,7 @@ def test_yes_is_permission_given_up_front(home, installs, consent_answers):
 def test_when_there_is_no_way_to_ask(home, installs, consent_answers):
     consent_answers.append("unavailable")
     code, out = cli("daemon", "install")
-    assert code == 1 and installs == [] and "openmcp daemon install --yes" in out
+    assert code == 1 and installs == [] and "openmemore daemon install --yes" in out
 
 
 def test_dry_run_doesn_t_ask(home, installs, consent_answers):

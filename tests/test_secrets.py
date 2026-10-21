@@ -1,6 +1,6 @@
 import pytest
 
-from openmcp.safety.secrets import find_secret, redact
+from openmemore.safety.secrets import find_secret, redact
 
 # Synthetic values only: shaped like real secrets, valid for nothing.
 SECRETS = {

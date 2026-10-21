@@ -1,4 +1,4 @@
-"""SPEC.md M7: automatic consolidation with a model OpenMCP calls itself, through the open
+"""SPEC.md M7: automatic consolidation with a model OpenMemore calls itself, through the open
 standard for LLM APIs (Open Responses, or Chat Completions). Off by default; a local
 endpoint sends nothing off the machine; a remote one needs permission first."""
 
@@ -16,10 +16,10 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import plain
-from openmcp import config, consolidate, daemon, db, llm, repo
-from openmcp.cli import app, initialize
-from openmcp.ingest import store_conversation
-from openmcp.models import ParsedConversation, ParsedMessage
+from openmemore import config, consolidate, daemon, db, llm, repo
+from openmemore.cli import app, initialize
+from openmemore.ingest import store_conversation
+from openmemore.models import ParsedConversation, ParsedMessage
 
 LOCAL = "http://127.0.0.1:11434/v1"
 
@@ -103,7 +103,7 @@ def test_what_counts_as_local():
 @pytest.fixture
 def store(home):
     initialize(home)
-    conn = db.connect(home / "openmcp.db")
+    conn = db.connect(home / "openmemore.db")
     yield home, conn
     conn.close()
 
@@ -276,11 +276,11 @@ def test_run_status_and_off(home, answers):
     code, out = cli("consolidate", "run")
     assert code == 2 and "Not set up yet" in out
     set_up(home)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         chat(conn, "a", ("user", "I prefer window seats."))
     answers.answers.append(memories({"kind": "preference", "content": "Prefers window seats."}))
     code, out = cli("consolidate", "run")
-    assert code == 0 and "Consolidated 1 conversations into 1 proposals" in out and "openmcp review" in out
+    assert code == 0 and "Consolidated 1 conversations into 1 proposals" in out and "openmemore review" in out
     code, out = cli("consolidate", "status")
     assert "last run" in out and "1 proposals" in out
     code, out = cli("consolidate", "off", "--forget")

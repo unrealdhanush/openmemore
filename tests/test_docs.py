@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from openmcp import consolidate, llm
-from openmcp.models import CONVERSATION_BATCH_CHARS
+from openmemore import consolidate, llm
+from openmemore.models import CONVERSATION_BATCH_CHARS
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 

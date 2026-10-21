@@ -2,10 +2,10 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import caller, insert
-from openmcp import repo
-from openmcp.models import MemoryInput
-from openmcp.tools.memories import content_hash, forget, save_memories, update_memory
-from openmcp.tools.search import search_context
+from openmemore import repo
+from openmemore.models import MemoryInput
+from openmemore.tools.memories import content_hash, forget, save_memories, update_memory
+from openmemore.tools.search import search_context
 
 
 def items(*contents, kind="preference", **extra):
@@ -21,10 +21,10 @@ def active_count(conn):
 
 def test_save_records_scope_source_and_fields(conn):
     result = save_memories(conn, caller("cursor", read=["work"], write="work"),
-                           items("Uses ruff.", subject="tooling", project="OpenMCP", confidence=0.8))
+                           items("Uses ruff.", subject="tooling", project="OpenMemore", confidence=0.8))
     m = repo.get_memory(conn, result.saved[0])
     assert (m.kind, m.scope, m.source_client, m.subject, m.project, m.confidence) == (
-        "preference", "work", "cursor", "tooling", "OpenMCP", 0.8,
+        "preference", "work", "cursor", "tooling", "OpenMemore", 0.8,
     )
     assert m.created_at.tzinfo is not None and m.metadata == {}
 

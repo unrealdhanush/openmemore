@@ -10,12 +10,12 @@ import pytest
 from mcp import Client
 from mcp.types import Implementation
 
-from openmcp import config, db, embed, repo
-from openmcp import setup as client_setup
-from openmcp.config import ClientScopes
-from openmcp.models import NewMemory
-from openmcp.tools import Caller
-from openmcp.tools.memories import content_hash
+from openmemore import config, db, embed, repo
+from openmemore import setup as client_setup
+from openmemore.config import ClientScopes
+from openmemore.models import NewMemory
+from openmemore.tools import Caller
+from openmemore.tools.memories import content_hash
 
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
@@ -35,14 +35,14 @@ def isolated_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     user_home = tmp_path / "user-home"
     monkeypatch.setenv("HOME", str(user_home))
     monkeypatch.setenv("USERPROFILE", str(user_home))
-    for var in ("APPDATA", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "OPENMCP_HOME"):
+    for var in ("APPDATA", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "OPENMEMORE_HOME"):
         monkeypatch.delenv(var, raising=False)
     return user_home
 
 
 # Where the real embedding model is cached for tests marked `real_model`: outside the
 # per-test home directories, so it downloads once per machine (CI caches it).
-MODEL_CACHE = Path(os.environ.get("OPENMCP_TEST_MODEL_DIR") or Path.home() / ".cache" / "openmcp-test-models")
+MODEL_CACHE = Path(os.environ.get("OPENMEMORE_TEST_MODEL_DIR") or Path.home() / ".cache" / "openmemore-test-models")
 
 
 class FakeEmbedder:
@@ -75,7 +75,7 @@ class FakeEmbedder:
 @pytest.fixture(autouse=True)
 def no_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """By default there is no embedding model (keyword search only), as on a machine
-    that hasn't run `openmcp embed`. Tests opt in with `fake_embedder` or
+    that hasn't run `openmemore embed`. Tests opt in with `fake_embedder` or
     `real_embedder`, whose patch runs after this one and wins."""
     monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: None)
 
@@ -86,7 +86,7 @@ REAL_COPY_TO_CLIPBOARD = client_setup.copy_to_clipboard
 
 @pytest.fixture(autouse=True)
 def clipboard(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Never touch the real clipboard: `openmcp setup` copies the standing instruction.
+    """Never touch the real clipboard: `openmemore setup` copies the standing instruction.
     Copies are recorded here, and report success."""
     copied: list[str] = []
     monkeypatch.setattr(client_setup, "copy_to_clipboard", lambda text: copied.append(text) or True)
@@ -95,7 +95,7 @@ def clipboard(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.fixture(autouse=True)
 def installed_copy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests run from a development checkout, so `openmcp setup` would hand off to the
+    """Tests run from a development checkout, so `openmemore setup` would hand off to the
     machine's installed copy. By default, behave like an installed copy instead."""
     monkeypatch.setattr(client_setup, "development_checkout", lambda: None)
 
@@ -110,11 +110,11 @@ def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> FakeEmbedder:
 @pytest.fixture
 def real_embedder(monkeypatch: pytest.MonkeyPatch):
     """The real model (downloaded to MODEL_CACHE on first use). Skipped when it can't be
-    downloaded, unless OPENMCP_REQUIRE_MODEL is set (CI), where that's a failure."""
+    downloaded, unless OPENMEMORE_REQUIRE_MODEL is set (CI), where that's a failure."""
     try:
         model = embed.FastEmbedder(MODEL_CACHE, allow_download=True)
     except Exception as e:  # noqa: BLE001
-        if os.environ.get("OPENMCP_REQUIRE_MODEL"):
+        if os.environ.get("OPENMEMORE_REQUIRE_MODEL"):
             raise
         pytest.skip(f"embedding model unavailable: {e}")
     monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: model)
@@ -123,9 +123,9 @@ def real_embedder(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An isolated OPENMCP_HOME so tests never touch ~/.openmcp."""
-    base = tmp_path / "openmcp-home"
-    monkeypatch.setenv("OPENMCP_HOME", str(base))
+    """An isolated OPENMEMORE_HOME so tests never touch ~/.openmemore."""
+    base = tmp_path / "openmemore-home"
+    monkeypatch.setenv("OPENMEMORE_HOME", str(base))
     return base
 
 
@@ -143,7 +143,7 @@ def conn(tmp_path: Path):
 def connect(home: Path, app: str = "claude-desktop") -> Client:
     """An in-process MCP session with a server for `home`, as the application `app`
     (which is also the client name, since app names are already config-friendly here)."""
-    from openmcp.server import build_server
+    from openmemore.server import build_server
 
     return Client(build_server(home), client_info=Implementation(name=app, version="test"))
 
@@ -174,9 +174,9 @@ def insert(conn, content: str, *, kind="fact", scope="personal", project=None, s
 
 @pytest.fixture(autouse=True)
 def consent_answers(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Never show a real permission dialog or prompt: OpenMCP's own consent question
-    (openmcp.consent.ask) answers 'denied' unless a test appends another answer here."""
-    from openmcp import consent
+    """Never show a real permission dialog or prompt: OpenMemore's own consent question
+    (openmemore.consent.ask) answers 'denied' unless a test appends another answer here."""
+    from openmemore import consent
 
     answers: list[str] = []
     monkeypatch.setattr(consent, "ask", lambda *a, **k: answers.pop(0) if answers else "denied")

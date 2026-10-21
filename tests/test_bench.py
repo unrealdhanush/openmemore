@@ -110,7 +110,7 @@ def test_sampling_spreads_over_types():
 
 def test_judged_answers():
     from bench.judge import answerer
-    from openmcp import llm
+    from openmemore import llm
 
     replies = iter(["Tomatoes and basil.", "correct", "I don't know.", "incorrect"])
 

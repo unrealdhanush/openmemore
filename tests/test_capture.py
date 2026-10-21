@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 from conftest import caller
-from openmcp import repo
-from openmcp.capture import capture, claude_code, vscode_copilot
-from openmcp.config import CaptureConfig, Config
-from openmcp.tools.conversations import recent_conversations
-from openmcp.tools.search import search_context
+from openmemore import repo
+from openmemore.capture import capture, claude_code, vscode_copilot
+from openmemore.config import CaptureConfig, Config
+from openmemore.tools.conversations import recent_conversations
+from openmemore.tools.search import search_context
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CFG = Config(capture=CaptureConfig(sources=("claude-code", "vscode-copilot")))
@@ -277,7 +277,7 @@ def test_vscode_tool_messages_can_be_plain_strings(tmp_path):
 
 
 def test_one_broken_transcript_doesnt_stop_the_others(conn, user_home, monkeypatch):
-    from openmcp import capture as capture_module
+    from openmemore import capture as capture_module
     add_claude_session(user_home)
     add_vscode_session(user_home)
     original = capture_module.SOURCES["vscode-copilot"]
@@ -343,7 +343,7 @@ def test_without_a_folder_a_chat_is_captured_unless_folders_are_included(conn, u
 
 
 def test_a_skipped_transcript_isn_t_read_again_until_its_folder_is_captured(conn, user_home, monkeypatch):
-    from openmcp.capture import SOURCES, Source
+    from openmemore.capture import SOURCES, Source
 
     path = session_in(user_home, "/work/client", "a", "First.")
     excluded = folders(exclude=("/work/client",))
@@ -381,9 +381,9 @@ def test_folders_take_home_shortcuts_and_vscode_workspaces(conn, user_home, monk
 
 
 def test_setup_mentions_folders_quietly_when_it_turns_on_capture(tmp_path):
-    from openmcp.setup import Context, plan
+    from openmemore.setup import Context, plan
 
-    ctx = Context(base=tmp_path, user_home=tmp_path, platform="darwin", command=("openmcp",))
+    ctx = Context(base=tmp_path, user_home=tmp_path, platform="darwin", command=("openmemore",))
     notes = [s.note for s in plan("vscode-copilot", ctx) if s.note]
     assert notes == ["Only some projects? List folders under include_folders or exclude_folders in [capture]."]
     assert not any(s.note for s in plan("cursor", ctx))

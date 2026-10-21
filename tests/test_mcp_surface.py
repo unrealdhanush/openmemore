@@ -10,13 +10,13 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from mcp.types import Implementation
 
-from openmcp import config, db
-from openmcp.capture import vscode_copilot
-from openmcp.cli import initialize
+from openmemore import config, db
+from openmemore.capture import vscode_copilot
+from openmemore.cli import initialize
 from conftest import connect, example_clients
-from openmcp.models import MAX_SAVE_ITEMS
-from openmcp.safety.wrap import NOTICE
-from openmcp.server import IMPORT_MY_MEMORY
+from openmemore.models import MAX_SAVE_ITEMS
+from openmemore.safety.wrap import NOTICE
+from openmemore.server import IMPORT_MY_MEMORY
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -29,13 +29,13 @@ def server(home):
 
 
 def stdio(home, app, user_home=None):
-    """`openmcp serve` in its own process, as MCP clients start it; `app` is the
+    """`openmemore serve` in its own process, as MCP clients start it; `app` is the
     application name the client reports."""
-    env = {"OPENMCP_HOME": str(home)}
+    env = {"OPENMEMORE_HOME": str(home)}
     if user_home is not None:
         env["HOME"] = env["USERPROFILE"] = str(user_home)  # Path.home(): HOME on POSIX, USERPROFILE on Windows
     return Client(
-        StdioServerParameters(command=sys.executable, args=["-m", "openmcp.cli", "serve"], env=env),
+        StdioServerParameters(command=sys.executable, args=["-m", "openmemore.cli", "serve"], env=env),
         client_info=Implementation(name=app, version="test"), read_timeout_seconds=30,
     )
 
@@ -92,7 +92,7 @@ async def test_m1_5_done_when_a_transcript_is_found_without_record_exchange(home
         found = await claude.call_tool("search_context", {"query": "parse Retry-After"})
         assert found.structured_content["results"][0]["conversation_id"] == conv["id"]
 
-    rows = db.connect(home / "openmcp.db").execute(
+    rows = db.connect(home / "openmemore.db").execute(
         "SELECT summary FROM audit_log WHERE tool = 'recent_conversations' ORDER BY id"
     ).fetchall()
     assert "captured 5" in rows[-1][0]
@@ -213,11 +213,11 @@ async def test_every_call_is_audited_with_a_short_summary(server, home):
         await client.call_tool("search_context", {"query": long_query})
         await client.call_tool("get_profile", {})
         await client.call_tool("forget", {"id": 999})
-        await client.read_resource("openmcp://profile")
+        await client.read_resource("openmemore://profile")
 
-    conn = db.connect(home / "openmcp.db")
+    conn = db.connect(home / "openmemore.db")
     rows = {r["tool"]: r for r in conn.execute("SELECT * FROM audit_log")}
-    assert set(rows) == {"save_memories", "search_context", "get_profile", "forget", "openmcp://profile"}
+    assert set(rows) == {"save_memories", "search_context", "get_profile", "forget", "openmemore://profile"}
     assert rows["save_memories"]["result_count"] == 1
     assert len(rows["search_context"]["summary"]) < 80
     assert rows["forget"]["summary"] == "error: ToolError"
@@ -237,7 +237,7 @@ async def test_import_my_memory_prompt(server):
 async def test_profile_resource_matches_get_profile(server):
     async with server() as client:
         await client.call_tool("save_memories", {"items": [{"kind": "preference", "content": "Prefers dark mode."}]})
-        resource = await client.read_resource("openmcp://profile")
+        resource = await client.read_resource("openmemore://profile")
         tool = await client.call_tool("get_profile", {})
     payload = json.loads(resource.contents[0].text)
     assert payload["notice"] == NOTICE
@@ -259,7 +259,7 @@ async def test_tool_descriptions_tell_models_when_to_act(server):
     assert "later one is current" in tools["recent_conversations"]
     assert "what did I ask Claude earlier?" in tools["recent_conversations"]
     assert "only when the user asks you to consolidate" in tools["consolidation_batch"]
-    assert "openmcp review" in tools["propose_memories"]
+    assert "openmemore review" in tools["propose_memories"]
 
 
 @pytest.mark.anyio
@@ -294,5 +294,5 @@ async def test_ignore_scopes_shares_everything_with_every_client(server, home):
     assert (ping["read_scopes"], ping["write_scope"]) == (None, "work")
     assert {h["type"] for h in hits} == {"memory", "chat"}
     assert not updated.is_error
-    rows = dict(db.connect(home / "openmcp.db").execute("SELECT content, scope FROM memories WHERE superseded_by IS NULL"))
+    rows = dict(db.connect(home / "openmemore.db").execute("SELECT content, scope FROM memories WHERE superseded_by IS NULL"))
     assert rows == {"Has two cats, Miso and Tofu.": "personal", "Uses Go at work.": "work"}  # labels kept

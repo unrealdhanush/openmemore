@@ -12,10 +12,10 @@ from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
 from opentelemetry.proto.common.v1 import common_pb2
 
-from openmcp import config, db, repo
-from openmcp.capture import otlp
-from openmcp.capture.otel import ingest
-from openmcp.cli import initialize
+from openmemore import config, db, repo
+from openmemore.capture import otlp
+from openmemore.capture.otel import ingest
+from openmemore.cli import initialize
 
 T0 = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 EVENT = "gen_ai.client.inference.operation.details"
@@ -135,7 +135,7 @@ def traces_pb(*calls):
         span.start_time_unix_nano = int(nanos(c["start"]))
         span.end_time_unix_nano = int(nanos(c["end"]))
         span.attributes.extend(kvs_pb(c["attributes"]))
-        span.status.code = 1  # fields OpenMCP doesn't read: skipped
+        span.status.code = 1  # fields OpenMemore doesn't read: skipped
         span.links.add(trace_id=b"\x03" * 16, span_id=b"\x04" * 8)
     return request.SerializeToString()
 
@@ -244,8 +244,8 @@ def test_without_an_id_the_opening_message_identifies_the_chat(conn, cfg):
 
 def test_a_turn_that_used_a_recall_tool_is_a_recap_and_stays_one(conn, cfg):
     ask = [text("user", "What did I ask Copilot?")]
-    send(conn, cfg, traces_json(call(ask, [tool_call("mcp_openmcp_recent_conversations")])))
-    looked_up = [*ask, tool_call("mcp_openmcp_recent_conversations"), tool_result("lists vs tuples")]
+    send(conn, cfg, traces_json(call(ask, [tool_call("mcp_openmemore_recent_conversations")])))
+    looked_up = [*ask, tool_call("mcp_openmemore_recent_conversations"), tool_result("lists vs tuples")]
     send(conn, cfg, traces_json(call(looked_up, "You asked about lists.", at=3)))
     next_turn = [*looked_up, text("assistant", "You asked about lists."), text("user", "Plan a garden.")]
     send(conn, cfg, traces_json(call(next_turn, "Start with tomatoes.", at=9)))
@@ -273,7 +273,7 @@ def test_the_app_is_its_service_name_and_gets_that_clients_scope(home):
     initialize(home)
     cfg = config.load_config(home / "config.toml")
     cfg.clients["work-bot"] = config.ClientOverride(read_scopes=("work",), write_scope="work")
-    with closing(db.open_db(home / "openmcp.db")) as conn:
+    with closing(db.open_db(home / "openmemore.db")) as conn:
         send(conn, cfg, traces_json(call([text("user", "Deploy steps?")], "make deploy", service="Work Bot")))
         [c] = repo.list_conversations(conn, scopes=None)
         assert (c.provider, c.scope) == ("work-bot", "work")
@@ -386,7 +386,7 @@ def test_earlier_convention_events_are_grouped_by_their_call(conn, cfg, encode):
 
 def test_earlier_convention_tool_calls_mark_a_recap(conn, cfg):
     ask = [{"role": "user", "content": "What did I ask Copilot?"}]
-    calls = [{"id": "c1", "type": "function", "function": {"name": "mcp_openmcp_search_context", "arguments": "{}"}}]
+    calls = [{"id": "c1", "type": "function", "function": {"name": "mcp_openmemore_search_context", "arguments": "{}"}}]
     events = [*legacy_events(ask, None, span="03" * 8)[:-1],
               {"name": "gen_ai.choice", "span": "03" * 8, "trace": "bb" * 16, "at": T0,
                "body": {"index": 0, "message": {"role": "assistant", "tool_calls": calls}}},

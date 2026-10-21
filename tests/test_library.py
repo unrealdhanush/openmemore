@@ -1,4 +1,4 @@
-"""SPEC.md M7.5: OpenMCP as a library. Programs share memory with assistants in-process;
+"""SPEC.md M7.5: OpenMemore as a library. Programs share memory with assistants in-process;
 the decorators record and recall without ever breaking the decorated function."""
 
 import asyncio
@@ -9,9 +9,9 @@ import sys
 import pytest
 
 from conftest import connect
-from openmcp import Memory, OpenMCPError, config, db
-from openmcp.cli import initialize
-from openmcp.safety.wrap import NOTICE, unwrap
+from openmemore import Memory, OpenMemoreError, config, db
+from openmemore.cli import initialize
+from openmemore.safety.wrap import NOTICE, unwrap
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def memory(home):
 
 
 def audit_apps(home):
-    return {tuple(r) for r in db.connect(home / "openmcp.db").execute("SELECT DISTINCT client, app FROM audit_log")}
+    return {tuple(r) for r in db.connect(home / "openmemore.db").execute("SELECT DISTINCT client, app FROM audit_log")}
 
 
 # --- direct calls -----------------------------------------------------------------------------
@@ -38,13 +38,13 @@ def test_save_search_profile_update_forget(memory, home):
     new_id = memory.update(memory_id, "Prefers window seats.")
     assert [h.text for h in memory.search("seats", chats=False)] == ["Prefers window seats."]
     assert memory.forget(new_id) == 2
-    assert audit_apps(home) == {("trip-planner", "openmcp library")}
+    assert audit_apps(home) == {("trip-planner", "openmemore library")}
 
 
 def test_secrets_and_missing_ids_raise(memory):
-    with pytest.raises(OpenMCPError, match="not saved"):
+    with pytest.raises(OpenMemoreError, match="not saved"):
         memory.save("My token is ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", kind="fact")
-    with pytest.raises(OpenMCPError, match="not found"):
+    with pytest.raises(OpenMemoreError, match="not found"):
         memory.forget(999)
 
 
@@ -74,7 +74,7 @@ def test_scopes_apply_by_client_name(home):
     secret_id = personal.save("Personal thing.", kind="fact")
     work.save("Uses Go at work.", kind="fact")
     assert [h.text for h in work.search("thing work Go", chats=False)] == ["Uses Go at work."]
-    with pytest.raises(OpenMCPError, match="not found"):
+    with pytest.raises(OpenMemoreError, match="not found"):
         work.forget(secret_id)
 
 
@@ -175,7 +175,7 @@ def test_the_store_failing_never_breaks_the_function(memory, monkeypatch, caplog
     def plan(request: str, context: str = "") -> str:
         return f"context={context!r}"
 
-    with caplog.at_level(logging.WARNING, logger="openmcp"):
+    with caplog.at_level(logging.WARNING, logger="openmemore"):
         assert plan("Lisbon") == "context=''"
     assert "couldn't record" in caplog.text and "couldn't recall" in caplog.text
 
@@ -211,9 +211,9 @@ async def test_assistants_and_programs_share_one_memory(home):
     assert any(h["source"] == "trip-planner" and "Aisle seat booked." in h["content"] for h in found["results"])
 
 
-def test_importing_openmcp_stays_light():
-    """`import openmcp` must not load the store or the library: the server's start-up
+def test_importing_openmemore_stays_light():
+    """`import openmemore` must not load the store or the library: the server's start-up
     budget (SPEC.md Section 4.3) doesn't pay for them."""
-    out = subprocess.run([sys.executable, "-c", "import sys, openmcp; print(sorted(m for m in sys.modules "
-                          "if m.startswith('openmcp.')))"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([sys.executable, "-c", "import sys, openmemore; print(sorted(m for m in sys.modules "
+                          "if m.startswith('openmemore.')))"], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "[]"

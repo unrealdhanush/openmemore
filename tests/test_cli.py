@@ -11,10 +11,10 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import caller, insert, plain
-from openmcp import db
-from openmcp.audit import percentile, stats
-from openmcp.cli import app, initialize
-from openmcp.tools.conversations import record_exchange
+from openmemore import db
+from openmemore.audit import percentile, stats
+from openmemore.cli import app, initialize
+from openmemore.tools.conversations import record_exchange
 
 runner = CliRunner()
 
@@ -22,7 +22,7 @@ runner = CliRunner()
 @pytest.fixture
 def store(home):
     initialize(home)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         a = insert(conn, "Prefers Python.", kind="preference", scope="personal")
         b = insert(conn, "Work uses Go.", kind="fact", scope="work", project="Svc")
         c = insert(conn, "Work uses Go 1.23.", kind="fact", scope="work", project="Svc")
@@ -113,7 +113,7 @@ def test_percentiles():
 @pytest.fixture
 def chats(home):
     initialize(home)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         a = record_exchange(conn, caller("claude-desktop"), "How do I rate-limit Flask?", "Flask-Limiter.")
         b = record_exchange(conn, caller("gemini-cli"), "Explain WAL mode", "Readers don't block writers.")
         yield conn, a.conversation_id, b.conversation_id
@@ -166,9 +166,9 @@ def test_setup_config_merges_into_the_named_file(home, tmp_path):
     target = tmp_path / "client.json"
     result = run("setup", "some-editor", "--config", str(target))
     assert result.exit_code == 0, result.output
-    entry = json.loads(target.read_text())["mcpServers"]["openmcp"]
+    entry = json.loads(target.read_text())["mcpServers"]["openmemore"]
     assert entry["args"][-1] == "serve"
-    assert entry["env"] == {"OPENMCP_HOME": str(home)}  # tests use a non-default data directory
+    assert entry["env"] == {"OPENMEMORE_HOME": str(home)}  # tests use a non-default data directory
 
 
 def test_setup_turns_on_capture_and_catches_up(home, monkeypatch):
@@ -220,25 +220,25 @@ def test_capture_still_succeeds_without_a_model(home):
 
 @pytest.fixture
 def checkout(monkeypatch, tmp_path):
-    from openmcp import setup as client_setup
+    from openmemore import setup as client_setup
     monkeypatch.setattr(client_setup, "development_checkout", lambda: tmp_path / "repo")
     return client_setup
 
 
 def test_setup_from_a_checkout_hands_off_to_the_installed_copy(home, checkout, monkeypatch):
     calls = []
-    monkeypatch.setattr(checkout, "installed_command", lambda root: ("/opt/tools/openmcp",))
-    monkeypatch.setattr("openmcp.cli.subprocess.run", lambda args: calls.append(args) or subprocess.CompletedProcess(args, 0))
+    monkeypatch.setattr(checkout, "installed_command", lambda root: ("/opt/tools/openmemore",))
+    monkeypatch.setattr("openmemore.cli.subprocess.run", lambda args: calls.append(args) or subprocess.CompletedProcess(args, 0))
     result = run("setup", "vscode-copilot", "--dry-run")
-    assert result.exit_code == 0 and "installed openmcp at /opt/tools/openmcp" in " ".join(result.output.split())
-    assert calls == [["/opt/tools/openmcp", "setup", "vscode-copilot", "--dry-run"]]
+    assert result.exit_code == 0 and "installed openmemore at /opt/tools/openmemore" in " ".join(result.output.split())
+    assert calls == [["/opt/tools/openmemore", "setup", "vscode-copilot", "--dry-run"]]
     assert not (Path(os.environ["HOME"]) / "Library").exists()  # nothing configured from the checkout
 
 
 def test_setup_from_a_checkout_without_an_installed_copy_stops(home, checkout, monkeypatch):
     monkeypatch.setattr(checkout, "installed_command", lambda root: None)
     result = run("setup", "claude-desktop")
-    assert result.exit_code == 2 and "no installed openmcp was found" in " ".join(result.output.split())
+    assert result.exit_code == 2 and "no installed openmemore was found" in " ".join(result.output.split())
 
 
 def test_setup_dev_registers_the_checkout(home, checkout, monkeypatch, tmp_path):
@@ -246,4 +246,4 @@ def test_setup_dev_registers_the_checkout(home, checkout, monkeypatch, tmp_path)
     target = tmp_path / "client.json"
     result = run("setup", "some-editor", "--config", str(target), "--dev")
     assert result.exit_code == 0, result.output
-    assert json.loads(target.read_text())["mcpServers"]["openmcp"]
+    assert json.loads(target.read_text())["mcpServers"]["openmemore"]

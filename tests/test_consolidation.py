@@ -8,14 +8,14 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import caller, connect, insert
-from openmcp import config, db, repo
-from openmcp.capture.common import is_recall_tool
-from openmcp.cli import initialize
-from openmcp.ingest import store_conversation
-from openmcp.models import DoneConversation, ParsedConversation, ParsedMessage, ProposalInput
-from openmcp.proposals import reject
-from openmcp.tools import consolidation
-from openmcp.tools.consolidation import consolidation_batch, propose_memories
+from openmemore import config, db, repo
+from openmemore.capture.common import is_recall_tool
+from openmemore.cli import initialize
+from openmemore.ingest import store_conversation
+from openmemore.models import DoneConversation, ParsedConversation, ParsedMessage, ProposalInput
+from openmemore.proposals import reject
+from openmemore.tools import consolidation
+from openmemore.tools.consolidation import consolidation_batch, propose_memories
 
 ME = caller("claude-ai", read=["personal", "work"], write="personal")
 
@@ -49,7 +49,7 @@ def test_a_batch_has_unread_messages_newest_first_without_recaps(conn):
     assert [len(c.messages) for c in batch.conversations] == [2, 2]  # the recap turn is left out
     assert "Plan my garden." in batch.conversations[0].messages[0].content
     assert batch.conversations[0].messages[0].content.startswith("<stored_context ")
-    assert batch.remaining == 0 and "last batch" in batch.note and "openmcp review" in batch.note
+    assert batch.remaining == 0 and "last batch" in batch.note and "openmemore review" in batch.note
 
 
 def test_done_conversations_aren_t_read_again_until_they_grow(conn):
@@ -119,8 +119,8 @@ def test_duplicates_secrets_and_rejections(conn):
 
 
 def test_a_near_duplicate_of_a_memory_is_noted(conn, fake_embedder):
-    from openmcp.tools.memories import save_memories
-    from openmcp.models import MemoryInput
+    from openmemore.tools.memories import save_memories
+    from openmemore.models import MemoryInput
 
     [existing] = save_memories(conn, ME, [MemoryInput(kind="preference", content="Prefers green tea in the morning")]).saved
     result = propose_memories(conn, ME, [item("prefers green tea in the morning daily")], [])
@@ -130,7 +130,7 @@ def test_a_near_duplicate_of_a_memory_is_noted(conn, fake_embedder):
 
 
 def test_deleting_a_conversation_deletes_its_undecided_proposals(conn):
-    from openmcp.proposals import approve
+    from openmemore.proposals import approve
 
     conversation_id = chat(conn, "a", [("user", "I like tea."), ("user", "And jazz.")])
     pending, rejected, approved = propose_memories(conn, ME, [
@@ -146,7 +146,7 @@ def test_deleting_a_conversation_deletes_its_undecided_proposals(conn):
 
 
 def test_turns_that_consolidated_are_recaps_in_captured_transcripts():
-    assert is_recall_tool("mcp_openmcp_consolidation_batch")
+    assert is_recall_tool("mcp_openmemore_consolidation_batch")
 
 
 # --- through MCP, with scopes ------------------------------------------------------
@@ -160,7 +160,7 @@ def scoped(home):
     cfg = config.load_config(path)
     cfg.clients["work-app"] = config.ClientOverride(read_scopes=("work",), write_scope="work")
     config.save_config(path, cfg)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         personal = chat(conn, "p", [("user", "I'm vegetarian."), ("assistant", "Got it.")])
         work = chat(conn, "w", [("user", "Our API uses gRPC."), ("assistant", "Noted.")], scope="work")
     return home, personal, work
@@ -199,7 +199,7 @@ async def test_the_consolidate_prompt(scoped):
     async with connect(home, "home-app") as client:
         text = (await client.get_prompt("consolidate", {"batches": "3"})).messages[0].content.text
     assert "consolidation_batch" in text and "propose_memories" in text and "at most 3 batches" in text
-    assert "openmcp review" in text and "Don't call record_exchange" in text
+    assert "openmemore review" in text and "Don't call record_exchange" in text
 
 
 def test_a_proposal_can_name_the_memory_it_updates(conn):
@@ -227,7 +227,7 @@ def test_naming_a_memory_the_client_can_t_read_looks_like_naming_none(conn):
 
 
 def test_naming_an_old_version_points_to_the_current_one(conn):
-    from openmcp.tools.memories import update_memory
+    from openmemore.tools.memories import update_memory
 
     old = insert(conn, "Likes tea.", kind="preference")
     new = update_memory(conn, ME, old, "Likes green tea.").new_id

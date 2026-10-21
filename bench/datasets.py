@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-CACHE = Path(os.environ.get("OPENMCP_BENCH_DIR") or Path.home() / ".cache" / "openmcp-bench")
+CACHE = Path(os.environ.get("OPENMEMORE_BENCH_DIR") or Path.home() / ".cache" / "openmemore-bench")
 SOURCES = {
     "longmemeval-s": ("longmemeval_s_cleaned.json",
                       "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json"),

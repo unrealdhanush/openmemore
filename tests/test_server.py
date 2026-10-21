@@ -12,9 +12,9 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from conftest import plain
-from openmcp import config, db
-from openmcp.cli import app, initialize
-from openmcp.config import DEFAULT_CONFIG, ClientScopes, Config, load_config, resolve_client
+from openmemore import config, db
+from openmemore.cli import app, initialize
+from openmemore.config import DEFAULT_CONFIG, ClientScopes, Config, load_config, resolve_client
 from conftest import connect, example_clients
 from mcp.types import Implementation
 
@@ -38,21 +38,21 @@ async def test_ping_in_process(home):
 
 @pytest.mark.anyio
 async def test_ping_over_stdio(home):
-    """End to end: spawn `openmcp serve` as a real subprocess, the way MCP clients do.
+    """End to end: spawn `openmemore serve` as a real subprocess, the way MCP clients do.
 
     Serve must also bootstrap a data dir that `init` never created.
     """
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "openmcp.cli", "serve"],
-        env={"OPENMCP_HOME": str(home)},
+        args=["-m", "openmemore.cli", "serve"],
+        env={"OPENMEMORE_HOME": str(home)},
     )
     async with Client(params, client_info=Implementation(name="claude-desktop", version="1"), read_timeout_seconds=30) as client:
         result = await client.call_tool("ping", {})
         assert not result.is_error
         assert result.structured_content["client"] == "claude-desktop"
         assert result.structured_content["schema_version"] >= 1
-    assert (home / "openmcp.db").is_file()
+    assert (home / "openmemore.db").is_file()
 
 
 @pytest.mark.anyio
@@ -62,7 +62,7 @@ async def test_every_tool_call_is_audited(home):
         await client.call_tool("ping", {})
         await client.call_tool("ping", {})
 
-    conn = db.connect(home / "openmcp.db")
+    conn = db.connect(home / "openmemore.db")
     rows = conn.execute("SELECT ts, client, tool, duration_ms FROM audit_log ORDER BY id").fetchall()
     assert [(r["client"], r["tool"]) for r in rows] == [("cursor", "ping")] * 2
     assert all(r["duration_ms"] > 0 for r in rows)
@@ -70,13 +70,13 @@ async def test_every_tool_call_is_audited(home):
 
 
 def test_startup_under_budget(home):
-    """SPEC 4.3: `openmcp serve` answers its first request in under 500ms.
+    """SPEC 4.3: `openmemore serve` answers its first request in under 500ms.
 
     Best of 3, so a one-off cold start (bytecode compile, disk cache) doesn't fail the build.
-    CI sets OPENMCP_STARTUP_BUDGET_MS higher: shared runners start processes far slower
+    CI sets OPENMEMORE_STARTUP_BUDGET_MS higher: shared runners start processes far slower
     than the machines the budget is for.
     """
-    budget_ms = float(os.environ.get("OPENMCP_STARTUP_BUDGET_MS", "500"))
+    budget_ms = float(os.environ.get("OPENMEMORE_STARTUP_BUDGET_MS", "500"))
     initialize(home)
     init = json.dumps({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -86,9 +86,9 @@ def test_startup_under_budget(home):
     for _ in range(3):
         start = time.perf_counter()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "openmcp.cli", "serve"],
+            [sys.executable, "-m", "openmemore.cli", "serve"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-            env={**os.environ, "OPENMCP_HOME": str(home)},
+            env={**os.environ, "OPENMEMORE_HOME": str(home)},
         )
         try:
             proc.stdin.write(init)
@@ -155,7 +155,7 @@ def test_enable_capture_keeps_the_rest_of_the_config(tmp_path):
     assert config.enable_capture(path, "claude-code") is False
     cfg = config.load_config(path)
     assert cfg.capture.sources == ("claude-code",)
-    assert path.read_text().startswith("# OpenMCP configuration")  # the header survives rewrites
+    assert path.read_text().startswith("# OpenMemore configuration")  # the header survives rewrites
 
 
 def test_app_pins_are_gone(tmp_path):

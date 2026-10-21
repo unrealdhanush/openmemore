@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import caller, insert
-from openmcp.safety.wrap import NOTICE
-from openmcp.tools.search import fts_query, search_context
+from openmemore.safety.wrap import NOTICE
+from openmemore.tools.search import fts_query, search_context
 
 
 def ids(result):
@@ -19,12 +19,12 @@ def test_natural_language_question_finds_preference_via_stemming(conn):
 
 
 def test_results_are_wrapped_and_carry_metadata(conn):
-    mid = insert(conn, "Uses uv for packaging.", kind="preference", project="OpenMCP", source="cursor")
+    mid = insert(conn, "Uses uv for packaging.", kind="preference", project="OpenMemore", source="cursor")
     result = search_context(conn, caller(), "uv packaging")
     assert result.notice == NOTICE
     hit = result.results[0]
     assert hit.content.startswith(f'<stored_context source="cursor" id="{mid}">')
-    assert (hit.type, hit.kind, hit.project, hit.source) == ("memory", "preference", "OpenMCP", "cursor")
+    assert (hit.type, hit.kind, hit.project, hit.source) == ("memory", "preference", "OpenMemore", "cursor")
     assert hit.score > 0
 
 

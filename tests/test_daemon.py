@@ -1,4 +1,4 @@
-"""SPEC.md M6: `openmcp daemon`. The receiver only takes its own token, on its own host,
+"""SPEC.md M6: `openmemore daemon`. The receiver only takes its own token, on its own host,
 as JSON; the capture loop stores changed transcripts without a client reading; the
 service definitions run the daemon at login on each OS."""
 
@@ -19,8 +19,8 @@ from starlette.testclient import TestClient
 from typer.testing import CliRunner
 
 from conftest import plain
-from openmcp import config, daemon, db, repo, service
-from openmcp.cli import app, initialize
+from openmemore import config, daemon, db, repo, service
+from openmemore.cli import app, initialize
 from test_otel import call, logs_json, text, traces_json, traces_pb
 
 PORT = 47999
@@ -46,7 +46,7 @@ def test_the_receiver_stores_conversations(receiver, home):
     r = client.post("/v1/traces", json=traces_json(call([text("user", "How do I parse TOML?")], "Use tomllib.")),
                     headers=auth)
     assert (r.status_code, r.json()) == (200, {"partialSuccess": {}})
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         [c] = repo.list_conversations(conn, scopes=None)
         assert [m.content for m in repo.conversation_messages(conn, c.id)] == ["How do I parse TOML?", "Use tomllib."]
         assert conn.execute("SELECT client, tool FROM audit_log").fetchall()[-1][:] == ("daemon", "otel")
@@ -64,7 +64,7 @@ def test_the_receiver_takes_protobuf_gzip_and_logs(receiver, home):
     r = client.post("/v1/logs", content=zipped,
                     headers={**auth, "content-type": "application/json", "content-encoding": "gzip"})
     assert r.status_code == 200
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         assert sorted(c.title for c in repo.list_conversations(conn, scopes=None)) == ["First?", "Second?"]
 
 
@@ -86,7 +86,7 @@ def test_the_receiver_refuses(receiver, home, change, status):
     headers = {k: v for k, v in headers.items() if v is not None}
     body = json.dumps(traces_json(call([text("user", "Injected?")], "Yes.")))
     assert client.post("/v1/traces", content=body, headers=headers).status_code == status
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         assert repo.list_conversations(conn, scopes=None) == []
 
 
@@ -108,7 +108,7 @@ def test_a_tick_captures_changed_transcripts_without_a_client(home, isolated_use
     config.save_config(path, cfg)  # picked up without a restart
     assert daemon.tick(home).messages == 1
     assert daemon.tick(home).messages == 0  # unchanged since
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         assert [r[0] for r in conn.execute("SELECT tool FROM audit_log WHERE client = 'daemon'")] == ["capture"]
 
 
@@ -116,7 +116,7 @@ def test_a_tick_embeds_what_is_pending(home, fake_embedder):
     initialize(home)
     from conftest import insert
 
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         insert(conn, "Prefers tea.")
     assert daemon.tick(home).embedded == 1
 
@@ -128,12 +128,12 @@ def test_status_without_a_daemon(home):
 
 # --- service definitions ---------------------------------------------------------------
 
-COMMAND = ("/opt/tools/openmcp/bin/openmcp",)
+COMMAND = ("/opt/tools/openmemore/bin/openmemore",)
 
 
 def test_macos_launchd_agent(tmp_path):
     svc = service.describe("darwin", COMMAND, tmp_path / "data", tmp_path / "home", uid=501)
-    assert svc.file == tmp_path / "home" / "Library" / "LaunchAgents" / "dev.openmcp.daemon.plist"
+    assert svc.file == tmp_path / "home" / "Library" / "LaunchAgents" / "dev.openmemore.daemon.plist"
     plist = plistlib.loads(svc.content.encode())
     assert plist["ProgramArguments"] == [*COMMAND, "daemon", "run", "--home", str(tmp_path / "data"),
                                          "--log-file", str(tmp_path / "data" / "logs" / "daemon.log")]
@@ -143,11 +143,11 @@ def test_macos_launchd_agent(tmp_path):
 
 def test_linux_systemd_unit(tmp_path):
     data = Path("/home/me/my data")  # built on this OS: backslashes when the tests run on Windows
-    svc = service.describe("linux", ("/home/me/.local/bin/openmcp",), data, tmp_path)
-    assert svc.file == tmp_path / ".config" / "systemd" / "user" / "openmcp.service"
-    assert "ExecStart=" + shlex.join(["/home/me/.local/bin/openmcp", "daemon", "run", "--home", str(data)]) in svc.content
+    svc = service.describe("linux", ("/home/me/.local/bin/openmemore",), data, tmp_path)
+    assert svc.file == tmp_path / ".config" / "systemd" / "user" / "openmemore.service"
+    assert "ExecStart=" + shlex.join(["/home/me/.local/bin/openmemore", "daemon", "run", "--home", str(data)]) in svc.content
     assert "WantedBy=default.target" in svc.content
-    assert svc.install[-1] == ["systemctl", "--user", "enable", "--now", "openmcp.service"]
+    assert svc.install[-1] == ["systemctl", "--user", "enable", "--now", "openmemore.service"]
     assert any("enable-linger" in n for n in svc.notes)
 
 
@@ -155,12 +155,12 @@ def test_windows_logon_task_uses_pythonw_when_there_is_one(tmp_path):
     scripts = tmp_path / "Scripts"
     scripts.mkdir()
     (scripts / "pythonw.exe").write_text("")
-    svc = service.describe("win32", (str(scripts / "openmcp.exe"),), tmp_path / "data", tmp_path)
+    svc = service.describe("win32", (str(scripts / "openmemore.exe"),), tmp_path / "data", tmp_path)
     create = svc.install[0]
     task = create[create.index("/TR") + 1]
-    assert "pythonw.exe" in task and "-m openmcp daemon run" in task and "/SC" in create and "ONLOGON" in create
-    without = service.describe("win32", (str(tmp_path / "openmcp.exe"),), tmp_path / "data", tmp_path)
-    assert "openmcp.exe daemon run" in without.install[0][without.install[0].index("/TR") + 1]
+    assert "pythonw.exe" in task and "-m openmemore daemon run" in task and "/SC" in create and "ONLOGON" in create
+    without = service.describe("win32", (str(tmp_path / "openmemore.exe"),), tmp_path / "data", tmp_path)
+    assert "openmemore.exe daemon run" in without.install[0][without.install[0].index("/TR") + 1]
 
 
 def test_unknown_platform():
@@ -204,14 +204,14 @@ def test_telemetry_prints_the_standard_settings(home):
     token = config.load_config(home / "config.toml").daemon.token
     assert code == 0
     assert "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:47318" in out
-    assert f"OTEL_EXPORTER_OTLP_HEADERS=x-openmcp-token={token}" in out
+    assert f"OTEL_EXPORTER_OTLP_HEADERS=x-openmemore-token={token}" in out
     assert "gen_ai.input.messages" in out and "claude" not in out.lower()
 
 
 def test_install_dry_run_changes_nothing(home, isolated_user):
     code, out = cli("daemon", "install", "--dry-run")
     assert code == 0 and "dry run" in out and "--home" in out and "--log-file" in out
-    assert not any(isolated_user.rglob("*.plist")) and not any(isolated_user.rglob("openmcp.service"))
+    assert not any(isolated_user.rglob("*.plist")) and not any(isolated_user.rglob("openmemore.service"))
 
 
 # --- the real process --------------------------------------------------------------------
@@ -224,7 +224,7 @@ def free_port() -> int:
 
 
 def test_the_daemon_process_receives_and_captures(home, isolated_user):
-    """`python -m openmcp daemon run`, as the services start it: it answers health checks,
+    """`python -m openmemore daemon run`, as the services start it: it answers health checks,
     stores what an exporter sends, captures transcripts on its own, and says where it is."""
     initialize(home)
     port = free_port()
@@ -236,7 +236,7 @@ def test_the_daemon_process_receives_and_captures(home, isolated_user):
     token = daemon.ensure_token(home)
     log = home / "logs" / "daemon.log"
     env = {**os.environ, "HOME": str(isolated_user), "USERPROFILE": str(isolated_user)}
-    proc = subprocess.Popen([sys.executable, "-m", "openmcp", "daemon", "run", "--home", str(home),
+    proc = subprocess.Popen([sys.executable, "-m", "openmemore", "daemon", "run", "--home", str(home),
                              "--log-file", str(log)], env=env)
     pid = None
     try:
@@ -257,7 +257,7 @@ def test_the_daemon_process_receives_and_captures(home, isolated_user):
         write_transcript(isolated_user, "s2", "Hi from a transcript.")
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            with closing(db.connect(home / "openmcp.db")) as conn:
+            with closing(db.connect(home / "openmemore.db")) as conn:
                 titles = {c.title for c in repo.list_conversations(conn, scopes=None)}
             if titles == {"Hi from OTel.", "Hi from a transcript."}:
                 break

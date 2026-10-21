@@ -7,12 +7,12 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import caller, insert
-from openmcp import consolidate, db, relations, repo
-from openmcp.models import ProposalInput
-from openmcp.proposals import Approval, approve
-from openmcp.tools.consolidation import propose_memories
-from openmcp.tools.profile import get_profile
-from openmcp.tools.search import search_context
+from openmemore import consolidate, db, relations, repo
+from openmemore.models import ProposalInput
+from openmemore.proposals import Approval, approve
+from openmemore.tools.consolidation import propose_memories
+from openmemore.tools.profile import get_profile
+from openmemore.tools.search import search_context
 
 ME = caller("claude-ai", read=["personal"], write="personal")
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
@@ -101,11 +101,11 @@ def test_review_page_conflicts(home):
 
     from starlette.testclient import TestClient
 
-    from openmcp.cli import initialize
-    from openmcp.review import CHANGE_HEADER, build_app
+    from openmemore.cli import initialize
+    from openmemore.review import CHANGE_HEADER, build_app
 
     initialize(home)
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         veg = insert(conn, "Is vegetarian.", kind="fact")
         [pid] = propose_memories(conn, ME, [ProposalInput(kind="fact", content="Eats fish.", contradicts=veg)], []).proposed
     page = TestClient(build_app(home, "t", 1), base_url="http://127.0.0.1:1")
@@ -120,6 +120,6 @@ def test_review_page_conflicts(home):
     assert r.status_code == 200 and page.get("/api/conflicts").json() == []
     again = page.post(f"/api/conflicts/{conflict['id']}/resolve", json={"resolution": "both"}, headers={CHANGE_HEADER: "1"})
     assert again.status_code == 400 and "already resolved" in again.json()["error"]
-    with closing(db.connect(home / "openmcp.db")) as conn:
+    with closing(db.connect(home / "openmemore.db")) as conn:
         assert [r[0] for r in conn.execute("SELECT tool FROM audit_log WHERE client = 'review'")] == [
             "approve", "resolve conflict", "resolve conflict"]

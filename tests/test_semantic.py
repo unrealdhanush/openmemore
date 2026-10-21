@@ -5,13 +5,13 @@ import pytest
 from mcp import Client
 
 from conftest import FakeEmbedder, caller, insert
-from openmcp import embed, repo
-from openmcp.cli import initialize
-from openmcp.models import MemoryInput
+from openmemore import embed, repo
+from openmemore.cli import initialize
+from openmemore.models import MemoryInput
 from conftest import connect
-from openmcp.tools.conversations import record_exchange
-from openmcp.tools.memories import save_memories, update_memory
-from openmcp.tools.search import SIMILARITY_FLOOR, search_context
+from openmemore.tools.conversations import record_exchange
+from openmemore.tools.memories import save_memories, update_memory
+from openmemore.tools.search import SIMILARITY_FLOOR, search_context
 
 ME = caller("claude-desktop", read=["personal", "work"], write="personal")
 WORK_ONLY = caller("cursor", read=["work"], write="work")
@@ -199,7 +199,7 @@ async def test_ping_reports_semantic_search(home, monkeypatch):
         off = (await client.call_tool("ping", {})).structured_content["semantic_search"]
         monkeypatch.setattr(embed, "get_embedder", lambda allow_download=False: FakeEmbedder())
         on = (await client.call_tool("ping", {})).structured_content["semantic_search"]
-    assert off.startswith("unavailable") and "openmcp embed" in off
+    assert off.startswith("unavailable") and "openmemore embed" in off
     assert on == f"ready ({embed.MODEL})"
 
 
@@ -276,7 +276,7 @@ def test_stems_match_the_index(conn):
 
 
 def test_the_most_common_words_are_left_out_of_chat_keyword_search(conn, monkeypatch):
-    from openmcp.tools import search
+    from openmemore.tools import search
     for i in range(6):
         record_exchange(conn, ME, f"code question {i}", "code answer" + (" redis" if i == 0 else ""))
     monkeypatch.setattr(search, "MAX_CHUNK_KEYWORD_MATCHES", 3)

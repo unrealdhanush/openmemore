@@ -8,8 +8,8 @@ connection per call, with the real embedding model, warm. Stored vectors are ran
 unit vectors (embedding 110k texts would take most of an hour, and search time
 doesn't depend on what the vectors contain); queries and saved items use the model.
 
-Exits non-zero if a p95 is over budget. Needs the model: run `openmcp embed` first,
-or set OPENMCP_MODEL_DIR to a directory that has it.
+Exits non-zero if a p95 is over budget. Needs the model: run `openmemore embed` first,
+or set OPENMEMORE_MODEL_DIR to a directory that has it.
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ from pathlib import Path
 
 import numpy as np
 
-from openmcp import db, embed, repo
-from openmcp.audit import percentile
-from openmcp.config import ClientScopes
-from openmcp.models import MemoryInput, NewConversation, NewMemory, NewMessage
-from openmcp.tools import Caller
-from openmcp.tools.memories import content_hash, save_memories
-from openmcp.tools.search import search_context
+from openmemore import db, embed, repo
+from openmemore.audit import percentile
+from openmemore.config import ClientScopes
+from openmemore.models import MemoryInput, NewConversation, NewMemory, NewMessage
+from openmemore.tools import Caller
+from openmemore.tools.memories import content_hash, save_memories
+from openmemore.tools.search import search_context
 
 BUDGET_MS = {"search_context": 100.0, "save_memories (20 items)": 300.0}
 TOPIC_WORDS = """
@@ -119,7 +119,7 @@ def main() -> int:
 
     embedder = embed.get_embedder()
     if embedder is None:
-        print(f"The embedding model isn't in {embed.model_dir()}: run `openmcp embed` first.", file=sys.stderr)
+        print(f"The embedding model isn't in {embed.model_dir()}: run `openmemore embed` first.", file=sys.stderr)
         return 2
 
     with tempfile.TemporaryDirectory() as tmp:
