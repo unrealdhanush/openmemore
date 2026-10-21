@@ -191,11 +191,14 @@ def clients_command(
     """List the MCP clients that have connected, and the scopes each one gets."""
     from openmemore.capture import captured_source
     from openmemore.clients import client_name
+    from openmemore.library import APP as LIBRARY_APP
 
     cfg = config.load_config(config.config_path(config.home()))
     with _db() as conn:
         seen = repo.seen_clients(conn)
-    current = [row for row in seen if row[1] is not None and row[0] == client_name(row[1])]
+    # A client is named after its application, except a program using the library, which
+    # names itself: anything else is an earlier version's name for it.
+    current = [row for row in seen if row[1] == LIBRARY_APP or (row[1] is not None and row[0] == client_name(row[1]))]
     earlier = len(seen) - len(current)
     seen = seen if show_all else current
     if not seen:
@@ -541,11 +544,11 @@ def import_command(
             raise typer.Exit(130) from None
 
     name = _format_name(report.provider)
+    what = name if report.provider == "openmemore" else f"{name} export"  # "OpenMemore export" already says it
     if report.already_done:
-        console.print(f"Already imported: this {name} export ({report.total} conversations) was imported before.")
+        console.print(f"Already imported: this {what} ({report.total} conversations) was imported before.")
         return
     resumed = f", resuming at {report.resumed_from}" if report.resumed_from else ""
-    what = name if report.provider == "openmemore" else f"{name} export"  # "OpenMemore export" already says it
     where = f"into scope '{target_scope}'" if request.scope or report.provider != "openmemore" else "keeping its scopes"
     console.print(
         f"Imported the {what} {where}{resumed}: {report.conversations} conversations "
@@ -851,6 +854,9 @@ def _daemon_line() -> str:
     port = config.load_config(config.config_path(base)).daemon.port
     if answer := daemon.healthy(port):
         state = daemon.read_state(base) or {}
+        if state.get("pid") != answer.get("pid"):  # another data directory's daemon has the port
+            return (f"not running for this data directory: port {port} is taken by another openmemore daemon "
+                    f"(pid {answer.get('pid')}). Give this one another [daemon] port in config.toml.")
         since = f", since {state['started_at']}" if state.get("started_at") else ""
         return f"running (pid {answer['pid']}, port {port}{since})"
     try:

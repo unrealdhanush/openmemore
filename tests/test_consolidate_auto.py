@@ -195,11 +195,12 @@ def set_up(home, endpoint=LOCAL, **changes):
 
 def test_a_remote_endpoint_needs_its_host_allowed(store):
     home, _ = store
-    set_up(home, endpoint="https://api.example.com/v1")
+    midnight = {"schedule": "00:00"}  # always past, so only the host decides (03:00 failed before 3am)
+    set_up(home, endpoint="https://api.example.com/v1", **midnight)
     assert daemon.consolidation_due(home) is None
-    set_up(home, endpoint="https://api.example.com/v1", allowed_host="api.example.com")
+    set_up(home, endpoint="https://api.example.com/v1", allowed_host="api.example.com", **midnight)
     assert daemon.consolidation_due(home) is not None
-    set_up(home, endpoint="https://other.example.com/v1", allowed_host="api.example.com")
+    set_up(home, endpoint="https://other.example.com/v1", allowed_host="api.example.com", **midnight)
     assert daemon.consolidation_due(home) is None
 
 

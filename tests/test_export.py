@@ -157,3 +157,5 @@ def test_export_and_import_commands(home, tmp_path):
     code, out, _ = cli("import", str(target))
     assert code == 0 and "Imported the OpenMemore export keeping its scopes" in out
     assert "Memories: 0 added, 2 already here." in out
+    code, out, _ = cli("import", str(target))
+    assert code == 0 and "Already imported: this OpenMemore export (2 conversations)" in " ".join(out.split())
