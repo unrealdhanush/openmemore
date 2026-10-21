@@ -126,6 +126,17 @@ def test_status_without_a_daemon(home):
     assert daemon.healthy(PORT) is None and daemon.read_state(home) is None
 
 
+def test_status_tells_this_daemon_from_another_data_directorys(home, monkeypatch):
+    """Two data directories with the default port: what answers may be the other one's."""
+    initialize(home)
+    monkeypatch.setattr(daemon, "healthy", lambda port: {"ok": True, "pid": 4242})
+    out = plain(CliRunner().invoke(app, ["status"], env={"COLUMNS": "200"}).output)
+    assert "taken by another openmemore daemon (pid 4242)" in out and "running (pid" not in out
+    daemon.state_path(home).write_text(json.dumps({"pid": 4242, "started_at": "2026-10-21T07:00:00+00:00"}))
+    out = plain(CliRunner().invoke(app, ["status"], env={"COLUMNS": "200"}).output)
+    assert "running (pid 4242, port" in out
+
+
 # --- service definitions ---------------------------------------------------------------
 
 COMMAND = ("/opt/tools/openmemore/bin/openmemore",)

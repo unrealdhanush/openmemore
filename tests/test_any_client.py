@@ -230,3 +230,13 @@ async def test_clients_command_hides_earlier_names_unless_asked(home):
     assert "under [clients.<name>] in config.toml" in " ".join(out.split())
     out = plain(CliRunner().invoke(app, ["clients", "--all"], env={"COLUMNS": "200"}).output)
     assert "old-name" in out and "older" in out
+
+
+def test_clients_command_lists_programs_using_the_library(home):
+    from typer.testing import CliRunner
+    from openmemore import Memory
+    from openmemore.cli import app
+    initialize(home)
+    Memory("Trip Planner").save("Prefers metric units.")
+    out = plain(CliRunner().invoke(app, ["clients"], env={"COLUMNS": "200"}).output)
+    assert "trip-planner" in out and "openmemore library" in out and "earlier names" not in out
