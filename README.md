@@ -1,7 +1,5 @@
 # OpenMemore
 
-> Working name. Rename before any public release.
-
 One shared memory for all your AI assistants, kept on your own machine.
 
 Ask Claude something today and ask Cursor about it tomorrow: it knows what you mean. OpenMemore is a local [MCP](https://modelcontextprotocol.io) server that every assistant you use connects to. Each one can save what it learns, record what you asked and what it answered, and read what the others stored. It's all in one SQLite file on your disk, which you can list, edit, export and delete.
