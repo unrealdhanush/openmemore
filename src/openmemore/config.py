@@ -34,6 +34,10 @@ CONFIG_HEADER = """\
 #   read_scopes = ["work", "personal"]
 #   write_scope = "work"
 #
+# A client can also be kept from storing much: writes = "memories" keeps none of its
+# conversations (it still reads everyone's, and saves memories), and writes = "none"
+# lets it only read. The default is "all".
+#
 # Transcript capture can be limited to some project folders, for apps whose transcripts
 # say which folder a chat was in (Claude Code, VS Code). Exclusions win:
 #
@@ -44,8 +48,13 @@ CONFIG_HEADER = """\
 """
 
 
+Writes = Literal["all", "memories", "none"]
+"""What a client may store: everything (its conversations and memories), memories only
+(it reads conversations but none of its own are kept), or nothing (it only reads)."""
+
+
 class ClientScopes(BaseModel):
-    """The scopes one client may read from and write to."""
+    """The scopes one client may read from and write to, and what it may store."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -53,6 +62,18 @@ class ClientScopes(BaseModel):
     """None: every scope (ignore_scopes), and existing items in any scope can be changed."""
     write_scope: Scope
     """The label new items get."""
+    writes: Writes = "all"
+
+    @property
+    def records(self) -> bool:
+        """Whether this client's conversations are stored, by any route: record_exchange,
+        transcript capture, OpenTelemetry, or the library."""
+        return self.writes == "all"
+
+    @property
+    def saves_memories(self) -> bool:
+        """Whether it may save, correct, delete and propose memories."""
+        return self.writes != "none"
 
 
 class ClientOverride(BaseModel):
@@ -62,6 +83,7 @@ class ClientOverride(BaseModel):
 
     read_scopes: tuple[Scope, ...] | None = None
     write_scope: Scope | None = None
+    writes: Writes | None = None
 
 
 class CaptureConfig(BaseModel):
@@ -177,6 +199,18 @@ def enable_capture(path: Path, source: CaptureSource) -> bool:
     return True
 
 
+def set_writes(path: Path, client: str, writes: Writes) -> None:
+    """What a client may store, under [clients.<client>] (the default, "all", removes the key)."""
+    cfg = load_config(path)
+    override = cfg.clients.get(client, ClientOverride())
+    override.writes = None if writes == "all" else writes
+    if override.model_dump(exclude_none=True):
+        cfg.clients[client] = override
+    else:
+        cfg.clients.pop(client, None)
+    save_config(path, cfg)
+
+
 def resolve_client(config: Config, client: str) -> ClientScopes:
     """Scopes for a client name; unknown clients (or missing keys) fall back to [defaults]."""
     override = config.clients.get(client, ClientOverride())
@@ -187,4 +221,5 @@ def resolve_client(config: Config, client: str) -> ClientScopes:
     return ClientScopes(
         read_scopes=read_scopes,
         write_scope=override.write_scope if override.write_scope is not None else config.defaults.write_scope,
+        writes=override.writes if override.writes is not None else config.defaults.writes,
     )

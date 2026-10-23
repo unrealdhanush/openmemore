@@ -170,6 +170,7 @@ def build_server(base: Path) -> MCPServer:
                 client=caller.client,
                 read_scopes=None if caller.scopes.read_scopes is None else list(caller.scopes.read_scopes),
                 write_scope=caller.scopes.write_scope,
+                writes=caller.scopes.writes,
                 schema_version=db.schema_version(conn),
                 semantic_search=embed.status(),
                 connected_app=app_name(ctx),
@@ -397,6 +398,9 @@ def build_server(base: Path) -> MCPServer:
             result = conversation_tools.record_exchange(
                 conn, caller, question, answer_summary, conversation_id, title, code or ()
             )
+            if result.conversation_id is None:
+                call.summary = f"skipped: writes = {caller.scopes.writes}"
+                return result
             call.summary = f"conversation={result.conversation_id}"
             if code:
                 call.summary += f", {len(code)} code blocks"

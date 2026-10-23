@@ -33,6 +33,29 @@ Scopes are free-form strings. `personal` and `work` are just the starting set.
 A client configured to read only `work` can't see what other clients wrote to `personal`. That's the isolation working. For two assistants to share memories, they need a scope in common.
 </Note>
 
+## Limit what a client stores
+
+Scopes decide where a client's items go. `writes` decides whether it stores them at all. It's useful for an assistant you want to read your memory without adding much to it, such as a coding agent whose long sessions would otherwise all be kept:
+
+```toml
+[clients.claude-code]
+writes = "memories"
+```
+
+| `writes` | Reads | Stores its conversations | Saves, corrects and proposes memories |
+|---|---|---|---|
+| `"all"` (the default) | yes | yes | yes |
+| `"memories"` | yes | no | yes |
+| `"none"` | yes | no | no |
+
+- **No conversations, by any route:** with `memories` or `none`, `record_exchange` stores nothing and says why, the client's transcripts aren't captured, and its OpenTelemetry exports and library calls aren't stored either.
+- **Only reading:** with `none`, `save_memories`, `update_memory`, `forget` and `propose_memories` return an error.
+- **Reading is unchanged:** the client still sees everything in its `read_scopes`, including other assistants' conversations.
+- **From setup:** `openmemore setup claude-code --writes memories` sets it, skips turning on capture, and gives you a standing instruction without `record_exchange`. Running setup again keeps the setting; `--writes all` puts it back.
+- **For everyone:** `writes` under `[defaults]` applies to every client without its own setting.
+
+Its calls are still recorded in the audit log, and what it's shown still counts toward ranking.
+
 ## Share everything
 
 ```toml

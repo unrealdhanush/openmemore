@@ -27,7 +27,7 @@ from openmemore.models import (
     Rejection,
 )
 from openmemore.safety.wrap import wrap
-from openmemore.tools import Caller
+from openmemore.tools import Caller, require_memory_writes
 from openmemore.tools.memories import NEAR_DUPLICATE_CANDIDATES, NEAR_DUPLICATE_SIMILARITY, content_hash, embed_texts, secret_in
 
 REVIEW_HINT = "Tell the user to review the proposals with `openmemore review`: nothing is saved until they approve it."
@@ -117,6 +117,7 @@ def propose_memories(
     """Queue memories for the user's review. A proposal takes the scope of the
     conversations it came from and of the memory it replaces (which this client must be
     able to read, and which must agree), or this client's write scope when it cites none."""
+    require_memory_writes(caller)
     result = ProposeResult(note=REVIEW_HINT)
     accepted: list[tuple[int, ProposalInput, str]] = []
     for index, item in enumerate(items):

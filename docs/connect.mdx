@@ -41,6 +41,11 @@ openmemore setup <client> --dry-run
     - **Adds the server** with `claude mcp add --scope user`. Running setup again replaces the registration.
     - **Turns on transcript capture**, reading the sessions Claude Code saves under `~/.claude/projects`.
     - **Offers the background service**, as for VS Code.
+
+    Long coding sessions add up. To let Claude Code read your memory without keeping its sessions, set it up with `--writes memories`. It still saves memories and decisions. `--writes none` makes it read only. See [Limit what a client stores](/guides/scopes#limit-what-a-client-stores).
+    ```sh
+    openmemore setup claude-code --writes memories
+    ```
   </Tab>
   <Tab title="Claude Desktop">
     ```sh

@@ -97,6 +97,13 @@ def _add_message(conn: sqlite3.Connection, conversation_id: int, role: Role, con
     return message_id
 
 
+def not_recorded(caller: Caller) -> str:
+    """Why an exchange wasn't stored, for a client whose conversations aren't kept."""
+    then = " Save lasting facts and decisions with save_memories instead." if caller.scopes.saves_memories else ""
+    return (f"Not stored: this assistant's conversations aren't kept (writes = \"{caller.scopes.writes}\" in "
+            f"OpenMemore's config.toml), so record_exchange isn't needed here.{then}")
+
+
 def record_exchange(
     conn: sqlite3.Connection,
     caller: Caller,
@@ -106,6 +113,8 @@ def record_exchange(
     title: str | None = None,
     code: Sequence[CodeBlock] = (),
 ) -> RecordExchangeResult:
+    if not caller.scopes.records:
+        return RecordExchangeResult(conversation_id=None, note=not_recorded(caller))
     question, q_reasons = redact(question)
     answer, a_reasons = redact(with_code(answer_summary, code))
     title, t_reasons = redact(title) if title else (None, [])

@@ -358,6 +358,8 @@ class PingResult(BaseModel):
     read_scopes: list[str] | None
     """None: every scope (ignore_scopes is on)."""
     write_scope: str
+    writes: Literal["all", "memories", "none"] = "all"
+    """What this client may store: all, memories (none of its conversations), or none (it only reads)."""
     schema_version: int
     semantic_search: str
     """'ready (<model>)', or why only keyword search is available."""

@@ -20,18 +20,27 @@ STANDING_PREFIX = "Use the openmemore tools"
 """First words of every standing instruction, used to find and replace an earlier copy."""
 
 
-def pointer_instruction(captured: bool = False) -> str:
+def pointer_instruction(captured: bool = False, writes: str = "all") -> str:
     """The standing instruction the user pastes into a client. Stable on purpose:
     everything that may change lives in server_instructions(). A client whose
-    transcripts are captured is told not to record exchanges as well."""
-    record = "" if captured else "record_exchange after every answer, "
+    transcripts are captured, or whose conversations aren't kept (writes "memories" or
+    "none"), is told not to record exchanges; one that only reads, not to save."""
+    calls = [
+        "call get_profile at the start of each conversation",
+        *(["record_exchange after every answer"] if writes == "all" and not captured else []),
+        *(["save_memories when I make a decision or state a preference"] if writes != "none" else []),
+        "recent_conversations or search_context before saying you don't know about something I discussed earlier",
+    ]
+    listed = f"{calls[0]} and {calls[1]}" if len(calls) == 2 else ", ".join(calls[:-1]) + f", and {calls[-1]}"
     text = (
         f"{STANDING_PREFIX} (my memory, shared with all my AI assistants) as the openmemore server's "
-        f"instructions describe. In particular: call get_profile at the start of each conversation, {record}"
-        "save_memories when I make a decision or state a preference, and recent_conversations or "
-        "search_context before saying you don't know about something I discussed earlier."
+        f"instructions describe. In particular: {listed}."
     )
-    if captured:
+    if writes == "none":
+        text += " Only read it: don't call record_exchange, save_memories, update_memory, forget or propose_memories."
+    elif writes == "memories":
+        text += " Don't call record_exchange: conversations here aren't kept."
+    elif captured:
         text += " Don't call record_exchange: conversations here are captured automatically."
     return text
 

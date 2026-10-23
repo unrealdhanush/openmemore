@@ -106,12 +106,22 @@ def setup(
     dev: bool = typer.Option(
         False, "--dev", help="Register this development checkout itself: the app then runs whatever branch is checked out."
     ),
+    writes: str | None = typer.Option(
+        None, "--writes",
+        help="What the client may store: all, memories (none of its conversations are kept), or none (it only "
+        "reads). Default: what's configured, which starts as all.",
+    ),
 ) -> None:
     """Connect an MCP client to OpenMemore and put the standing instruction on your clipboard."""
     from openmemore import setup as client_setup
 
     if client is not None:
         client = _client_name(client, "CLIENT")
+    if writes not in (None, "all", "memories", "none"):
+        raise typer.BadParameter("use all, memories or none", param_hint="--writes")
+    if writes is not None and client is None:
+        raise typer.BadParameter("name the client whose writes to limit, e.g. openmemore setup claude-code "
+                                 f"--writes {writes}", param_hint="--writes")
     checkout = client_setup.development_checkout()
     if checkout is not None and not dev:
         # Registering this checkout would make the app run whatever branch is checked out,
@@ -131,7 +141,8 @@ def setup(
             "(--dev registers the checkout.)"
         )
         args = [*installed, "setup", *([client] if client else []),
-                *(["--config", str(config_file)] if config_file else []), *(["--dry-run"] if dry_run else [])]
+                *(["--config", str(config_file)] if config_file else []), *(["--dry-run"] if dry_run else []),
+                *(["--writes", writes] if writes else [])]
         raise typer.Exit(subprocess.run(args).returncode)
     base = config.home()
     initialize(base)
@@ -139,8 +150,8 @@ def setup(
         base=base, user_home=Path.home(), platform=sys.platform, command=client_setup.openmemore_command()
     )
     incomplete = False
-    for number, step in enumerate(client_setup.plan(client, ctx, config_file), start=1):
-        console.print(f"[bold]{number}. {step.description}[/bold]")
+    for number, step in enumerate(client_setup.plan(client, ctx, config_file, writes), start=1):  # type: ignore[arg-type]
+        console.print(f"[bold]{number}. {escape(step.description)}[/bold]")
         if step.apply is not None:
             if dry_run:
                 console.print("   [dim]dry run: not changed[/dim]")
@@ -158,13 +169,21 @@ def setup(
         if step.note:
             console.print(f"   [dim]{escape(step.note)}[/dim]", highlight=False)
     if not dry_run:
-        if client in CAPTURE_SOURCES:
+        if client in CAPTURE_SOURCES and _writes_of(client) == "all":
             _run_capture(CaptureRequest(sources=[client]))
         else:
             _run_embed()
         _offer_daemon()
     if incomplete:
         raise typer.Exit(1)
+
+
+def _writes_of(client: str) -> str:
+    """What a client set up by this name may store, as configured now."""
+    from openmemore.setup import CLIENT_NAMES
+
+    return config.resolve_client(config.load_config(config.config_path(config.home())),
+                                 CLIENT_NAMES.get(client, client)).writes
 
 
 def _offer_daemon() -> None:
@@ -205,7 +224,7 @@ def clients_command(
         console.print("No MCP client has connected yet. `openmemore setup` connects one; any MCP client works.")
         return
     table = Table(box=None, header_style="bold")
-    for column in ("client", "application", "reads", "writes", "capture", "calls", "last seen"):
+    for column in ("client", "application", "reads", "writes", "stores", "capture", "calls", "last seen"):
         table.add_column(column, no_wrap=column != "application")
     for client, app, calls, last in seen:
         scopes = config.resolve_client(cfg, client)
@@ -213,7 +232,9 @@ def clients_command(
         table.add_row(
             client, Text(app or "(unknown)"),
             "all (ignore_scopes)" if scopes.read_scopes is None else ", ".join(scopes.read_scopes), scopes.write_scope,
-            f"transcripts ({source})" if source else "record_exchange", str(calls), _when(last),
+            {"all": "everything", "memories": "memories only", "none": "nothing"}[scopes.writes],
+            "none" if not scopes.records else f"transcripts ({source})" if source else "record_exchange",
+            str(calls), _when(last),
         )
     console.print(table)
     if earlier and not show_all:
@@ -467,6 +488,9 @@ def _run_capture(request: CaptureRequest) -> None:
     if report.filtered:
         console.print(f"[dim]Not captured: {report.filtered} from folders outside [capture] include_folders / "
                       "exclude_folders.[/dim]")
+    for name in report.not_recorded:
+        console.print(f"Not captured: {name}, whose conversations aren't kept (writes in its [clients] table).",
+                      markup=False)
     for error in report.errors:
         console.print(f"[yellow]Skipped[/yellow] {error}", markup=True, highlight=False)
     _run_embed()

@@ -21,6 +21,9 @@ write_scope = "personal"
 read_scopes = ["work"]
 write_scope = "work"
 
+[clients.claude-code]
+writes = "memories"
+
 [capture]
 sources = ["claude-code", "vscode-copilot"]
 days = 30
@@ -54,6 +57,7 @@ The scopes of every client without its own `[clients.<name>]` table, and of any 
 |---|---|---|---|
 | `read_scopes` | list of strings | `["personal"]` | The scopes clients read |
 | `write_scope` | string | `"personal"` | The scope new items get |
+| `writes` | `"all"`, `"memories"` or `"none"` | `"all"` | What clients may store. `memories`: none of their conversations are kept, by any route, but they still save memories. `none`: they only read. See [Scopes](/guides/scopes#limit-what-a-client-stores) |
 
 ## `[clients.<name>]`
 
@@ -63,6 +67,7 @@ One table per client that needs its own scopes. `<name>` is the client's name as
 |---|---|---|---|
 | `read_scopes` | list of strings | `[defaults] read_scopes` | The scopes this client reads |
 | `write_scope` | string | `[defaults] write_scope` | The scope this client's new items get |
+| `writes` | `"all"`, `"memories"` or `"none"` | `[defaults] writes` | What this client may store |
 
 Scope names are 1 to 64 characters.
 

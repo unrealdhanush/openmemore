@@ -22,7 +22,7 @@ from openmemore.models import (
 )
 from openmemore.safety.secrets import find_secret
 from openmemore.safety.wrap import wrap
-from openmemore.tools import Caller, require_writable
+from openmemore.tools import Caller, require_memory_writes, require_writable
 
 NEAR_DUPLICATE_SIMILARITY = 0.92
 """This similar and the same kind is reported as a possible duplicate."""
@@ -69,6 +69,7 @@ def _near_duplicate(
 def save_memories(
     conn: sqlite3.Connection, caller: Caller, items: list[MemoryInput], scope: str | None = None
 ) -> SaveMemoriesResult:
+    require_memory_writes(caller)
     scope = scope or caller.scopes.write_scope
     if not caller.can_write(scope):
         raise ToolError(f"this client can't write to scope '{scope}' (it writes to '{caller.scopes.write_scope}')")
@@ -123,6 +124,7 @@ def update_memory(
 ) -> UpdateMemoryResult:
     """A new version of the memory. The old one is kept as history: it stopped being true
     when the new one started (`valid_from`, default now)."""
+    require_memory_writes(caller)
     if reason := secret_in(content, subject):
         raise ToolError(f"not saved: {reason}")
     # The subject may come from the old version, which needs a read first; embedding
@@ -157,6 +159,7 @@ def update_memory(
 
 def forget(conn: sqlite3.Connection, caller: Caller, memory_id: int) -> ForgetResult:
     """Hard-delete a memory and every version in its history."""
+    require_memory_writes(caller)
     with db.transaction(conn):
         require_writable(caller, repo.get_memory(conn, memory_id), memory_id)
         chain = repo.memory_chain(conn, memory_id)
