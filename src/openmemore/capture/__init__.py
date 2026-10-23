@@ -89,6 +89,8 @@ class CaptureReport:
     """Changed files left for next time because the time budget ran out."""
     filtered: int = 0
     """Changed files not read: their folder isn't captured ([capture] include/exclude_folders)."""
+    not_recorded: list[str] = field(default_factory=list)
+    """Sources not read: their application's client keeps no conversations (writes isn't "all")."""
     errors: list[str] = field(default_factory=list)
 
 
@@ -110,6 +112,9 @@ def capture(
 
     candidates: list[tuple[int, CaptureSource, Path, int]] = []
     for name in cfg.capture.sources if sources is None else sources:
+        if not resolve_client(cfg, client_name(SOURCES[name].app)).records:
+            report.not_recorded.append(name)
+            continue
         for path in SOURCES[name].files(home):
             try:
                 st = path.stat()

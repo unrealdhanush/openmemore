@@ -26,6 +26,14 @@ class Caller:
         return self.scopes.read_scopes is None or scope == self.scopes.write_scope
 
 
+def require_memory_writes(caller: Caller) -> None:
+    """Refuse a write from a client set to only read (writes = "none")."""
+    if not caller.scopes.saves_memories:
+        raise ToolError(
+            f'this client only reads: writes = "none" for it in OpenMemore\'s config.toml ([clients.{caller.client}])'
+        )
+
+
 def require_writable(caller: Caller, memory: Memory | None, memory_id: int) -> Memory:
     """The memory, if this client may both read and write it. Memories in scopes the
     client can't read are reported as not found, so their existence doesn't leak."""

@@ -75,6 +75,8 @@ read_scopes = ["work"]
 write_scope = "work"
 ```
 
+A client can also be kept from storing much. With `writes = "memories"` under its `[clients.<name>]` table, it reads as usual and saves memories, but none of its conversations are kept: no `record_exchange`, no transcript capture. `writes = "none"` makes it read only. `openmemore setup claude-code --writes memories` sets this up for Claude Code.
+
 ## Capture conversations from disk
 
 `openmemore setup vscode-copilot` and `openmemore setup claude-code` also turn on transcript capture for those apps (`[capture] sources` in the config). While capture is on, each search picks up new turns from their saved chats. To catch up on older chats, run `openmemore capture`; it reads chats changed in the last 30 days (`[capture] days`).

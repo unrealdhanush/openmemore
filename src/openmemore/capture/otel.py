@@ -210,7 +210,11 @@ def _store(conn: sqlite3.Connection, cfg: Config, op: Operation, report: OtelRep
     if answer:
         messages.append(ParsedMessage(external_id=_id("assistant", answer), role="assistant", content=answer,
                                       created_at=op.end, recall=latest_recall))
-    scope = resolve_client(cfg, provider).write_scope
+    client = resolve_client(cfg, provider)
+    if not client.records:
+        report.skipped.append(f"{provider}: its conversations aren't kept (writes = {client.writes})")
+        return
+    scope = client.write_scope
     with db.transaction(conn):
         is_new = repo.find_conversation(conn, provider, conversation) is None
         _, changed = store_conversation(conn, ParsedConversation(

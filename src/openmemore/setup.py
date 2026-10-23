@@ -37,6 +37,15 @@ from openmemore.models import CAPTURE_SOURCES, CaptureSource
 
 SERVER_NAME = "openmemore"
 
+CLIENT_NAMES: dict[str, str] = {
+    "vscode-copilot": "visual-studio-code",
+    "cursor": "cursor-vscode",
+    "claude-code": "claude-code",
+    "claude-desktop": "claude-ai",
+}
+"""The client names these apps connect as (from their MCP clientInfo, seen in real
+sessions): the [clients.<name>] table their settings go under."""
+
 
 class SetupError(Exception):
     """A step that can't be done automatically; the message says what to do by hand."""
@@ -279,8 +288,22 @@ def _enable_capture(ctx: Context, source: CaptureSource) -> Step:
     )
 
 
-def _copy_pointer(ctx: Context, name: str, captured: bool) -> list[Step]:
-    text = pointer_instruction(captured=captured)
+def _set_writes(ctx: Context, client: str, writes: config.Writes) -> Step:
+    name = CLIENT_NAMES.get(client, client)
+    what = {"all": "it stores its conversations and memories again", "memories": "none of its conversations are kept",
+            "none": "it only reads"}[writes]
+    note = None if client in CLIENT_NAMES else (
+        f"If `openmemore clients` lists it under another name once it connects, rename [clients.{name}] to that.")
+
+    def apply() -> str:
+        config.set_writes(config.config_path(ctx.base), name, writes)
+        return str(config.config_path(ctx.base))
+
+    return Step(f'Set writes = "{writes}" under [clients.{name}] in config.toml: {what}', apply=apply, note=note)
+
+
+def _copy_pointer(ctx: Context, name: str, captured: bool, writes: str = "all") -> list[Step]:
+    text = pointer_instruction(captured=captured, writes=writes)
     return [
         _copy_step(ctx, text, name),
         Step(
@@ -292,11 +315,18 @@ def _copy_pointer(ctx: Context, name: str, captured: bool) -> list[Step]:
     ]
 
 
-def plan(client: str | None, ctx: Context, config_file: Path | None = None) -> list[Step]:
-    """Steps to connect `client` (any name; None for "your MCP client")."""
+def plan(
+    client: str | None, ctx: Context, config_file: Path | None = None, writes: config.Writes | None = None
+) -> list[Step]:
+    """Steps to connect `client` (any name; None for "your MCP client"). `writes` sets
+    what it may store (None keeps what's configured); if it keeps no conversations, its
+    transcripts aren't captured."""
     installer = INSTALLERS.get(client or "")
     name = installer[0] if installer else (client or "your MCP client")
-    captured = client in CAPTURE_SOURCES
+    configured = config.resolve_client(config.load_config(config.config_path(ctx.base)),
+                                       CLIENT_NAMES.get(client or "", client or "")).writes
+    effective = writes or configured
+    captured = client in CAPTURE_SOURCES and effective == "all"
     if config_file is not None:
         steps = [_merge_into(ctx, config_file)]
     elif installer:
@@ -310,6 +340,8 @@ def plan(client: str | None, ctx: Context, config_file: Path | None = None) -> l
         )]
     if captured:
         steps.append(_enable_capture(ctx, client))  # type: ignore[arg-type]
-    steps += _copy_pointer(ctx, name, captured)
+    if client is not None and writes is not None and writes != configured:
+        steps.append(_set_writes(ctx, client, writes))
+    steps += _copy_pointer(ctx, name, captured, effective)
     steps.append(Step(f"Restart {name}", manual="Restart or reload it, so it starts the openmemore server."))
     return steps

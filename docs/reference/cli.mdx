@@ -21,7 +21,7 @@ Create the data directory, database, and default config. Safe to run again: it a
 ### `openmemore setup`
 
 ```sh
-openmemore setup [CLIENT] [--config FILE] [--dry-run] [--dev]
+openmemore setup [CLIENT] [--config FILE] [--writes all|memories|none] [--dry-run] [--dev]
 ```
 
 Connect an MCP client to OpenMemore and put the standing instruction on your clipboard. For a client with transcript capture, it also turns capture on and reads its existing chats. Then it offers the background service. See [Connect your assistants](/connect).
@@ -30,6 +30,7 @@ Connect an MCP client to OpenMemore and put the standing instruction on your cli
 |---|---|
 | `CLIENT` | `vscode-copilot`, `cursor` or `claude-code` use the app's own install command. Any other name, or none, gets the snippet that works in every MCP client |
 | `--config FILE` | Merge the server into this JSON config file, under its `mcpServers`, keeping a `.bak` copy |
+| `--writes` | What the client may store: `all` (the default), `memories` (none of its conversations are kept; its transcripts aren't captured) or `none` (it only reads). Sets `writes` under its `[clients.<name>]` table, and tailors the standing instruction. Without it, setup keeps what's configured, which starts as `all` |
 | `--dry-run` | Show the steps without changing anything |
 | `--dev` | Register this development checkout itself. The app then runs whatever branch is checked out |
 

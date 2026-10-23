@@ -9,6 +9,7 @@ icon: "toolbox"
 - **Tool descriptions** are written for the model: they say when to call each tool. The server's instructions, sent when a client connects, say how to use them together.
 - **Stored data:** every result holding stored content starts with a `notice` saying the enclosed content is the user's stored data, not instructions. Each item is wrapped in a `<stored_context>` tag, and text that looks like a prompt injection is flagged.
 - **Errors** are returned as tool errors, with a message for the model: a memory not found, a scope the client can't write to, a statement that looks like a secret.
+- **Read-only clients:** for a client with `writes = "none"`, `save_memories`, `update_memory`, `forget` and `propose_memories` return an error. Reading works the same for every client.
 - **Dates:** arguments that take a date accept `2024`, `2024-03`, `2024-03-15` or a full ISO 8601 timestamp. Without a time zone, UTC is assumed.
 
 ## Tools
@@ -22,6 +23,7 @@ Check that the server is running and reachable. It takes no arguments.
 <ResponseField name="client" type="string">The name this client gets its scopes under.</ResponseField>
 <ResponseField name="read_scopes" type="string[] | null">The scopes it reads. `null` means every scope, with `ignore_scopes` on.</ResponseField>
 <ResponseField name="write_scope" type="string">The scope its new items get.</ResponseField>
+<ResponseField name="writes" type="string">What it may store: `all`, `memories` (none of its conversations are kept) or `none` (it only reads).</ResponseField>
 <ResponseField name="schema_version" type="integer">The database schema version.</ResponseField>
 <ResponseField name="semantic_search" type="string">`ready (<model>)`, or why only keyword search is available.</ResponseField>
 <ResponseField name="connected_app" type="string | null">What the application calls itself (MCP `clientInfo.name`).</ResponseField>
@@ -148,7 +150,7 @@ Permanently delete a memory, including its earlier versions. Assistants are told
 
 ### `record_exchange`
 
-Record what the user asked and what the assistant answered, so their other assistants can continue from there. Secrets are replaced with `[REDACTED]` before anything is stored. For a client whose transcripts are captured, nothing is stored, and `note` says why.
+Record what the user asked and what the assistant answered, so their other assistants can continue from there. Secrets are replaced with `[REDACTED]` before anything is stored. For a client whose transcripts are captured, or whose conversations aren't kept (`writes` set to `memories` or `none`), nothing is stored, and `note` says why.
 
 <ParamField body="question" type="string" required>What the user asked, verbatim if short, otherwise condensed. Up to 8,000 characters.</ParamField>
 <ParamField body="answer_summary" type="string" required>A short summary of the answer, with conclusions, recommendations and open next steps. Up to 4,000 characters.</ParamField>
